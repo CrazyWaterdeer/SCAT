@@ -1,0 +1,35 @@
+# Build artifacts
+build/
+dist/
+release/
+*.egg-info/
+*.spec
+
+# User data
+data/
+
+# Python
+__pycache__/
+.venv/
+*.pyc
+*.pyo
+*.pyd
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Test outputs
+.pytest_cache/
+.coverage
+htmlcov/

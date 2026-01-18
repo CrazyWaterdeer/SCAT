@@ -1,0 +1,54 @@
+[project]
+name = "scat"
+version = "1.0.0"
+description = "SCAT - Spot Classification and Analysis Tool for Drosophila excreta"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Jin"}
+]
+keywords = ["drosophila", "excreta", "analysis", "ROD", "machine-learning"]
+
+dependencies = [
+    "numpy>=1.20.0",
+    "opencv-python>=4.5.0",
+    "Pillow>=8.0.0",
+    "pandas>=1.3.0",
+    "scikit-learn>=1.0.0",
+    "scipy>=1.7.0",
+    "PySide6>=6.0.0",
+    "matplotlib>=3.5.0",
+    "seaborn>=0.11.0",
+    "jinja2>=3.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pyinstaller>=6.0.0",
+]
+deep = [
+    "torch>=1.9.0",
+    "torchvision>=0.10.0",
+]
+pdf = [
+    "weasyprint>=52.0",
+]
+
+[project.scripts]
+scat = "scat.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/CrazyWaterdeer/SCAT"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["scat"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
