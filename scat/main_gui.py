@@ -113,24 +113,22 @@ class SettingsDialog(QDialog):
         
         shortcut_definitions = [
             ("Global", [
+                ("save", "Save"),
                 ("quit", "Quit Application"),
+                ("undo", "Undo"),
                 ("run_analysis", "Run Analysis"),
             ]),
-            ("Labeling", [
+            ("Labeling / Edit", [
                 ("label_normal", "Label as Normal"),
                 ("label_rod", "Label as ROD"),
                 ("label_artifact", "Label as Artifact"),
-                ("add_mode", "Add Mode"),
+                ("pan_mode", "Pan Mode"),
                 ("select_mode", "Select Mode"),
+                ("add_mode", "Add Mode"),
                 ("delete", "Delete Selected"),
                 ("merge", "Merge Selected"),
-                ("next_image", "Next Image"),
-                ("prev_image", "Previous Image"),
-                ("next_deposit", "Next Deposit"),
-                ("prev_deposit", "Previous Deposit"),
-            ]),
-            ("Results", [
-                ("open_detail", "Open Detail View"),
+                ("group", "Group Selected"),
+                ("ungroup", "Ungroup Selected"),
             ]),
         ]
         
@@ -769,8 +767,8 @@ class GroupWidget(QWidget):
         layout.addWidget(self.file_list)
     
     def _update_card_text(self):
-        prefix = "▼" if self.expanded else "▶"
-        self.card_btn.setText(f"  {prefix}  {self.group_name}          ({len(self.files)} files)")
+        suffix = "▼" if self.expanded else "▶"
+        self.card_btn.setText(f"  {self.group_name}    ({len(self.files)} files)  {suffix}  ")
     
     def _apply_card_style(self):
         if self.expanded:
@@ -1929,6 +1927,8 @@ class ResultsTab(QWidget):
         self.summary_table.setHorizontalHeaderLabels(["Filename", "Normal", "ROD", "Artifact", "ROD %", "Total IOD"])
         self.summary_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.summary_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.summary_table.setSelectionBehavior(QTableWidget.SelectRows)  # Select entire row
+        self.summary_table.setSortingEnabled(True)  # Enable column sorting
         self.summary_table.doubleClicked.connect(self._on_table_double_click)
         overview_layout.addWidget(self.summary_table)
         
@@ -1982,14 +1982,17 @@ class ResultsTab(QWidget):
             report_exists = report_path.exists()
         self.open_report_btn.setVisible(report_exists)
         
+        self.summary_table.setSortingEnabled(False)  # Disable during population
         self.summary_table.setRowCount(len(film_summary))
         for i, row in film_summary.iterrows():
             self.summary_table.setItem(i, 0, QTableWidgetItem(str(row['filename'])))
-            self.summary_table.setItem(i, 1, QTableWidgetItem(f"{row['n_normal']:.0f}"))
-            self.summary_table.setItem(i, 2, QTableWidgetItem(f"{row['n_rod']:.0f}"))
-            self.summary_table.setItem(i, 3, QTableWidgetItem(f"{row['n_artifact']:.0f}"))
-            self.summary_table.setItem(i, 4, QTableWidgetItem(f"{row['rod_fraction']*100:.1f}%"))
-            self.summary_table.setItem(i, 5, QTableWidgetItem(f"{row.get('total_iod', 0):.0f}"))
+            # Use NumericTableWidgetItem for numeric columns for proper sorting
+            self.summary_table.setItem(i, 1, NumericTableWidgetItem(row['n_normal'], "{:.0f}"))
+            self.summary_table.setItem(i, 2, NumericTableWidgetItem(row['n_rod'], "{:.0f}"))
+            self.summary_table.setItem(i, 3, NumericTableWidgetItem(row['n_artifact'], "{:.0f}"))
+            self.summary_table.setItem(i, 4, NumericTableWidgetItem(row['rod_fraction']*100, "{:.1f}%"))
+            self.summary_table.setItem(i, 5, NumericTableWidgetItem(row.get('total_iod', 0), "{:.0f}"))
+        self.summary_table.setSortingEnabled(True)  # Re-enable after population
         
         self._load_statistics_tab(results)
     
@@ -2507,8 +2510,9 @@ class ResultsTab(QWidget):
             from .visualization import generate_all_visualizations
             from .statistics import run_comprehensive_analysis
             
+            viz_dir = output_dir / 'visualizations'
             viz_results = generate_all_visualizations(
-                image_summary, deposit_data, output_dir,
+                image_summary, deposit_data, viz_dir,
                 group_by=self.results.get('group_by')
             )
             
@@ -2789,12 +2793,7 @@ class MainWindow(QMainWindow):
 
 def run_gui():
     """Launch the main GUI application."""
-    # Set Windows AppUserModelID for proper taskbar icon display
-    # Must be called BEFORE QApplication is created
-    if sys.platform == 'win32':
-        import ctypes
-        APP_ID = 'SCAT.DepositAnalyzer.1.0'
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
+    # AppUserModelID is already set at module import time (top of file)
     
     app = QApplication(sys.argv)
     app.setStyle('Fusion')

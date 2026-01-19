@@ -325,14 +325,45 @@ class ReportGenerator:
         def safe_std(col):
             return float(film_summary[col].std()) if col in film_summary.columns else 0.0
         
+        # Calculate mean_circularity and mean_hue from normal and rod values
+        # Weighted average based on deposit counts
+        def weighted_mean(normal_col, rod_col):
+            n_normal = safe_sum('n_normal')
+            n_rod = safe_sum('n_rod')
+            total = n_normal + n_rod
+            if total == 0:
+                return 0.0
+            
+            normal_mean = safe_mean(normal_col)
+            rod_mean = safe_mean(rod_col)
+            
+            # Handle NaN values
+            if np.isnan(normal_mean):
+                normal_mean = 0
+                n_normal = 0
+            if np.isnan(rod_mean):
+                rod_mean = 0
+                n_rod = 0
+            
+            total = n_normal + n_rod
+            if total == 0:
+                return 0.0
+            
+            return (normal_mean * n_normal + rod_mean * n_rod) / total
+        
         return {
             'total_films': len(film_summary),
-            'total_deposits': safe_sum('n_total'),
+            # Total deposits excludes artifacts (Normal + ROD only)
+            'total_deposits': safe_sum('n_normal') + safe_sum('n_rod'),
             'total_normal': safe_sum('n_normal'),
             'total_rod': safe_sum('n_rod'),
-            'total_artifact': safe_sum('n_artifact'),
             'mean_rod_fraction': safe_mean('rod_fraction'),
             'std_rod_fraction': safe_std('rod_fraction'),
+            # New summary statistics
+            'mean_area': safe_mean('mean_area'),
+            'mean_circularity': weighted_mean('normal_mean_circularity', 'rod_mean_circularity'),
+            'mean_hue': weighted_mean('normal_mean_hue', 'rod_mean_hue'),
+            # Legacy fields (kept for compatibility)
             'mean_total_iod': safe_mean('total_iod'),
             'mean_normal_area': safe_mean('normal_mean_area'),
             'mean_rod_area': safe_mean('rod_mean_area'),
@@ -346,14 +377,14 @@ class ReportGenerator:
         def safe_sum(col):
             return film_summary[col].sum() if col in film_summary.columns else 0
         
+        # Only show Normal and ROD (exclude Artifact from deposit statistics)
         totals = {
             'Normal': safe_sum('n_normal'),
-            'ROD': safe_sum('n_rod'),
-            'Artifact': safe_sum('n_artifact')
+            'ROD': safe_sum('n_rod')
         }
         
         # Use DEPOSIT_COLORS for consistency with visualization module
-        colors = [DEPOSIT_COLORS['normal'], DEPOSIT_COLORS['rod'], DEPOSIT_COLORS['artifact']]
+        colors = [DEPOSIT_COLORS['normal'], DEPOSIT_COLORS['rod']]
         bars = ax.bar(totals.keys(), totals.values(), color=colors)
         
         ax.set_ylabel('Count')
@@ -380,7 +411,7 @@ class ReportGenerator:
                    color='#E53935', linestyle='--', linewidth=2, label='Mean')
         
         ax.set_xlabel('ROD Fraction (%)')
-        ax.set_ylabel('Number of Films')
+        ax.set_ylabel('Number of Images')
         ax.set_title('Distribution of ROD Fraction')
         ax.legend()
         
@@ -586,7 +617,7 @@ class ReportGenerator:
         <div class="stats-grid">
             <div class="stat-card">
                 <div class="value">{summary['total_films']}</div>
-                <div class="label">Total Films</div>
+                <div class="label">Total Images</div>
             </div>
             <div class="stat-card">
                 <div class="value">{summary['total_deposits']}</div>
@@ -600,13 +631,25 @@ class ReportGenerator:
                 <div class="value">{summary['total_rod']}</div>
                 <div class="label">ROD</div>
             </div>
-            <div class="stat-card artifact">
-                <div class="value">{summary['total_artifact']}</div>
-                <div class="label">Artifact</div>
-            </div>
             <div class="stat-card">
                 <div class="value">{summary['mean_rod_fraction']*100:.1f}%</div>
                 <div class="label">Mean ROD Fraction (±{summary['std_rod_fraction']*100:.1f}%)</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">{summary['mean_area']:.1f}</div>
+                <div class="label">Mean Area (px²)</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">{summary['mean_circularity']:.3f}</div>
+                <div class="label">Mean Circularity</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">{summary['mean_hue']:.1f}°</div>
+                <div class="label">Mean pH (Hue)</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">{summary['mean_total_iod']:.0f}</div>
+                <div class="label">Mean IOD</div>
             </div>
         </div>
 '''
@@ -638,8 +681,15 @@ class ReportGenerator:
     </div>
 '''
         
-        # Statistical results
-        if statistical_results and isinstance(statistical_results, dict):
+        # Statistical results - only show if there are valid results
+        has_valid_stats = (
+            statistical_results 
+            and isinstance(statistical_results, dict) 
+            and len(statistical_results) > 0
+            and any(isinstance(v, dict) and 'error' not in v for v in statistical_results.values())
+        )
+        
+        if has_valid_stats:
             html += '''
     <div class="section">
         <h2>📉 Statistical Analysis</h2>
@@ -835,7 +885,7 @@ class ReportGenerator:
         # Film summary table
         html += '''
     <div class="section">
-        <h2>📋 Film Summary</h2>
+        <h2>📋 Image Summary</h2>
         <div style="overflow-x: auto;">
             <table>
                 <thead>
@@ -843,7 +893,6 @@ class ReportGenerator:
                         <th>Filename</th>
                         <th>Normal</th>
                         <th>ROD</th>
-                        <th>Artifact</th>
                         <th>ROD %</th>
                         <th>Total IOD</th>
                     </tr>
@@ -853,7 +902,6 @@ class ReportGenerator:
         for _, row in film_summary.iterrows():
             n_normal = int(row.get('n_normal', 0)) if 'n_normal' in row.index else 0
             n_rod = int(row.get('n_rod', 0)) if 'n_rod' in row.index else 0
-            n_artifact = int(row.get('n_artifact', 0)) if 'n_artifact' in row.index else 0
             rod_fraction = row.get('rod_fraction', 0) if 'rod_fraction' in row.index else 0
             total_iod = row.get('total_iod', 0) if 'total_iod' in row.index else 0
             
@@ -861,7 +909,6 @@ class ReportGenerator:
                         <td>{row.get('filename', 'N/A')}</td>
                         <td>{n_normal}</td>
                         <td>{n_rod}</td>
-                        <td>{n_artifact}</td>
                         <td>{rod_fraction*100:.1f}%</td>
                         <td>{total_iod:.0f}</td>
                     </tr>
@@ -909,7 +956,7 @@ class ReportGenerator:
                     'fraction_acidic': ('Acidic Fraction', '%', 100),
                     'total_iod': ('Total IOD', ''),
                     'mean_deposit_area': ('Mean Area', ' px²'),
-                    'mean_deposits_per_film': ('Deposits/Film', ''),
+                    'mean_deposits_per_film': ('Deposits/Image', ''),
                     'mean_rod_fraction': ('ROD Fraction', '%', 100),
                     'mean_circularity': ('Mean Circularity', ''),
                 }

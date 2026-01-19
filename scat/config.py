@@ -64,30 +64,24 @@ DEFAULT_CONFIG = {
     # Keyboard shortcuts (customizable)
     "shortcuts": {
         # Global
-        "open": "Ctrl+O",
         "save": "Ctrl+S",
         "quit": "Ctrl+Q",
-        "help": "F1",
+        "undo": "Ctrl+Z",
         
-        # Labeling
+        # Labeling / Edit mode
         "label_normal": "1",
         "label_rod": "2",
         "label_artifact": "3",
-        "add_mode": "A",
+        "pan_mode": "Q",
         "select_mode": "S",
+        "add_mode": "A",
         "delete": "Delete",
-        "merge": "M",
-        "next_image": "N",
-        "prev_image": "P",
-        "next_deposit": ".",
-        "prev_deposit": ",",
+        "merge": "R",
+        "group": "G",
+        "ungroup": "F",
         
         # Analysis
-        "run_analysis": "Ctrl+R",
-        
-        # Results
-        "export_excel": "Ctrl+E",
-        "open_detail": "Return"
+        "run_analysis": "Ctrl+R"
     },
     
     # Window state

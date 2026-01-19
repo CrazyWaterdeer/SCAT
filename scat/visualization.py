@@ -1177,7 +1177,7 @@ class Visualizer:
             )
         else:
             _sns.histplot(film_summary['n_total'], ax=ax, kde=True, color=DEFAULT_GRAY)
-        ax.set_title('Total Deposits per Film', fontweight='bold')
+        ax.set_title('Total Deposits per Image', fontweight='bold')
         ax.set_ylabel('Count')
         ax.set_xlabel('')
         apply_publication_style(ax)

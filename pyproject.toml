@@ -21,6 +21,7 @@ dependencies = [
     "matplotlib>=3.5.0",
     "seaborn>=0.11.0",
     "jinja2>=3.0.0",
+    "pyinstaller>=6.17.0",
 ]
 
 [project.optional-dependencies]

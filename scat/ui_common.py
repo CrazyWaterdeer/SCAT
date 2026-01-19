@@ -3,6 +3,7 @@ Common UI components shared between main_gui and labeling_gui.
 Consolidates Theme, custom widgets, and utility functions.
 """
 
+import sys
 from pathlib import Path
 
 from PySide6.QtWidgets import QSpinBox, QDoubleSpinBox, QComboBox, QTableWidgetItem
@@ -198,7 +199,7 @@ class Theme:
                 background-color: {cls.BG_MEDIUM};
                 border: 1px solid {cls.BORDER};
                 border-radius: 5px;
-                padding: 8px 10px;
+                padding: 8px 30px 8px 10px;
                 color: {cls.TEXT_PRIMARY};
                 min-height: 20px;
                 selection-background-color: {cls.SECONDARY};
@@ -207,14 +208,24 @@ class Theme:
                 border-color: {cls.PRIMARY};
             }}
             QComboBox::drop-down {{
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 24px;
                 border: none;
-                padding-right: 12px;
+                border-left: 1px solid {cls.BORDER};
+                border-top-right-radius: 5px;
+                border-bottom-right-radius: 5px;
             }}
             QComboBox::down-arrow {{
-                image: none;
+                width: 0;
+                height: 0;
                 border-left: 5px solid transparent;
                 border-right: 5px solid transparent;
                 border-top: 6px solid {cls.TEXT_SECONDARY};
+            }}
+            QComboBox::down-arrow:on {{
+                border-top: none;
+                border-bottom: 6px solid {cls.TEXT_SECONDARY};
             }}
             QComboBox QAbstractItemView {{
                 background-color: {cls.BG_DARK};
@@ -385,6 +396,28 @@ class Theme:
                 border-color: {cls.PRIMARY};
             }}
             QCheckBox::indicator:hover {{
+                border-color: {cls.PRIMARY_LIGHT};
+            }}
+            
+            /* RadioButton - same style as CheckBox */
+            QRadioButton {{
+                spacing: 10px;
+                color: {cls.TEXT_PRIMARY};
+                padding: 6px 0px;
+                min-height: 26px;
+            }}
+            QRadioButton::indicator {{
+                width: 18px;
+                height: 18px;
+                border-radius: 9px;
+                border: 2px solid {cls.BORDER};
+                background-color: {cls.BG_DARK};
+            }}
+            QRadioButton::indicator:checked {{
+                background-color: {cls.PRIMARY};
+                border-color: {cls.PRIMARY};
+            }}
+            QRadioButton::indicator:hover {{
                 border-color: {cls.PRIMARY_LIGHT};
             }}
             
@@ -578,7 +611,7 @@ class Theme:
                 background-color: {cls.BG_MEDIUM};
                 border: 1px solid {cls.BORDER};
                 border-radius: 4px;
-                padding: 4px 8px;
+                padding: 4px 24px 4px 8px;
                 min-height: 20px;
                 color: {cls.TEXT_PRIMARY};
             }}
@@ -586,14 +619,22 @@ class Theme:
                 border-color: {cls.PRIMARY};
             }}
             QComboBox::drop-down {{
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 20px;
                 border: none;
-                padding-right: 8px;
+                border-left: 1px solid {cls.BORDER};
             }}
             QComboBox::down-arrow {{
-                image: none;
+                width: 0;
+                height: 0;
                 border-left: 4px solid transparent;
                 border-right: 4px solid transparent;
                 border-top: 5px solid {cls.TEXT_SECONDARY};
+            }}
+            QComboBox::down-arrow:on {{
+                border-top: none;
+                border-bottom: 5px solid {cls.TEXT_SECONDARY};
             }}
             QComboBox QAbstractItemView {{
                 background-color: {cls.BG_DARK};
@@ -712,9 +753,31 @@ class NumericTableWidgetItem(QTableWidgetItem):
 # =============================================================================
 # Utility Functions
 # =============================================================================
+def get_resource_path(relative_path: str) -> Path:
+    """Get absolute path to resource, works for dev and PyInstaller.
+    
+    Args:
+        relative_path: Path relative to scat/resources/ (e.g., 'fonts/NotoSans-Regular.ttf')
+    
+    Returns:
+        Absolute path to the resource file
+    """
+    if getattr(sys, 'frozen', False):
+        # Running as compiled EXE - resources are in _internal/scat/resources
+        base_path = Path(sys._MEIPASS) / 'scat' / 'resources'
+    else:
+        # Running as script
+        base_path = Path(__file__).parent / 'resources'
+    
+    return base_path / relative_path
+
+
 def load_custom_fonts():
     """Load custom fonts bundled with the application."""
-    fonts_dir = Path(__file__).parent / "resources" / "fonts"
+    if getattr(sys, 'frozen', False):
+        fonts_dir = Path(sys._MEIPASS) / 'scat' / 'resources' / 'fonts'
+    else:
+        fonts_dir = Path(__file__).parent / "resources" / "fonts"
     
     if fonts_dir.exists():
         for font_file in fonts_dir.glob("*.ttf"):
@@ -725,15 +788,21 @@ def load_custom_fonts():
 
 def get_icon_path() -> str:
     """Get the path to the application icon."""
-    # Try multiple locations
-    possible_paths = [
-        Path(__file__).parent.parent / "scat" / "resources" / "scat.ico",
-        Path(__file__).parent / "resources" / "scat.ico",
-        Path(__file__).parent.parent / "resources" / "scat.ico",
-    ]
-    
-    for path in possible_paths:
-        if path.exists():
-            return str(path)
+    if getattr(sys, 'frozen', False):
+        # Running as compiled EXE
+        icon_path = Path(sys._MEIPASS) / 'scat' / 'resources' / 'icon.ico'
+        if icon_path.exists():
+            return str(icon_path)
+    else:
+        # Running as script - try multiple locations
+        possible_paths = [
+            Path(__file__).parent / "resources" / "icon.ico",
+            Path(__file__).parent.parent / "scat" / "resources" / "icon.ico",
+            Path(__file__).parent.parent / "resources" / "icon.ico",
+        ]
+        
+        for path in possible_paths:
+            if path.exists():
+                return str(path)
     
     return ""

@@ -27,7 +27,7 @@ from .detector import DepositDetector, Deposit
 from .features import FeatureExtractor
 from .config import config
 from .ui_common import (
-    Theme, NoScrollSpinBox, NoScrollDoubleSpinBox, NumericTableWidgetItem,
+    Theme, NoScrollSpinBox, NoScrollDoubleSpinBox, NoScrollComboBox, NumericTableWidgetItem,
     load_custom_fonts
 )
 
@@ -180,6 +180,9 @@ class ImageViewer(QGraphicsView):
         """Handle key press - Space for temporary pan mode."""
         if event.key() == Qt.Key_Space and not event.isAutoRepeat():
             if self.edit_mode != self.MODE_PAN and not self._space_pressed:
+                # Cancel any in-progress drawing before switching to pan
+                self._cancel_current_drawing()
+                
                 self._space_pressed = True
                 self._mode_before_space = self.edit_mode
                 self.setDragMode(QGraphicsView.ScrollHandDrag)
@@ -200,12 +203,43 @@ class ImageViewer(QGraphicsView):
             super().keyReleaseEvent(event)
     
     def set_mode(self, mode: int):
+        # Cancel any in-progress drawing before switching modes
+        self._cancel_current_drawing()
+        
         self.edit_mode = mode
         self.selected_items.clear()
         if mode == self.MODE_PAN:
             self.setDragMode(QGraphicsView.ScrollHandDrag)
         else:
             self.setDragMode(QGraphicsView.NoDrag)
+    
+    def _cancel_current_drawing(self):
+        """Cancel any in-progress drawing operation and clean up visual guides."""
+        self.drawing = False
+        
+        # Clean up selection rectangle (SELECT mode box selection)
+        if self.selection_rect:
+            self.scene.removeItem(self.selection_rect)
+            self.selection_rect = None
+        
+        # Clean up rectangle preview (ADD mode - Rectangle)
+        if self.rect_item:
+            self.scene.removeItem(self.rect_item)
+            self.rect_item = None
+        
+        # Clean up ellipse preview (ADD mode - Circle)
+        if hasattr(self, 'ellipse_item') and self.ellipse_item:
+            self.scene.removeItem(self.ellipse_item)
+            self.ellipse_item = None
+        
+        # Clean up freeform path (ADD mode - Freeform)
+        self._clear_freeform()
+        
+        # Clean up manual path (ADD mode - Manual)
+        self._clear_manual()
+        
+        # Reset start point
+        self.start_point = None
     
     def load_image(self, image: np.ndarray):
         self.scene.clear()
@@ -628,7 +662,7 @@ class LabelingWindow(QMainWindow):
         shape_label = QLabel("Shape:")
         shape_label.setFixedWidth(45)
         shape_label.setStyleSheet("background-color: transparent;")
-        self.add_shape_combo = QComboBox()
+        self.add_shape_combo = NoScrollComboBox()
         self.add_shape_combo.addItems(["Rectangle", "Circle", "Freeform", "Manual"])
         self.add_shape_combo.setCurrentIndex(config.get("labeling.add_shape", 0))
         self.add_shape_combo.currentIndexChanged.connect(self._on_shape_changed)
@@ -878,20 +912,25 @@ class LabelingWindow(QMainWindow):
         self.viewer.set_mode(ImageViewer.MODE_PAN)
     
     def _setup_shortcuts(self):
-        QShortcut(QKeySequence("1"), self, lambda: self._set_selected_label("normal"))
-        QShortcut(QKeySequence("2"), self, lambda: self._set_selected_label("rod"))
-        QShortcut(QKeySequence("3"), self, lambda: self._set_selected_label("artifact"))
-        QShortcut(QKeySequence("Ctrl+S"), self, self._save_current)  # Mode-aware save
-        QShortcut(QKeySequence("Ctrl+Z"), self, self._undo)
-        QShortcut(QKeySequence("Delete"), self, self._delete_selected)
-        # Mode shortcuts (left hand: Q W E area)
-        QShortcut(QKeySequence("Q"), self, lambda: self._set_mode(0))  # Pan
-        QShortcut(QKeySequence("S"), self, lambda: self._set_mode(1))  # Select
-        QShortcut(QKeySequence("A"), self, lambda: self._set_mode(2))  # Add
+        # Label shortcuts
+        QShortcut(QKeySequence(config.get_shortcut("label_normal")), self, lambda: self._set_selected_label("normal"))
+        QShortcut(QKeySequence(config.get_shortcut("label_rod")), self, lambda: self._set_selected_label("rod"))
+        QShortcut(QKeySequence(config.get_shortcut("label_artifact")), self, lambda: self._set_selected_label("artifact"))
+        
+        # Global shortcuts
+        QShortcut(QKeySequence(config.get_shortcut("save")), self, self._save_current)
+        QShortcut(QKeySequence(config.get_shortcut("undo")), self, self._undo)
+        QShortcut(QKeySequence(config.get_shortcut("delete")), self, self._delete_selected)
+        
+        # Mode shortcuts
+        QShortcut(QKeySequence(config.get_shortcut("pan_mode")), self, lambda: self._set_mode(0))
+        QShortcut(QKeySequence(config.get_shortcut("select_mode")), self, lambda: self._set_mode(1))
+        QShortcut(QKeySequence(config.get_shortcut("add_mode")), self, lambda: self._set_mode(2))
+        
         # Action shortcuts
-        QShortcut(QKeySequence("R"), self, self._merge_selected)  # meRge
-        QShortcut(QKeySequence("G"), self, self._group_selected)  # Group
-        QShortcut(QKeySequence("F"), self, self._ungroup_selected)  # Free from group
+        QShortcut(QKeySequence(config.get_shortcut("merge")), self, self._merge_selected)
+        QShortcut(QKeySequence(config.get_shortcut("group")), self, self._group_selected)
+        QShortcut(QKeySequence(config.get_shortcut("ungroup")), self, self._ungroup_selected)
     
     def _save_current(self):
         """Save based on current mode - Ctrl+S handler."""

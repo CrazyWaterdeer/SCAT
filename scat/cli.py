@@ -133,7 +133,7 @@ def analyze_command(args):
     print(f"\n{'='*50}")
     print("ANALYSIS COMPLETE")
     print('='*50)
-    print(f"  Total films: {len(results)}")
+    print(f"  Total images: {len(results)}")
     print(f"  Total deposits: {summary['n_total'].sum():.0f}")
     print(f"  Normal: {summary['n_normal'].sum():.0f}, ROD: {summary['n_rod'].sum():.0f}, Artifact: {summary['n_artifact'].sum():.0f}")
     print(f"  Mean ROD fraction: {summary['rod_fraction'].mean():.3f} ± {summary['rod_fraction'].std():.3f}")

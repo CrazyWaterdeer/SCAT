@@ -2,29 +2,26 @@
 """
 SCAT Launcher for PyInstaller.
 This script is the entry point for the packaged EXE.
+Handles frozen environment setup (paths, working directory).
 """
 
 import sys
 import os
 
-# Set Windows AppUserModelID for proper taskbar icon display
-# This MUST be called before any Qt imports
-if sys.platform == 'win32':
-    import ctypes
-    # Unique identifier for this application
-    APP_ID = 'SCAT.DepositAnalyzer.1.0'
-    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
-
-# Add the parent directory to path for proper imports
+# Fix working directory for PyInstaller frozen environment
+# This ensures relative paths (Models/, Data/) work correctly
+# regardless of where the EXE is launched from (e.g., shortcuts, command line)
 if getattr(sys, 'frozen', False):
     # Running as compiled EXE
+    exe_dir = os.path.dirname(sys.executable)
+    os.chdir(exe_dir)
+    
+    # Add _internal to path for imports
     application_path = sys._MEIPASS
     sys.path.insert(0, application_path)
-else:
-    # Running as script
-    application_path = os.path.dirname(os.path.abspath(__file__))
 
-# Now import and run the main GUI
+# Import and run the main GUI
+# AppUserModelID is set in main_gui.py at import time
 from scat.main_gui import run_gui
 
 if __name__ == "__main__":
