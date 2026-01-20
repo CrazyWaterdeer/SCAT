@@ -726,6 +726,7 @@ class GroupWidget(QWidget):
         self.group_name = group_name
         self.files = files
         self.expanded = False
+        self._hovered = False
         
         self.setAcceptDrops(True)
         
@@ -733,14 +734,30 @@ class GroupWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         
-        # Card header (button)
-        self.card_btn = QPushButton()
-        self.card_btn.setCursor(Qt.PointingHandCursor)
-        self.card_btn.setFixedHeight(44)
-        self.card_btn.clicked.connect(self._on_card_clicked)
+        # Card header (QFrame with HBoxLayout for proper arrow positioning)
+        self.card_frame = QFrame()
+        self.card_frame.setCursor(Qt.PointingHandCursor)
+        self.card_frame.setFixedHeight(44)
+        
+        card_layout = QHBoxLayout(self.card_frame)
+        card_layout.setContentsMargins(12, 8, 12, 8)
+        card_layout.setSpacing(8)
+        
+        # Group name and file count label
+        self.name_label = QLabel()
+        self.name_label.setStyleSheet(f"color: {Theme.TEXT_PRIMARY}; font-weight: bold; background: transparent; border: none;")
+        card_layout.addWidget(self.name_label)
+        
+        card_layout.addStretch()  # Push arrow to the right
+        
+        # Arrow label (always at right end)
+        self.arrow_label = QLabel()
+        self.arrow_label.setStyleSheet(f"color: {Theme.TEXT_PRIMARY}; background: transparent; border: none;")
+        card_layout.addWidget(self.arrow_label)
+        
         self._update_card_text()
         self._apply_card_style()
-        layout.addWidget(self.card_btn)
+        layout.addWidget(self.card_frame)
         
         # File list (hidden by default)
         self.file_list = QListWidget()
@@ -767,36 +784,35 @@ class GroupWidget(QWidget):
         layout.addWidget(self.file_list)
     
     def _update_card_text(self):
-        suffix = "▼" if self.expanded else "▶"
-        self.card_btn.setText(f"  {self.group_name}    ({len(self.files)} files)  {suffix}  ")
+        self.name_label.setText(f"{self.group_name}  ({len(self.files)} files)")
+        # Use same-family triangles for consistent size: ▼ (down) ◀ (left)
+        self.arrow_label.setText("▼" if self.expanded else "◀")
     
     def _apply_card_style(self):
         if self.expanded:
-            self.card_btn.setStyleSheet(f"""
-                QPushButton {{
+            self.card_frame.setStyleSheet(f"""
+                QFrame {{
                     background-color: {Theme.BG_DARK};
                     border: 1px solid {Theme.BORDER};
                     border-bottom: none;
                     border-radius: 6px 6px 0 0;
-                    text-align: left;
-                    padding: 8px 12px;
-                    font-weight: bold;
-                    color: {Theme.TEXT_PRIMARY};
+                }}
+                QFrame QLabel {{
+                    border: none;
+                    background: transparent;
                 }}
             """)
         else:
-            self.card_btn.setStyleSheet(f"""
-                QPushButton {{
+            border_color = Theme.TEXT_SECONDARY if self._hovered else Theme.BORDER
+            self.card_frame.setStyleSheet(f"""
+                QFrame {{
                     background-color: {Theme.BG_DARK};
-                    border: 1px solid {Theme.BORDER};
+                    border: 1px solid {border_color};
                     border-radius: 6px;
-                    text-align: left;
-                    padding: 8px 12px;
-                    font-weight: bold;
-                    color: {Theme.TEXT_PRIMARY};
                 }}
-                QPushButton:hover {{
-                    border-color: {Theme.TEXT_SECONDARY};
+                QFrame QLabel {{
+                    border: none;
+                    background: transparent;
                 }}
             """)
     
@@ -805,8 +821,24 @@ class GroupWidget(QWidget):
         for f in sorted(self.files):
             self.file_list.addItem(f)
     
-    def _on_card_clicked(self):
-        self.expandRequested.emit(self.group_name)
+    def mousePressEvent(self, event):
+        # Check if click is on the card frame area
+        if self.card_frame.geometry().contains(event.pos()):
+            self.expandRequested.emit(self.group_name)
+        else:
+            super().mousePressEvent(event)
+    
+    def enterEvent(self, event):
+        self._hovered = True
+        if not self.expanded:
+            self._apply_card_style()
+        super().enterEvent(event)
+    
+    def leaveEvent(self, event):
+        self._hovered = False
+        if not self.expanded:
+            self._apply_card_style()
+        super().leaveEvent(event)
     
     def set_expanded(self, expanded: bool):
         self.expanded = expanded
@@ -1007,9 +1039,9 @@ class GroupEditorDialog(QDialog):
         widget.expandRequested.connect(self._on_expand_requested)
         widget.filesDropped.connect(self._on_files_dropped)
         
-        # Context menu for the card button
-        widget.card_btn.setContextMenuPolicy(Qt.CustomContextMenu)
-        widget.card_btn.customContextMenuRequested.connect(
+        # Context menu for the card frame
+        widget.card_frame.setContextMenuPolicy(Qt.CustomContextMenu)
+        widget.card_frame.customContextMenuRequested.connect(
             lambda pos, n=group_name: self._show_group_context_menu(pos, n)
         )
         
@@ -1093,7 +1125,7 @@ class GroupEditorDialog(QDialog):
         
         widget = self.group_widgets.get(group_name)
         if widget:
-            menu.exec(widget.card_btn.mapToGlobal(pos))
+            menu.exec(widget.card_frame.mapToGlobal(pos))
     
     def _show_file_list_context_menu(self, pos, group_name: str):
         """Context menu for expanded file list."""

@@ -405,7 +405,7 @@ class ReportGenerator:
         """Generate ROD fraction histogram as base64."""
         fig, ax = plt.subplots(figsize=(8, 4))
         
-        ax.hist(film_summary['rod_fraction'] * 100, bins=15, 
+        ax.hist(film_summary['rod_fraction'] * 100, bins=20, rwidth=0.8,
                 color=DEFAULT_GRAY, edgecolor='white', alpha=0.8)
         ax.axvline(film_summary['rod_fraction'].mean() * 100, 
                    color='#E53935', linestyle='--', linewidth=2, label='Mean')

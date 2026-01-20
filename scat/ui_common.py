@@ -199,7 +199,7 @@ class Theme:
                 background-color: {cls.BG_MEDIUM};
                 border: 1px solid {cls.BORDER};
                 border-radius: 5px;
-                padding: 8px 30px 8px 10px;
+                padding: 8px 28px 8px 10px;
                 color: {cls.TEXT_PRIMARY};
                 min-height: 20px;
                 selection-background-color: {cls.SECONDARY};
@@ -209,23 +209,18 @@ class Theme:
             }}
             QComboBox::drop-down {{
                 subcontrol-origin: padding;
-                subcontrol-position: top right;
-                width: 24px;
+                subcontrol-position: center right;
+                width: 20px;
                 border: none;
                 border-left: 1px solid {cls.BORDER};
                 border-top-right-radius: 5px;
                 border-bottom-right-radius: 5px;
+                background-color: transparent;
             }}
             QComboBox::down-arrow {{
-                width: 0;
-                height: 0;
-                border-left: 5px solid transparent;
-                border-right: 5px solid transparent;
-                border-top: 6px solid {cls.TEXT_SECONDARY};
-            }}
-            QComboBox::down-arrow:on {{
-                border-top: none;
-                border-bottom: 6px solid {cls.TEXT_SECONDARY};
+                width: 10px;
+                height: 10px;
+                image: none;
             }}
             QComboBox QAbstractItemView {{
                 background-color: {cls.BG_DARK};
@@ -620,21 +615,16 @@ class Theme:
             }}
             QComboBox::drop-down {{
                 subcontrol-origin: padding;
-                subcontrol-position: top right;
-                width: 20px;
+                subcontrol-position: center right;
+                width: 18px;
                 border: none;
                 border-left: 1px solid {cls.BORDER};
+                background-color: transparent;
             }}
             QComboBox::down-arrow {{
-                width: 0;
-                height: 0;
-                border-left: 4px solid transparent;
-                border-right: 4px solid transparent;
-                border-top: 5px solid {cls.TEXT_SECONDARY};
-            }}
-            QComboBox::down-arrow:on {{
-                border-top: none;
-                border-bottom: 5px solid {cls.TEXT_SECONDARY};
+                width: 8px;
+                height: 8px;
+                image: none;
             }}
             QComboBox QAbstractItemView {{
                 background-color: {cls.BG_DARK};
