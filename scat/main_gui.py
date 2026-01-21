@@ -1601,6 +1601,11 @@ class AnalysisTab(QWidget):
             self._selected_files = files
             config.set("last_input_dir", str(Path(files[0]).parent))
             self._update_input_display()
+            
+            # Reset groups when new files are selected
+            self._group_data = {}
+            self._metadata = None
+            self.groups_tree.clear()
     
     def _update_input_display(self):
         """Update the input path display."""

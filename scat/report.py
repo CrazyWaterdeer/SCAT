@@ -466,21 +466,30 @@ class ReportGenerator:
             data = valid_data['area_px'].dropna()
             
             if len(data) > 0:
-                # Bin size: 5px, axis labels: 20 unit intervals
-                max_val = data.max()
-                bins = np.arange(0, max_val + 5, 5)
+                # Use 99th percentile as upper limit for better visualization
+                upper_limit = min(data.quantile(0.99) * 1.2, data.max())
+                upper_limit = int(np.ceil(upper_limit / 50) * 50)  # Round to nearest 50
                 
-                ax.hist(data, bins=bins, color=DEFAULT_GRAY, edgecolor='white', alpha=0.8)
+                # Bin size: 10px
+                bins = np.arange(0, upper_limit + 10, 10)
+                
+                ax.hist(data[data <= upper_limit], bins=bins, color=DEFAULT_GRAY, edgecolor='white', alpha=0.8)
                 ax.axvline(data.mean(), color='#E53935', linestyle='--', linewidth=2, label=f'Mean: {data.mean():.1f}')
                 
-                # Set x-axis ticks at 20 unit intervals
-                max_tick = int(np.ceil(max_val / 20) * 20)
-                ax.set_xticks(np.arange(0, max_tick + 20, 20))
+                # Set x-axis ticks at 50 unit intervals
+                ax.set_xticks(np.arange(0, upper_limit + 50, 50))
+                ax.set_xlim(0, upper_limit)
                 
                 ax.set_xlabel('Deposit Area (px²)')
                 ax.set_ylabel('Number of Deposits')
                 ax.set_title('Distribution of Deposit Size')
                 ax.legend()
+                
+                # Add note if data was truncated
+                n_truncated = len(data[data > upper_limit])
+                if n_truncated > 0:
+                    ax.text(0.98, 0.95, f'({n_truncated} deposits > {upper_limit} not shown)', 
+                           transform=ax.transAxes, ha='right', va='top', fontsize=8, color='#666')
         
         apply_publication_style(ax)
         plt.tight_layout()
@@ -496,18 +505,31 @@ class ReportGenerator:
             data = valid_data['iod'].dropna()
             
             if len(data) > 0:
-                # Auto bin size based on data range
-                max_val = data.max()
-                bin_size = max(50, int(max_val / 30))  # ~30 bins or minimum 50
-                bins = np.arange(0, max_val + bin_size, bin_size)
+                # Use 99th percentile as upper limit for better visualization
+                upper_limit = min(data.quantile(0.99) * 1.2, data.max())
+                upper_limit = int(np.ceil(upper_limit / 10) * 10)  # Round to nearest 10
                 
-                ax.hist(data, bins=bins, color=DEFAULT_GRAY, edgecolor='white', alpha=0.8)
-                ax.axvline(data.mean(), color='#E53935', linestyle='--', linewidth=2, label=f'Mean: {data.mean():.0f}')
+                # Bin size: 5
+                bins = np.arange(0, upper_limit + 5, 5)
+                
+                ax.hist(data[data <= upper_limit], bins=bins, color=DEFAULT_GRAY, edgecolor='white', alpha=0.8)
+                ax.axvline(data.mean(), color='#E53935', linestyle='--', linewidth=2, label=f'Mean: {data.mean():.1f}')
+                
+                # Set appropriate x-axis ticks
+                tick_interval = 20 if upper_limit > 100 else 10
+                ax.set_xticks(np.arange(0, upper_limit + tick_interval, tick_interval))
+                ax.set_xlim(0, upper_limit)
                 
                 ax.set_xlabel('IOD (Integrated Optical Density)')
                 ax.set_ylabel('Number of Deposits')
                 ax.set_title('Distribution of Pigment Amount (IOD)')
                 ax.legend()
+                
+                # Add note if data was truncated
+                n_truncated = len(data[data > upper_limit])
+                if n_truncated > 0:
+                    ax.text(0.98, 0.95, f'({n_truncated} deposits > {upper_limit} not shown)', 
+                           transform=ax.transAxes, ha='right', va='top', fontsize=8, color='#666')
         
         apply_publication_style(ax)
         plt.tight_layout()
@@ -582,6 +604,35 @@ class ReportGenerator:
         return self._generate_metric_boxplot(film_summary, 'rod_fraction', group_by, 
                                               'ROD Fraction (%)', scale=100)
     
+    @staticmethod
+    def _natural_sort_key(value):
+        """Natural sort key that handles numbers correctly.
+        
+        Examples:
+            - "1", "2", "10" → sorted as 1, 2, 10 (not 1, 10, 2)
+            - "Group1", "Group10", "Group2" → Group1, Group2, Group10
+            - Mixed: numbers first, then strings
+        """
+        import re
+        value_str = str(value)
+        
+        # Check if it's a pure number
+        try:
+            return (0, float(value_str), value_str)
+        except ValueError:
+            pass
+        
+        # Split into numeric and non-numeric parts for natural sorting
+        parts = re.split(r'(\d+)', value_str)
+        converted = []
+        for part in parts:
+            if part.isdigit():
+                converted.append((0, int(part)))
+            elif part:
+                converted.append((1, part.lower()))
+        
+        return (1, converted, value_str)
+    
     def _generate_metric_boxplot(
         self,
         film_summary: pd.DataFrame,
@@ -594,7 +645,8 @@ class ReportGenerator:
         """Generate boxplot comparing groups for a specific metric."""
         fig, ax = plt.subplots(figsize=(10, 5))
         
-        groups = sorted(film_summary[group_by].dropna().unique())
+        # Use natural sorting for groups
+        groups = sorted(film_summary[group_by].dropna().unique(), key=self._natural_sort_key)
         
         # Check if metric exists
         if metric not in film_summary.columns:
@@ -604,7 +656,7 @@ class ReportGenerator:
         data = [film_summary[film_summary[group_by] == g][metric].dropna() * scale 
                 for g in groups]
         
-        bp = ax.boxplot(data, labels=groups, patch_artist=True)
+        bp = ax.boxplot(data, labels=[str(g) for g in groups], patch_artist=True)
         
         # Color boxes
         if use_hue_colors or 'hue' in metric.lower():
@@ -982,7 +1034,7 @@ class ReportGenerator:
                 if plot_key not in inline_plots:
                     continue
                     
-                html += f'''        <div class="plot-container" style="margin-bottom:30px;">
+                html += f'''        <div class="plot-container" style="margin-bottom:50px; padding-bottom:30px; border-bottom:1px solid #e0e0e0;">
             <img src="data:image/png;base64,{inline_plots[plot_key]}" alt="{title}">
             <p class="plot-description"><strong>{title}:</strong> {desc}</p>
 '''
@@ -1162,18 +1214,27 @@ class ReportGenerator:
             </p>
         </div>
 '''
-                    # Show group statistics summary (sorted: Normal first, then others, ROD last)
+                    # Show group statistics summary (sorted: Normal first, then natural sort, ROD last)
                     group_stats = result.get('group_statistics', {})
                     if group_stats:
-                        # Sort groups: 'normal' first, then alphabetically, 'rod' last
+                        # Sort groups: 'normal' first, then natural sort, 'rod' last
                         def sort_key(name):
-                            name_lower = name.lower()
-                            if name_lower == 'normal':
-                                return (0, name)
-                            elif name_lower == 'rod':
-                                return (2, name)
+                            import re
+                            name_str = str(name).lower()
+                            if name_str == 'normal':
+                                return (0, [], str(name))
+                            elif name_str == 'rod':
+                                return (2, [], str(name))
                             else:
-                                return (1, name)
+                                # Natural sort for other groups
+                                parts = re.split(r'(\d+)', str(name))
+                                converted = []
+                                for part in parts:
+                                    if part.isdigit():
+                                        converted.append((0, int(part)))
+                                    elif part:
+                                        converted.append((1, part.lower()))
+                                return (1, converted, str(name))
                         
                         sorted_groups = sorted(group_stats.keys(), key=sort_key)
                         
@@ -1221,7 +1282,7 @@ class ReportGenerator:
                     g2_std = result.get('std2', 0)
                     
                     # Sort: Normal first
-                    if g2_name.lower() == 'normal' and g1_name.lower() != 'normal':
+                    if str(g2_name).lower() == 'normal' and str(g1_name).lower() != 'normal':
                         g1_name, g2_name = g2_name, g1_name
                         g1_mean, g2_mean = g2_mean, g1_mean
                         g1_std, g2_std = g2_std, g1_std
