@@ -47,8 +47,9 @@ class FeatureExtractor:
                 deposit.mean_hue = pixels_hls[:, 0].mean() * 2
                 deposit.mean_lightness = pixels_hls[:, 1].mean() / 255.0
                 deposit.mean_saturation = pixels_hls[:, 2].mean() / 255.0
+                deposit.pigment_density = 1.0 - deposit.mean_lightness  # Higher = darker
             
-            deposit.iod = deposit.area * (1 - deposit.mean_lightness)
+            deposit.iod = deposit.area * deposit.pigment_density
         
         return deposits
     
@@ -72,6 +73,7 @@ class FeatureExtractor:
             'mean_hue': deposit.mean_hue,
             'mean_saturation': deposit.mean_saturation,
             'mean_lightness': deposit.mean_lightness,
+            'pigment_density': deposit.pigment_density,
             'mean_r': deposit.mean_r,
             'mean_g': deposit.mean_g,
             'mean_b': deposit.mean_b,

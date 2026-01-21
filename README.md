@@ -2,7 +2,7 @@
 
 **Version 1.0.0**
 
-A machine learning-based analysis tool for *Drosophila* excreta classification and quantification. SCAT automatically detects, classifies, and analyzes deposits to distinguish Normal deposits from RODs (Reproductive Oblong Deposits).
+A machine learning-based analysis tool for *Drosophila* excreta classification and quantification. SCAT automatically detects, classifies, and analyzes deposits to distinguish Normal deposits from ROD (Reproductive Oblong Deposits).
 
 📖 **[Detailed Workflow Guide](WORKFLOW.md)**
 

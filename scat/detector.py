@@ -28,6 +28,7 @@ class Deposit:
     mean_hue: float = 0.0
     mean_saturation: float = 0.0
     mean_lightness: float = 0.0
+    pigment_density: float = 0.0  # 1 - lightness (higher = darker)
     mean_r: float = 0.0
     mean_g: float = 0.0
     mean_b: float = 0.0

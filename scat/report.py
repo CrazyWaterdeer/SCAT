@@ -29,7 +29,7 @@ except ImportError:
 # Import color constants from visualization for consistency
 from .visualization import (
     DEFAULT_GRAY, PASTEL_PALETTE, CONTROL_COLOR, DEPOSIT_COLORS,
-    get_palette, apply_publication_style
+    get_palette, apply_publication_style, hue_to_rgb
 )
 
 
@@ -79,6 +79,8 @@ class ReportGenerator:
         'mean_lightness': 'Pigment Density (Lightness)',
         'normal_mean_lightness': 'Normal Pigment Density (Lightness)',
         'rod_mean_lightness': 'ROD Pigment Density (Lightness)',
+        'pigment_density': 'Pigment Density',
+        'mean_pigment_density': 'Mean Pigment Density',
         'mean_brightness': 'Mean Brightness',
         'mean_red': 'Mean Red Channel',
         'mean_green': 'Mean Green Channel',
@@ -286,9 +288,23 @@ class ReportGenerator:
         # Generate inline plots
         inline_plots = {}
         if HAS_MATPLOTLIB:
-            inline_plots['overview_bar'] = self._generate_overview_bar(film_summary)
+            # Summary distribution plots (order: Count, Area, IOD, pH, ROD, Circularity)
+            # Count and ROD fraction: image-level, others: individual deposit-level
+            inline_plots['count_distribution'] = self._generate_count_distribution(film_summary)
+            inline_plots['area_distribution'] = self._generate_area_distribution(deposit_data)
+            inline_plots['iod_distribution'] = self._generate_iod_distribution(deposit_data)
+            inline_plots['ph_distribution'] = self._generate_ph_distribution(deposit_data)
             inline_plots['rod_distribution'] = self._generate_rod_histogram(film_summary)
+            inline_plots['circularity_distribution'] = self._generate_circularity_distribution(deposit_data)
+            
+            # Legacy: overview bar (deposit count by classification)
+            inline_plots['overview_bar'] = self._generate_overview_bar(film_summary)
+            
             if group_by and group_by in film_summary.columns:
+                # Generate all group comparison boxplots
+                group_plots = self._generate_all_group_comparisons(film_summary, group_by)
+                inline_plots.update(group_plots)
+                # Legacy: keep single group_comparison for backward compatibility
                 inline_plots['group_comparison'] = self._generate_group_comparison(
                     film_summary, group_by
                 )
@@ -359,11 +375,11 @@ class ReportGenerator:
             'total_rod': safe_sum('n_rod'),
             'mean_rod_fraction': safe_mean('rod_fraction'),
             'std_rod_fraction': safe_std('rod_fraction'),
-            # New summary statistics
+            # Summary statistics
             'mean_area': safe_mean('mean_area'),
             'mean_circularity': weighted_mean('normal_mean_circularity', 'rod_mean_circularity'),
             'mean_hue': weighted_mean('normal_mean_hue', 'rod_mean_hue'),
-            # Legacy fields (kept for compatibility)
+            'mean_density': weighted_mean('normal_mean_lightness', 'rod_mean_lightness'),  # Will be converted to 1-lightness
             'mean_total_iod': safe_mean('total_iod'),
             'mean_normal_area': safe_mean('normal_mean_area'),
             'mean_rod_area': safe_mean('rod_mean_area'),
@@ -385,7 +401,7 @@ class ReportGenerator:
         
         # Use DEPOSIT_COLORS for consistency with visualization module
         colors = [DEPOSIT_COLORS['normal'], DEPOSIT_COLORS['rod']]
-        bars = ax.bar(totals.keys(), totals.values(), color=colors)
+        bars = ax.bar(totals.keys(), totals.values(), color=colors, width=0.4)
         
         ax.set_ylabel('Count')
         ax.set_title('Total Deposits by Classification')
@@ -405,7 +421,7 @@ class ReportGenerator:
         """Generate ROD fraction histogram as base64."""
         fig, ax = plt.subplots(figsize=(8, 4))
         
-        ax.hist(film_summary['rod_fraction'] * 100, bins=20, rwidth=0.8,
+        ax.hist(film_summary['rod_fraction'] * 100, bins=15, 
                 color=DEFAULT_GRAY, edgecolor='white', alpha=0.8)
         ax.axvline(film_summary['rod_fraction'].mean() * 100, 
                    color='#E53935', linestyle='--', linewidth=2, label='Mean')
@@ -421,34 +437,245 @@ class ReportGenerator:
         plt.tight_layout()
         return self._fig_to_base64(fig)
     
+    def _generate_count_distribution(self, film_summary: pd.DataFrame) -> str:
+        """Generate deposit count distribution histogram."""
+        fig, ax = plt.subplots(figsize=(8, 4))
+        
+        counts = film_summary['n_total'] if 'n_total' in film_summary.columns else \
+                 film_summary['n_normal'] + film_summary['n_rod']
+        
+        ax.hist(counts, bins=15, color=DEFAULT_GRAY, edgecolor='white', alpha=0.8)
+        ax.axvline(counts.mean(), color='#E53935', linestyle='--', linewidth=2, label='Mean')
+        
+        ax.set_xlabel('Deposit Count per Image')
+        ax.set_ylabel('Number of Images')
+        ax.set_title('Distribution of Deposit Counts')
+        ax.legend()
+        
+        apply_publication_style(ax)
+        plt.tight_layout()
+        return self._fig_to_base64(fig)
+    
+    def _generate_area_distribution(self, deposit_data: pd.DataFrame) -> str:
+        """Generate area distribution histogram from individual deposits."""
+        fig, ax = plt.subplots(figsize=(8, 4))
+        
+        if deposit_data is not None and 'area_px' in deposit_data.columns:
+            # Filter out artifacts
+            valid_data = deposit_data[deposit_data['label'].isin(['normal', 'rod'])]
+            data = valid_data['area_px'].dropna()
+            
+            if len(data) > 0:
+                # Bin size: 5px, axis labels: 20 unit intervals
+                max_val = data.max()
+                bins = np.arange(0, max_val + 5, 5)
+                
+                ax.hist(data, bins=bins, color=DEFAULT_GRAY, edgecolor='white', alpha=0.8)
+                ax.axvline(data.mean(), color='#E53935', linestyle='--', linewidth=2, label=f'Mean: {data.mean():.1f}')
+                
+                # Set x-axis ticks at 20 unit intervals
+                max_tick = int(np.ceil(max_val / 20) * 20)
+                ax.set_xticks(np.arange(0, max_tick + 20, 20))
+                
+                ax.set_xlabel('Deposit Area (px²)')
+                ax.set_ylabel('Number of Deposits')
+                ax.set_title('Distribution of Deposit Size')
+                ax.legend()
+        
+        apply_publication_style(ax)
+        plt.tight_layout()
+        return self._fig_to_base64(fig)
+    
+    def _generate_iod_distribution(self, deposit_data: pd.DataFrame) -> str:
+        """Generate IOD distribution histogram from individual deposits."""
+        fig, ax = plt.subplots(figsize=(8, 4))
+        
+        if deposit_data is not None and 'iod' in deposit_data.columns:
+            # Filter out artifacts
+            valid_data = deposit_data[deposit_data['label'].isin(['normal', 'rod'])]
+            data = valid_data['iod'].dropna()
+            
+            if len(data) > 0:
+                # Auto bin size based on data range
+                max_val = data.max()
+                bin_size = max(50, int(max_val / 30))  # ~30 bins or minimum 50
+                bins = np.arange(0, max_val + bin_size, bin_size)
+                
+                ax.hist(data, bins=bins, color=DEFAULT_GRAY, edgecolor='white', alpha=0.8)
+                ax.axvline(data.mean(), color='#E53935', linestyle='--', linewidth=2, label=f'Mean: {data.mean():.0f}')
+                
+                ax.set_xlabel('IOD (Integrated Optical Density)')
+                ax.set_ylabel('Number of Deposits')
+                ax.set_title('Distribution of Pigment Amount (IOD)')
+                ax.legend()
+        
+        apply_publication_style(ax)
+        plt.tight_layout()
+        return self._fig_to_base64(fig)
+    
+    def _generate_ph_distribution(self, deposit_data: pd.DataFrame) -> str:
+        """Generate pH (Hue) distribution histogram from individual deposits with actual colors."""
+        fig, ax = plt.subplots(figsize=(8, 4))
+        
+        if deposit_data is not None and 'mean_hue' in deposit_data.columns:
+            # Filter out artifacts
+            valid_data = deposit_data[deposit_data['label'].isin(['normal', 'rod'])]
+            all_hues = valid_data['mean_hue'].dropna().values
+            
+            if len(all_hues) > 0:
+                # Bin size: 10 degrees
+                bins = np.arange(0, 370, 10)
+                
+                # Create histogram with colored bars based on hue values
+                n, bin_edges, patches = ax.hist(all_hues, bins=bins, edgecolor='white', alpha=0.8)
+                
+                # Color each bar based on its hue value
+                for patch, bin_left, bin_right in zip(patches, bin_edges[:-1], bin_edges[1:]):
+                    bin_center = (bin_left + bin_right) / 2
+                    patch.set_facecolor(hue_to_rgb(bin_center))
+                
+                ax.axvline(np.mean(all_hues), color='#333333', linestyle='--', 
+                          linewidth=2, label=f'Mean: {np.mean(all_hues):.1f}°')
+                
+                ax.set_xlabel('pH Indicator Hue (°)')
+                ax.set_ylabel('Number of Deposits')
+                ax.set_title('Distribution of pH Indicator (Hue)')
+                ax.legend()
+        
+        apply_publication_style(ax)
+        plt.tight_layout()
+        return self._fig_to_base64(fig)
+    
+    def _generate_circularity_distribution(self, deposit_data: pd.DataFrame) -> str:
+        """Generate circularity distribution histogram from individual deposits."""
+        fig, ax = plt.subplots(figsize=(8, 4))
+        
+        if deposit_data is not None and 'circularity' in deposit_data.columns:
+            # Filter out artifacts
+            valid_data = deposit_data[deposit_data['label'].isin(['normal', 'rod'])]
+            all_circ = valid_data['circularity'].dropna().values
+            
+            if len(all_circ) > 0:
+                # Bin size: 0.05
+                bins = np.arange(0, 1.05, 0.05)
+                
+                ax.hist(all_circ, bins=bins, color=DEFAULT_GRAY, edgecolor='white', alpha=0.8)
+                ax.axvline(np.mean(all_circ), color='#E53935', linestyle='--', 
+                          linewidth=2, label=f'Mean: {np.mean(all_circ):.3f}')
+                
+                ax.set_xlabel('Circularity (0-1)')
+                ax.set_ylabel('Number of Deposits')
+                ax.set_title('Distribution of Circularity')
+                ax.legend()
+                ax.set_xlim(0, 1)
+        
+        apply_publication_style(ax)
+        plt.tight_layout()
+        return self._fig_to_base64(fig)
+    
     def _generate_group_comparison(
         self, 
         film_summary: pd.DataFrame, 
         group_by: str
     ) -> str:
-        """Generate group comparison box plot as base64."""
+        """Generate group comparison box plot for ROD fraction (legacy)."""
+        return self._generate_metric_boxplot(film_summary, 'rod_fraction', group_by, 
+                                              'ROD Fraction (%)', scale=100)
+    
+    def _generate_metric_boxplot(
+        self,
+        film_summary: pd.DataFrame,
+        metric: str,
+        group_by: str,
+        ylabel: str = None,
+        scale: float = 1.0,
+        use_hue_colors: bool = False
+    ) -> str:
+        """Generate boxplot comparing groups for a specific metric."""
         fig, ax = plt.subplots(figsize=(10, 5))
         
-        groups = list(film_summary[group_by].unique())
-        data = [film_summary[film_summary[group_by] == g]['rod_fraction'] * 100 
+        groups = sorted(film_summary[group_by].dropna().unique())
+        
+        # Check if metric exists
+        if metric not in film_summary.columns:
+            plt.close(fig)
+            return ""
+        
+        data = [film_summary[film_summary[group_by] == g][metric].dropna() * scale 
                 for g in groups]
         
         bp = ax.boxplot(data, labels=groups, patch_artist=True)
         
-        # Use PASTEL_PALETTE for consistency with visualization module
-        for i, patch in enumerate(bp['boxes']):
-            patch.set_facecolor(PASTEL_PALETTE[i % len(PASTEL_PALETTE)])
-            patch.set_alpha(0.8)
+        # Color boxes
+        if use_hue_colors or 'hue' in metric.lower():
+            # Use actual hue values as colors for pH-related metrics
+            for i, (patch, group) in enumerate(zip(bp['boxes'], groups)):
+                mean_hue = film_summary[film_summary[group_by] == group][metric].mean()
+                if not np.isnan(mean_hue):
+                    patch.set_facecolor(hue_to_rgb(mean_hue))
+                else:
+                    patch.set_facecolor(DEFAULT_GRAY)
+                patch.set_alpha(0.8)
+        else:
+            # Use standard palette
+            for i, patch in enumerate(bp['boxes']):
+                patch.set_facecolor(PASTEL_PALETTE[i % len(PASTEL_PALETTE)])
+                patch.set_alpha(0.8)
         
-        ax.set_ylabel('ROD Fraction (%)')
-        ax.set_xlabel(group_by)
-        ax.set_title(f'ROD Fraction by {group_by}')
+        metric_label = self.get_metric_label(metric)
+        ax.set_ylabel(ylabel or metric_label)
+        ax.set_xlabel(group_by.replace('_', ' ').title())
+        ax.set_title(f'{metric_label} by {group_by.replace("_", " ").title()}')
         
-        # Apply publication style
         apply_publication_style(ax)
-        
         plt.tight_layout()
         return self._fig_to_base64(fig)
+    
+    def _generate_all_group_comparisons(
+        self,
+        film_summary: pd.DataFrame,
+        group_by: str
+    ) -> Dict[str, str]:
+        """Generate boxplots for all comparison metrics."""
+        plots = {}
+        
+        # Metrics to compare in order matching Summary section:
+        # Count, Area, IOD, pH(Hue), ROD, Circularity
+        comparison_metrics = [
+            ('n_total', 'Deposit Count', 1.0, False),
+            ('mean_area', 'Mean Deposit Area (px²)', 1.0, False),
+            ('total_iod', 'Total IOD', 1.0, False),
+            ('mean_hue', 'pH Indicator (Hue °)', 1.0, True),  # Use hue colors
+            ('rod_fraction', 'ROD Fraction (%)', 100.0, False),
+            ('mean_circularity', 'Mean Circularity', 1.0, False),
+        ]
+        
+        for metric, ylabel, scale, use_hue in comparison_metrics:
+            # Check if metric exists, try alternatives
+            actual_metric = metric
+            if metric == 'mean_hue':
+                # Try to use combined hue
+                if metric not in film_summary.columns:
+                    if 'normal_mean_hue' in film_summary.columns:
+                        actual_metric = 'normal_mean_hue'  # Fallback
+                    else:
+                        continue
+            if metric == 'mean_circularity':
+                # Try to use combined circularity
+                if metric not in film_summary.columns:
+                    if 'normal_mean_circularity' in film_summary.columns:
+                        actual_metric = 'normal_mean_circularity'  # Fallback
+                    else:
+                        continue
+            
+            if actual_metric in film_summary.columns:
+                plot = self._generate_metric_boxplot(
+                    film_summary, actual_metric, group_by, ylabel, scale, use_hue
+                )
+                if plot:
+                    plots[f'group_{metric}'] = plot
+        
+        return plots
     
     def _fig_to_base64(self, fig) -> str:
         """Convert matplotlib figure to base64 string."""
@@ -580,6 +807,16 @@ class ReportGenerator:
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }}
+        .plot-description {{
+            font-size: 0.9em;
+            color: #555;
+            margin-top: 10px;
+            text-align: left;
+            padding: 8px 12px;
+            background: #f8f9fa;
+            border-radius: 4px;
+            border-left: 3px solid #3949ab;
+        }}
         .two-column {{
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -623,65 +860,194 @@ class ReportGenerator:
                 <div class="value">{summary['total_deposits']}</div>
                 <div class="label">Total Deposits</div>
             </div>
-            <div class="stat-card normal">
-                <div class="value">{summary['total_normal']}</div>
-                <div class="label">Normal</div>
-            </div>
-            <div class="stat-card rod">
-                <div class="value">{summary['total_rod']}</div>
-                <div class="label">ROD</div>
-            </div>
             <div class="stat-card">
-                <div class="value">{summary['mean_rod_fraction']*100:.1f}%</div>
-                <div class="label">Mean ROD Fraction (±{summary['std_rod_fraction']*100:.1f}%)</div>
+                <div class="value">{summary['mean_circularity']:.3f}</div>
+                <div class="label">Mean Circularity</div>
             </div>
             <div class="stat-card">
                 <div class="value">{summary['mean_area']:.1f}</div>
                 <div class="label">Mean Area (px²)</div>
             </div>
             <div class="stat-card">
-                <div class="value">{summary['mean_circularity']:.3f}</div>
-                <div class="label">Mean Circularity</div>
+                <div class="value">{summary['mean_total_iod']:.0f}</div>
+                <div class="label">Mean IOD</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">{1.0 - summary['mean_density']:.3f}</div>
+                <div class="label">Mean Pigment Density</div>
             </div>
             <div class="stat-card">
                 <div class="value">{summary['mean_hue']:.1f}°</div>
-                <div class="label">Mean pH (Hue)</div>
+                <div class="label">Mean pH Indicator (Hue)</div>
             </div>
             <div class="stat-card">
-                <div class="value">{summary['mean_total_iod']:.0f}</div>
-                <div class="label">Mean IOD</div>
+                <div class="value">{summary['mean_rod_fraction']*100:.1f}%</div>
+                <div class="label">ROD Fraction (±{summary['std_rod_fraction']*100:.1f}%)</div>
             </div>
         </div>
 '''
         
-        # Add inline plots
-        if 'overview_bar' in inline_plots:
-            html += f'''
+        # Add distribution plots (2 columns x 3 rows)
+        if 'count_distribution' in inline_plots:
+            html += '''
+        <h3 style="color:#3949ab; margin-top:30px;">Distributions</h3>
+        
+        <!-- Row 1: Count and Area -->
         <div class="two-column">
             <div class="plot-container">
-                <img src="data:image/png;base64,{inline_plots['overview_bar']}" alt="Overview">
+'''
+            html += f'                <img src="data:image/png;base64,{inline_plots["count_distribution"]}" alt="Count Distribution">\n'
+            html += '''                <p class="plot-description">
+                    <strong>Deposit Count:</strong> Number of deposits detected per image (image-level).
+                </p>
             </div>
             <div class="plot-container">
-                <img src="data:image/png;base64,{inline_plots['rod_distribution']}" alt="ROD Distribution">
+'''
+            html += f'                <img src="data:image/png;base64,{inline_plots["area_distribution"]}" alt="Area Distribution">\n'
+            html += '''                <p class="plot-description">
+                    <strong>Deposit Size:</strong> Area of individual deposits in pixels² (deposit-level).
+                </p>
+            </div>
+        </div>
+        
+        <!-- Row 2: IOD and pH -->
+        <div class="two-column">
+            <div class="plot-container">
+'''
+            html += f'                <img src="data:image/png;base64,{inline_plots["iod_distribution"]}" alt="IOD Distribution">\n'
+            html += '''                <p class="plot-description">
+                    <strong>IOD (Integrated Optical Density):</strong> Pigment amount of individual deposits. IOD = Area × Density (deposit-level).
+                </p>
+            </div>
+            <div class="plot-container">
+'''
+            html += f'                <img src="data:image/png;base64,{inline_plots["ph_distribution"]}" alt="pH Distribution">\n'
+            html += '''                <p class="plot-description">
+                    <strong>pH Indicator (Hue):</strong> Hue of individual deposits. ~60° = acidic, ~240° = alkaline (deposit-level).
+                </p>
+            </div>
+        </div>
+        
+        <!-- Row 3: ROD and Circularity -->
+        <div class="two-column">
+            <div class="plot-container">
+'''
+            html += f'                <img src="data:image/png;base64,{inline_plots["rod_distribution"]}" alt="ROD Distribution">\n'
+            html += '''                <p class="plot-description">
+                    <strong>ROD Fraction:</strong> Percentage of ROD among all deposits per image (image-level).
+                </p>
+            </div>
+            <div class="plot-container">
+'''
+            html += f'                <img src="data:image/png;base64,{inline_plots["circularity_distribution"]}" alt="Circularity Distribution">\n'
+            html += '''                <p class="plot-description">
+                    <strong>Circularity:</strong> Shape regularity of individual deposits (0-1). 1.0 = perfect circle (deposit-level).
+                </p>
             </div>
         </div>
 '''
         
         html += '    </div>\n'
         
-        # Group comparison
+        # Group comparison - show metrics vertically with omnibus results
         if group_by and 'group_comparison' in inline_plots:
             group_label = self.get_metric_label(group_by)
             html += f'''
     <div class="section">
-        <h2>📈 Condition Comparison ({group_label})</h2>
-        <div class="plot-container">
-            <img src="data:image/png;base64,{inline_plots['group_comparison']}" alt="Group Comparison">
-        </div>
-    </div>
+        <h2>📈 Group Comparison ({group_label})</h2>
+        <p style="color:#666; margin-bottom:20px;">Comparing deposit characteristics across different {group_label.lower()} groups.</p>
 '''
+            
+            # Define metrics in order matching Summary section
+            # Order: Count, Area, IOD, pH(Hue), ROD, Circularity
+            group_metrics = [
+                ('group_n_total', 'n_total', 'Deposit Count', 'Number of deposits detected per image.'),
+                ('group_mean_area', 'mean_area', 'Deposit Size', 'Mean area of deposits in pixels².'),
+                ('group_total_iod', 'total_iod', 'Pigment Amount (IOD)', 'Total Integrated Optical Density per image.'),
+                ('group_mean_hue', 'mean_hue', 'pH Indicator (Hue)', 'pH indicator hue. Bar colors reflect actual pH-indicator colors.'),
+                ('group_rod_fraction', 'rod_fraction', 'ROD Fraction', 'Percentage of ROD among all deposits.'),
+                ('group_mean_circularity', 'mean_circularity', 'Circularity', 'Shape regularity (0-1). 1.0 = perfect circle.'),
+            ]
+            
+            # Build appendix index mapping
+            appendix_index = {}
+            idx = 1
+            for _, stat_key, _, _ in group_metrics:
+                if statistical_results and stat_key in statistical_results:
+                    appendix_index[stat_key] = idx
+                    idx += 1
+            
+            # Show each metric vertically: boxplot → description → omnibus result
+            for plot_key, stat_key, title, desc in group_metrics:
+                if plot_key not in inline_plots:
+                    continue
+                    
+                html += f'''        <div class="plot-container" style="margin-bottom:30px;">
+            <img src="data:image/png;base64,{inline_plots[plot_key]}" alt="{title}">
+            <p class="plot-description"><strong>{title}:</strong> {desc}</p>
+'''
+                
+                # Add omnibus test result if available
+                if statistical_results and stat_key in statistical_results:
+                    result = statistical_results[stat_key]
+                    if isinstance(result, dict) and 'error' not in result:
+                        appendix_num = appendix_index.get(stat_key, '?')
+                        
+                        if 'overall_test' in result:
+                            # 3+ groups: Omnibus test
+                            test_name = result['overall_test']
+                            p_val = result.get('overall_p_value', 1.0)
+                            is_sig = result.get('overall_significant', False)
+                            sig_icon = '✅' if is_sig else '❌'
+                            sig_text = 'At least one group differs' if is_sig else 'No significant difference'
+                            
+                            html += f'''            <div style="background:#f5f5f5; padding:10px; border-radius:5px; margin-top:10px;">
+                <strong>Omnibus Test:</strong> {test_name}, p = {p_val:.4f} {sig_icon} {sig_text}
+                <span style="color:#666; font-size:0.9em; margin-left:10px;">→ See Appendix {appendix_num} for pairwise comparisons</span>
+            </div>
+'''
+                        else:
+                            # 2 groups: Direct comparison
+                            test_name = result.get('test_name', 'N/A')
+                            p_val = result.get('p_value', 1.0)
+                            is_sig = result.get('significant', False)
+                            sig_icon = '✅' if is_sig else '❌'
+                            sig_text = 'Significant difference' if is_sig else 'No significant difference'
+                            
+                            html += f'''            <div style="background:#f5f5f5; padding:10px; border-radius:5px; margin-top:10px;">
+                <strong>Statistical Test:</strong> {test_name}, p = {p_val:.4f} {sig_icon} {sig_text}
+                <span style="color:#666; font-size:0.9em; margin-left:10px;">→ See Appendix {appendix_num} for details</span>
+            </div>
+'''
+                
+                html += '        </div>\n'
+            
+            # Add summary of significant differences (without bullet points)
+            if statistical_results and isinstance(statistical_results, dict):
+                significant_findings = []
+                for _, stat_key, title, _ in group_metrics:
+                    if stat_key in statistical_results:
+                        result = statistical_results[stat_key]
+                        if isinstance(result, dict) and 'error' not in result:
+                            if result.get('overall_significant') or result.get('significant'):
+                                p_val = result.get('overall_p_value', result.get('p_value', 1.0))
+                                significant_findings.append((title, p_val))
+                
+                if significant_findings:
+                    html += '''
+        <div class="highlight" style="background:#e8f5e9; border-left-color:#4caf50;">
+            <h4 style="margin-top:0; color:#2e7d32;">✅ Significant Differences Found</h4>
+            <p style="margin-bottom:0;">
+'''
+                    findings_text = ' · '.join([f'<strong>{m}</strong> (p={p:.4f})' for m, p in significant_findings])
+                    html += f'                {findings_text}\n'
+                    html += '''            </p>
+        </div>
+'''
+            
+            html += '    </div>\n'
         
-        # Statistical results - only show if there are valid results
+        # Statistical results - shown as Appendix
         has_valid_stats = (
             statistical_results 
             and isinstance(statistical_results, dict) 
@@ -692,34 +1058,37 @@ class ReportGenerator:
         if has_valid_stats:
             html += '''
     <div class="section">
-        <h2>📉 Statistical Analysis</h2>
+        <h2>📑 Appendix: Statistical Details</h2>
+        <p style="color:#666; margin-bottom:20px;">Detailed pairwise comparison results for group comparisons.</p>
 '''
-            for metric, result in statistical_results.items():
+            # Define metrics in order matching Summary/Group Comparison sections
+            ordered_metrics = [
+                ('n_total', 'Total Deposit Count'),
+                ('mean_area', 'Mean Deposit Area'),
+                ('total_iod', 'Total IOD'),
+                ('mean_hue', 'pH Indicator (Hue)'),
+                ('rod_fraction', 'ROD Fraction'),
+                ('mean_circularity', 'Mean Circularity'),
+            ]
+            
+            appendix_num = 0
+            for metric_key, metric_title in ordered_metrics:
+                if metric_key not in statistical_results:
+                    continue
+                    
+                result = statistical_results[metric_key]
+                
                 # Skip if result is not a dict or has error
                 if not isinstance(result, dict):
                     continue
                 if 'error' in result:
                     continue
                 
-                # Convert metric name to human-readable label
-                metric_label = self.get_metric_label(metric)
-                html += f'        <h3 style="color:#3949ab; margin-top:20px;">{metric_label}</h3>\n'
+                appendix_num += 1
+                html += f'        <h3 style="color:#3949ab; margin-top:20px;">{appendix_num}. {metric_title}</h3>\n'
                 
                 if 'overall_test' in result:
-                    # 3+ groups: Omnibus test + pairwise comparisons
-                    n_groups = result.get('n_groups', 0)
-                    group_names = result.get('group_names', [])
-                    
-                    html += f'''        <div style="background:#f5f5f5; padding:10px; border-radius:5px; margin-bottom:10px;">
-            <p><strong>🔬 Omnibus Test ({n_groups} groups):</strong> {result['overall_test']}</p>
-            <p style="margin-left:20px; color:#666;">
-                <em>Tests whether at least one group differs from the others</em>
-            </p>
-            <p><strong>p-value:</strong> {result['overall_p_value']:.4f} 
-            {'✅ At least one group is different' if result['overall_significant'] else '❌ No overall difference detected'}</p>
-        </div>
-'''
-                    # Show pairwise comparisons if available
+                    # 3+ groups: Show pairwise comparisons (omnibus already shown in Group Comparison)
                     pairwise = result.get('pairwise_comparisons', [])
                     if pairwise:
                         correction = result.get('correction_method', 'none')
@@ -728,11 +1097,8 @@ class ReportGenerator:
                         # Check if correction was applied
                         has_correction = any('p_value_corrected' in pw for pw in pairwise if 'error' not in pw)
                         
-                        html += f'''        <div style="margin-top:15px;">
+                        html += f'''        <div style="margin-top:10px;">
             <p><strong>🔄 Pairwise Comparisons{correction_label}:</strong></p>
-            <p style="margin-left:20px; color:#666; margin-bottom:10px;">
-                <em>Tests which specific group pairs are different</em>
-            </p>
             <table style="width:100%; border-collapse:collapse; font-size:0.9em;">
                 <thead>
                     <tr style="background:#e8eaf6;">
@@ -796,9 +1162,21 @@ class ReportGenerator:
             </p>
         </div>
 '''
-                    # Show group statistics summary
+                    # Show group statistics summary (sorted: Normal first, then others, ROD last)
                     group_stats = result.get('group_statistics', {})
                     if group_stats:
+                        # Sort groups: 'normal' first, then alphabetically, 'rod' last
+                        def sort_key(name):
+                            name_lower = name.lower()
+                            if name_lower == 'normal':
+                                return (0, name)
+                            elif name_lower == 'rod':
+                                return (2, name)
+                            else:
+                                return (1, name)
+                        
+                        sorted_groups = sorted(group_stats.keys(), key=sort_key)
+                        
                         html += '''        <div style="margin-top:15px;">
             <p><strong>📊 Group Statistics:</strong></p>
             <table style="width:100%; border-collapse:collapse; font-size:0.9em;">
@@ -813,7 +1191,8 @@ class ReportGenerator:
                 </thead>
                 <tbody>
 '''
-                        for gname, gstat in group_stats.items():
+                        for gname in sorted_groups:
+                            gstat = group_stats[gname]
                             mean_val = gstat.get('mean', 0)
                             std_val = gstat.get('std', 0)
                             median_val = gstat.get('median', 0)
@@ -833,17 +1212,30 @@ class ReportGenerator:
         </div>
 '''
                 else:
-                    # 2 groups: Direct comparison
+                    # 2 groups: Direct comparison - sort Normal first
+                    g1_name = result.get('group1_name', 'Group1')
+                    g2_name = result.get('group2_name', 'Group2')
+                    g1_mean = result.get('mean1', 0)
+                    g1_std = result.get('std1', 0)
+                    g2_mean = result.get('mean2', 0)
+                    g2_std = result.get('std2', 0)
+                    
+                    # Sort: Normal first
+                    if g2_name.lower() == 'normal' and g1_name.lower() != 'normal':
+                        g1_name, g2_name = g2_name, g1_name
+                        g1_mean, g2_mean = g2_mean, g1_mean
+                        g1_std, g2_std = g2_std, g1_std
+                    
                     html += f'''        <div style="background:#f5f5f5; padding:10px; border-radius:5px;">
             <p><strong>🔬 Two-Group Comparison:</strong> {result.get('test_name', 'N/A')}</p>
             <table style="width:100%; border-collapse:collapse; font-size:0.9em; margin:10px 0;">
                 <tr>
-                    <td style="padding:8px; border:1px solid #ddd;"><strong>{result.get('group1_name', 'Group1')}</strong></td>
-                    <td style="padding:8px; text-align:center; border:1px solid #ddd;">{result.get('mean1', 0):.3f} ± {result.get('std1', 0):.3f}</td>
+                    <td style="padding:8px; border:1px solid #ddd;"><strong>{g1_name}</strong></td>
+                    <td style="padding:8px; text-align:center; border:1px solid #ddd;">{g1_mean:.3f} ± {g1_std:.3f}</td>
                 </tr>
                 <tr>
-                    <td style="padding:8px; border:1px solid #ddd;"><strong>{result.get('group2_name', 'Group2')}</strong></td>
-                    <td style="padding:8px; text-align:center; border:1px solid #ddd;">{result.get('mean2', 0):.3f} ± {result.get('std2', 0):.3f}</td>
+                    <td style="padding:8px; border:1px solid #ddd;"><strong>{g2_name}</strong></td>
+                    <td style="padding:8px; text-align:center; border:1px solid #ddd;">{g2_mean:.3f} ± {g2_std:.3f}</td>
                 </tr>
             </table>
             <p><strong>p-value:</strong> {result.get('p_value', 0):.4f} 
@@ -920,9 +1312,9 @@ class ReportGenerator:
     </div>
 '''
         
-        # Comprehensive Statistics Section
-        if comprehensive_stats and isinstance(comprehensive_stats, dict):
-            html += self._build_comprehensive_stats_html(comprehensive_stats)
+        # Comprehensive Statistics Section - REMOVED (integrated into other sections)
+        # if comprehensive_stats and isinstance(comprehensive_stats, dict):
+        #     html += self._build_comprehensive_stats_html(comprehensive_stats)
         
         html += '''    
     <div class="footer">

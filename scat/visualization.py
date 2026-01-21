@@ -77,6 +77,8 @@ FEATURE_LABELS = {
     'mean_lightness': 'Pigment Density (Lightness)',
     'normal_mean_lightness': 'Normal Pigment Density (Lightness)',
     'rod_mean_lightness': 'ROD Pigment Density (Lightness)',
+    'pigment_density': 'Pigment Density',
+    'mean_pigment_density': 'Mean Pigment Density',
     # Shape features (morphology)
     'circularity': 'Circularity',
     'normal_mean_circularity': 'Normal Circularity',
