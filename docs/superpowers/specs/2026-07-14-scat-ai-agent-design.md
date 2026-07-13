@@ -98,6 +98,20 @@ docs/superpowers/specs/2026-07-14-scat-ai-agent-design.md  (this file)
   fuses provider+runner and re-exposes the *same* `turn()/reset()/cancel()`
   surface. The CLI/agent front-ends treat both runners identically.
 
+**Runner parity contract (the two paths are NOT automatically equivalent).**
+The same `turn()` surface hides different internals (the API path's `AgentRunner`
+owns the loop, compaction, provenance, retries, `max_loops`; the subscription
+path delegates the loop and tool execution to the SDK/CLI). Both runners MUST
+guarantee the same *observable* behavior: (a) `cancel()` stops at the next tool
+boundary; (b) **every** tool invocation is provenance-logged regardless of who
+drives the loop (so the subscription bridge must record calls itself); (c) a tool
+exception surfaces as an `is_error` result, not a crashed turn; (d) `max_loops`
+is enforced. What the subscription path **cannot** match and is documented as
+such: server-side context compaction and token/cost accounting are owned by the
+SDK, so the durable-ledger-in-system-prompt (§7) is the portable substitute, and
+cost metering exists only on the API path. This divergence is called out so
+callers never assume identical semantics.
+
 ### 4.3 Backend selection (`backend.build_runner()`)
 1. If `subscription_available()` (Claude Agent SDK importable + `claude` on PATH
    + a login: `CLAUDE_CODE_OAUTH_TOKEN` or `~/.claude/.credentials.json`) →
@@ -106,6 +120,27 @@ docs/superpowers/specs/2026-07-14-scat-ai-agent-design.md  (this file)
    the subscription.
 2. Elif `ANTHROPIC_API_KEY` set → `AgentRunner(AnthropicApiProvider(model="claude-opus-4-8"))`.
 3. Else → a clear error explaining both options.
+
+**Observability (required).** The selection is silent-surprise-prone (auto-
+preferring subscription, popping API env vars). On startup, loudly log the
+chosen backend, model, and **whether API billing is possible** ("using Claude
+subscription — no API charges" vs "using ANTHROPIC_API_KEY — requests are
+billed"), so a user never unknowingly bills the API. `agent.backend` can be
+forced to `subscription`/`api` to override auto.
+
+### 4.4 Plain services beneath thin tools (avoid the "@tool == domain API" trap)
+
+The reusable orchestration is **plain Python**, not a tool. `scat/pipeline.py`
+exposes `analyze_folder(path, groups=None, ...) -> AnalyzeResult` (and the
+stats/report/scan services) as ordinary typed functions with rich return types.
+The `@tool` in `scat/tools/` is a **thin adapter**: it calls the plain service,
+then compacts the return into an LLM-sized dict. So:
+- The CLI `analyze` command and (phase 2) the GUI Run button call the **plain
+  services**, never the `@tool` — no JSON-schema/LLM-argument-shape/compact-
+  return constraints leak into CLI/GUI internals.
+- Only the agent path imports the registry/pydantic/anthropic (see §12).
+This keeps "collapse to one path" honest: the *service* is the single canonical
+implementation; chat, CLI, and GUI are three thin front doors onto it.
 
 ## 5. Tool set
 
@@ -143,9 +178,26 @@ Deterministic, not prompt-driven, so grouping is reliable:
    position(s) that **vary** across files; match against a condition vocabulary
    (control/ctrl/wt/treated/treatment/mutant/dose/timepoint/genotype + numeric
    replicate suffixes) to pick the grouping token.
-3. Group files by that token; return `{group: [files]}`, the tokens matched, a
-   confidence signal, and any `unmatched` files.
+3. Group files by that token; return the canonical **`{file: group}`** mapping
+   (per-file, so `unmatched` files are explicit), plus the tokens matched, the
+   inferred **role** of the varying token (condition vs replicate vs dose vs
+   timepoint — from the vocabulary match), and a **confidence** score.
 4. Fallback: no structure found → single cohort (no comparison).
+
+**Join key.** SCAT merges metadata on the `filename` column, which is the image
+**basename** (`Path(path).name`, per `analyzer.py`). So `_build_group_metadata`
+keys on basename. **Risk:** subfolder-based grouping can produce duplicate
+basenames across subfolders, which would mis-join — in that case
+`infer_groups`/`analyze_folder` must disambiguate (prefix the group, or key on a
+relative path and expose it as `filename`). This is called out as a required
+edge case, not an assumption.
+
+**Confidence & the bias-to-action exception.** Numeric suffixes are ambiguous
+(replicate vs dose vs timepoint vs plate-row vs image index), and real names mix
+delimiters (`ctrl_rep1_flyA`, `drug10uM_rep2`). The parser is conservative:
+below a confidence threshold it does **not** silently group — it surfaces the
+proposal prominently and recommends confirmation or an explicit metadata CSV.
+Grouping ambiguity is the one sanctioned exception to §6's "don't ask" stance.
 
 Unassigned files are labeled with the sentinel `'ungrouped'` so
 `statistics.run_all_tests`' existing filter keeps working.
@@ -172,8 +224,8 @@ Reuse Imajin's prompt *structure*, none of its confocal/napari/Korean content:
 2. **Bias to action** — given a folder, run the whole pipeline to completion;
    don't ask clarifying questions unless genuinely ambiguous.
 3. **Pipeline recipe**: "analyze this folder" → `scan_folder` → `infer_groups` →
-   `apply_groups` → `analyze_folder` → (if ≥2 groups) `run_statistics` →
-   `generate_report`. State the inferred grouping to the user.
+   `analyze_folder(groups=<mapping>)` → (if ≥2 groups) `run_statistics` →
+   `generate_report`. State the inferred grouping to the user before analyzing.
 4. **Statistics guardrail** (domain-neutral, high value): you assert the design
    (paired vs independent); for 3+ groups report the omnibus p + a
    multiplicity-corrected post-hoc, not uncorrected pairwise; relay warnings
@@ -191,8 +243,16 @@ Reuse Imajin's prompt *structure*, none of its confocal/napari/Korean content:
 - **Tool-result compaction** in the runner (cap ~4000 chars; SCAT payloads are
   small dicts, so mostly a safety net); message compaction if the transcript
   grows; **orphaned-`tool_result` backfill** preserved (Anthropic 400s otherwise).
-- **Provenance** (`provenance.py`): append every tool call to a session JSONL —
-  reproducible run log and the basis for a future "methods" section.
+- **Provenance** (`provenance.py`): append every tool call to a session JSONL.
+  For real reproducibility the run header records more than calls: **dataset
+  fingerprint** (folder path + file count + a hash of sorted basenames+sizes),
+  **SCAT version + git commit**, **config snapshot**, **model id / classifier
+  model path + hash**, and the **grouping mapping + confidence**. This is the
+  basis for a future "methods" section.
+- **Idempotency / no overwrite:** `analyze_folder` writes to a **timestamped**
+  output dir (`get_timestamped_output_dir`), so re-running never overwrites or
+  mixes results. The durable ledger and `run_statistics`/`generate_report` take
+  an explicit `results_dir`, so "regenerate the report" targets a specific run.
 
 ## 8. Agent-first slimdown (what the new design removes/simplifies)
 
@@ -263,6 +323,23 @@ provider/model selection. The subscription path needs no secret in config.
 - If `< 2` groups, statistics is **explicitly skipped with a note** ("stats
   skipped: N groups"), never a silent no-op.
 
+### 10.1 Cost, latency, and cancellation
+
+Cost is inherently **low**: because tools are coarse, a whole folder is **one**
+`analyze_folder` tool call (pure local compute, no per-image LLM), so a 500-image
+run is ~5 LLM turns total, not 500. `max_loops=40` is a runaway backstop, not the
+expected depth (~5). Still add:
+- **Progress independent of model turns:** `analyze_folder` streams per-image
+  progress via a `report_progress` contextvar (rendered by the CLI/chat), so the
+  user sees "142/500" during the pure-compute turn, not just at tool return.
+- **Cooperative cancellation:** the batch loop checks a `raise_if_cancelled`
+  token per image, so a chat "stop" actually halts analysis at the next image
+  (documented as cooperative, not preemptive).
+- **Wall-clock guardrails:** an overall turn timeout; a large-batch heads-up
+  (e.g. ">N images — proceeding, this may take a while") rather than a blocking
+  confirm (bias-to-action), configurable.
+- On the API path only, surface token usage per turn (from `Stop.usage`).
+
 ## 11. Testing (pytest; no real LLM required)
 
 - `registry`: a sample `@tool` produces the expected JSON schema from its hints.
@@ -273,6 +350,17 @@ provider/model selection. The subscription path needs no secret in config.
   blocks, driving `AgentRunner` end-to-end through `analyze_folder` on the
   synthetic-image fixture (reused from the bugfix test suite) with **no network**.
 - `backend`: selection logic (subscription available / only key / neither).
+- **Parity / anti-drift gate (required for v1):** the new plain-service
+  `analyze_folder` path must produce output **byte-identical** to the current
+  pipeline on the synthetic fixture (`image_summary.csv`, `all_deposits.csv`) —
+  the same diff-based check used in the bugfix pass. This is the guard against
+  the v1/phase-2 sequencing trap (CLI/agent on the new path while the GUI is
+  still on the old one).
+- **Subscription bridge contract test:** a focused test against the real Claude
+  Agent SDK bridge (guarded/skipped when the SDK/`claude` login is absent) that
+  verifies a tool round-trips: schema is accepted, a compact dict result returns,
+  a raised exception maps to an error result, and a `worker=True` tool runs. The
+  `FakeProvider` cannot cover the bridge; this closes that gap.
 
 ## 12. Dependencies
 
@@ -283,6 +371,14 @@ agent = ["anthropic>=0.40", "pydantic>=2.0", "claude-agent-sdk"]
 ```
 `anthropic` + `pydantic` are required for the agent layer; `claude-agent-sdk` is
 needed only for the subscription path (import guarded).
+
+**Packaging guard (required).** Core SCAT must import and run without the
+`[agent]` extra. `pydantic`/`anthropic`/`claude-agent-sdk` are imported **only**
+under `scat/agent/` and `scat/tools/`, never by `scat/analyzer.py`,
+`scat/pipeline.py`, or the CLI `analyze` command (which calls the plain services
+per §4.4). `python -m scat.cli analyze ...` and `import scat` must work with just
+the base dependencies; only `python -m scat.cli chat` requires `[agent]`. A smoke
+test asserts core import without the extra installed.
 
 ## 13. Phasing summary
 
@@ -305,3 +401,16 @@ needed only for the subscription path (import guarded).
 - `infer_groups` heuristics won't cover every naming scheme; the mapping is always
   surfaced in chat so the user can correct, and an explicit metadata CSV path
   remains a supported override.
+- **Two-runner non-equivalence** (subscription vs API): mitigated by the runner
+  parity contract (§4.2) and the documented divergences (compaction/cost). Track:
+  keep provenance/cancel/error-shape behavior tested on both.
+- **Subscription MCP bridge is external and version-fragile**: mitigated by
+  pinning the SDK, the bridge contract test (§11), and duck-typed translation
+  matching Imajin's working bridge. An SDK upgrade requires re-running that test.
+
+> This revision folds an independent Codex (gpt-5.5) review: fixed the
+> `apply_groups` recipe/return-shape inconsistencies; added the join-key contract
+> and conservative grouping confidence (§5.1); the runner parity contract (§4.2);
+> auth observability (§4.3); the plain-services-under-thin-tools rule (§4.4);
+> provenance enrichment + idempotency (§7); cost/progress/cancel controls (§10.1);
+> the parity gate + bridge contract test (§11); and the packaging guard (§12).
