@@ -14,6 +14,82 @@
 
 ---
 
+## Codex review — corrections applied (READ FIRST; these override the task bodies below where they conflict)
+
+An independent Codex review (which grepped the real SCAT code) found 15 issues; corrections:
+
+- **C1 (Task 5 test payload):** `_compact_value` truncates strings to 1200 chars *before* the 6000-char fallback, so a single 20k string never triggers "compacted". Use a many-key payload instead:
+  `big = {f"k{i}": "y" * 300 for i in range(40)}` → after per-item compaction still >6000 chars → the fallback with `"compacted"` note fires.
+- **C2 + C10 (Task 7 duplicate basenames):** the dict `{p.name: p.parent.name}` silently drops duplicate keys, so the dup warning never fires; and SCAT merges metadata on basename `filename`, so duplicate basenames across subfolders **cannot be represented**. Fix `infer_groups_from_folder`: compute duplicates from the full image list first, and if the subfolder layout has duplicate basenames, **refuse subfolder grouping** — return `basis="single_cohort"`, `confidence="low"`, and a warning telling the user to flatten/rename (do NOT emit a mis-joining mapping). Corrected block:
+  ```python
+  from collections import Counter
+  names = [p.name for p in images]
+  dups = [n for n, c in Counter(names).items() if c > 1]
+  sub = {p.name: p.parent.name for p in images if p.parent != root}
+  if sub and len(set(sub.values())) >= 2:
+      if dups:
+          return {"mapping": {n: "all" for n in names}, "basis": "single_cohort",
+                  "groups": ["all"], "confidence": "low", "unmatched": [],
+                  "warnings": [f"duplicate basenames across subfolders {dups[:5]} — SCAT keys on basename, "
+                               "so subfolder grouping is unsafe here; flatten or rename before grouping."],
+                  "matched_tokens": []}
+      return {"mapping": sub, "basis": "subfolder", "groups": sorted(set(sub.values())),
+              "confidence": "high", "unmatched": [], "warnings": [], "matched_tokens": []}
+  ```
+  The Task-7 test `test_duplicate_basename_across_subfolders_flagged` then asserts `basis=="single_cohort"`, `confidence=="low"`, and a "duplicate" warning.
+- **C3 (Task 2 test isolation):** do NOT clear the process-global `_REGISTRY` (it corrupts full-suite runs — `scat.tools` may already be imported and won't re-register). Instead register the demo tool and assert it is *present* among the specs (don't assert `len == 1`):
+  ```python
+  @registry.tool(description="demo")
+  def demo(path: str, min_area: int = 20) -> dict: return {"path": path}
+  specs = {s["name"]: s for s in registry.tools_for_anthropic()}
+  s = specs["demo"]; props = s["input_schema"]["properties"]
+  assert props["path"]["type"] == "string" and props["min_area"]["type"] == "integer"
+  ```
+- **C4 + C5 (Task 5 runner error path):** the `attempt += 1` branch is dead and non-context exceptions get mislabeled/swallowed; history is left dirty. Replace the whole `try/except` around the stream with: on ANY exception, pop the trailing user message, yield `TextDelta("\n[error: <exc>]\n")` + `TurnDone("error", total_usage)`, and `return`. No `attempt`, no context-limit special-casing (compaction is deferred). Corrected inner block:
+  ```python
+  try:
+      for event in self.provider.stream(self.messages, tools_spec, self.system_prompt):
+          ...  # (unchanged event handling)
+  except Exception as exc:
+      if self.messages and self.messages[-1]["role"] == "user":
+          self.messages.pop()          # keep history clean
+      yield TextDelta(f"\n[error: {exc}]\n")
+      yield TurnDone("error", total_usage); return
+  ```
+  (Delete the `while True:`/`attempt` wrapper entirely; the `for event ...` runs once inside the `try`.)
+- **C6 (Task 5/12 backfill test):** add a FakeProvider case with TWO tool_use blocks where one tool raises, asserting both get a `ToolResult` (error one flagged) and history ends with a single user message whose blocks are all `tool_result`.
+- **C7 (Task 6 stats→report shape):** `report.generate_report` expects the **flat metrics mapping**, not the whole `run_comprehensive_analysis` dict. `generate_report_service` must extract it:
+  ```python
+  metrics = None
+  if statistical_results:
+      metrics = statistical_results.get("basic", {}).get("metrics") or statistical_results
+  return generate_report(film, output_dir=rd, deposit_data=deposits,
+                         statistical_results=metrics, group_by=group_by, format="html")
+  ```
+- **C8 (Task 13 parity):** also compare `image_summary.csv` (not just `all_deposits.csv`), and add a grouped variant (pass `groups={...}` and assert the `group` column appears + `condition_summary.csv` exists). Keep the byte-identical `all_deposits` check as the core anti-drift guard.
+- **C9 (Task 13 CLI flags):** preserve `--edge-margin` and `--visualize`; `--report` default comes from `config.get("analysis.report", True)`. Add `edge_margin: int = 20` and `visualize: bool = False` params to `analyze_folder_service` (pass `edge_margin` to `DepositDetector`; when `visualize`, call `scat.visualization.generate_all_visualizations(film_summary, deposit_data, out/'visualizations', group_by=...)` inside a `try/except ImportError`). Handle comma `--group-by` by taking the first column.
+- **C12 (Task 11 bridge fake-SDK test):** add a unit test that installs a stub `claude_agent_sdk` into `sys.modules` (capturing `tool(name, desc, schema)` and `create_sdk_mcp_server(...)` calls), builds the server via `ClaudeSubscriptionRunner._build_server()`, and asserts the allowed-tool names are `mcp__scat__<toolname>` for each registered tool. This covers the bridge without a login.
+- **C13 (Task 14 grep):** narrow to config-key strings only:
+  `grep -rn '"detection.sensitive_mode"\|"detection.edge_margin"\|"analysis.group_by"\|"last_metadata_path"\|analysis\.group_by' scat/` — expect no matches after deletion. (Detector constructor args `sensitive_mode=`/`edge_margin=` are unrelated and stay.)
+- **C14 (Task 14 real packaging guard):** make it a subprocess that blocks the extras via a meta-path finder, then imports core:
+  ```python
+  code = ("import sys\n"
+          "class B:\n"
+          "  def find_spec(self, n, p=None, t=None):\n"
+          "    if n.split('.')[0] in {'pydantic','anthropic','claude_agent_sdk'}:\n"
+          "      raise ImportError(n)\n"
+          "sys.meta_path.insert(0, B())\n"
+          "import scat, scat.analyzer, scat.pipeline, scat.grouping_util\n"
+          "from scat.pipeline import scan_folder_service\n"
+          "print('ok')\n")
+  out = subprocess.check_output([sys.executable, "-c", code], text=True); assert out.strip() == "ok"
+  ```
+  (If this fails, a core module imports an agent-only dep at top level — that is the bug the guard catches.)
+- **C15 (Task 10 dropped):** the `context.py` ledger is unused in v1 (never wired into the runner, which has a static system prompt) and cross-session resume is a phase-2 non-goal. **Skip Task 10 for v1**; move the durable ledger to phase 2 alongside resume (where the runner rebuilds its system prompt per turn). Remove `scat/agent/context.py` and `tests/test_context.py` from this plan.
+- **C11 (import cycle):** confirmed lazy-safe (pipeline imports `grouping_util` only inside the function). No change; just build Task 7 before running any grouped-analysis path.
+
+---
+
 ## File structure (created by this plan)
 
 ```
