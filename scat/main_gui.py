@@ -34,17 +34,17 @@ from PySide6.QtWidgets import (
     QGraphicsView, QGraphicsScene, QListWidget, QMenu, 
     QRadioButton, QTreeWidget, QTreeWidgetItem, QFrame
 )
-from PySide6.QtCore import Qt, QThread, Signal, QSize, QTimer, QRectF
+from PySide6.QtCore import Qt, QThread, Signal, QSize, QRectF
 from PySide6.QtGui import (
-    QFont, QPixmap, QImage, QIcon, QKeySequence, 
+    QFont, QPixmap, QIcon, QKeySequence,
     QColor, QShortcut, QFontDatabase, QPainter
 )
 
 # Import SCAT modules
 from .detector import DepositDetector
-from .classifier import ClassifierConfig, get_classifier
+from .classifier import ClassifierConfig
 from .analyzer import Analyzer, ReportGenerator
-from .config import config, get_timestamped_output_dir, DEFAULT_CONFIG
+from .config import config, get_timestamped_output_dir
 from .ui_common import (
     Theme, NoScrollSpinBox, NoScrollDoubleSpinBox, NoScrollComboBox,
     load_custom_fonts, get_icon_path
@@ -1535,20 +1535,22 @@ class AnalysisTab(QWidget):
         """Enable/disable report options based on analysis mode."""
         # In Quick mode, disable report-related options
         report_widgets = [
-            self.annotate,
-            self.visualize,
-            self.spatial,
-            self.stats,
-            self.report
+            (self.annotate, 'annotate'),
+            (self.visualize, 'visualize'),
+            (self.spatial, 'spatial'),
+            (self.stats, 'stats'),
+            (self.report, 'report'),
         ]
-        
-        for widget in report_widgets:
+
+        for widget, config_key in report_widgets:
             widget.setEnabled(not quick_mode)
             if quick_mode:
                 widget.setChecked(False)
             else:
-                # Restore to config defaults when Full mode selected
-                pass
+                # Restore each option from its saved config default, otherwise
+                # switching Quick -> Full would leave a Full analysis with every
+                # report/visualization option silently unchecked.
+                widget.setChecked(config.get(f"analysis.{config_key}", True))
         
         # Update Options group title to indicate state
         if quick_mode:
@@ -2021,7 +2023,7 @@ class ResultsTab(QWidget):
         
         self.summary_table.setSortingEnabled(False)  # Disable during population
         self.summary_table.setRowCount(len(film_summary))
-        for i, row in film_summary.iterrows():
+        for i, (_, row) in enumerate(film_summary.iterrows()):
             self.summary_table.setItem(i, 0, QTableWidgetItem(str(row['filename'])))
             # Use NumericTableWidgetItem for numeric columns for proper sorting
             self.summary_table.setItem(i, 1, NumericTableWidgetItem(row['n_normal'], "{:.0f}"))
@@ -2462,8 +2464,6 @@ class ResultsTab(QWidget):
         QApplication.processEvents()
         
         try:
-            import cv2
-            
             # Reload data from CSV files (support both new and old naming)
             summary_path = output_dir / 'image_summary.csv'
             if not summary_path.exists():
@@ -2574,8 +2574,7 @@ class ResultsTab(QWidget):
                 deposit_data=deposit_data, 
                 statistical_results=stats_results.get('basic', {}).get('metrics', {}),
                 visualization_paths=viz_results,
-                group_by=self.results.get('group_by'),
-                comprehensive_stats=stats_results  # Pass all analysis results
+                group_by=self.results.get('group_by')
             )
             
             self.progress.setValue(100)

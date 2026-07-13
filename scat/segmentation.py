@@ -518,6 +518,7 @@ class SegmentationTrainer:
         
         # Create model
         in_channels = X.shape[1]
+        self.in_channels = in_channels
         self.model = UNet.create(in_channels=in_channels, out_channels=1)
         self.model = self.model.to(self.device)
         
@@ -531,8 +532,7 @@ class SegmentationTrainer:
             mode='min', 
             factor=0.5,      # LR *= 0.5 when plateau
             patience=5,      # Wait 5 epochs before reducing
-            min_lr=1e-6,
-            verbose=True
+            min_lr=1e-6
         )
         
         # Training loop with early stopping
@@ -635,6 +635,7 @@ class SegmentationTrainer:
         torch.save({
             'model_state_dict': self.model.state_dict(),
             'image_size': self.image_size,
+            'in_channels': getattr(self, 'in_channels', 3),
         }, path)
         
         print(f"Model saved to {path}")
@@ -646,7 +647,7 @@ class SegmentationTrainer:
         checkpoint = torch.load(path, map_location=self.device)
         self.image_size = checkpoint.get('image_size', 256)
         
-        self.model = UNet.create(in_channels=3, out_channels=1)
+        self.model = UNet.create(in_channels=checkpoint.get('in_channels', 3), out_channels=1)
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.model = self.model.to(self.device)
         self.model.eval()
@@ -678,7 +679,7 @@ class UNetDetector:
         checkpoint = torch.load(path, map_location=self.device)
         self.image_size = checkpoint.get('image_size', 256)
         
-        self.model = UNet.create(in_channels=3, out_channels=1)
+        self.model = UNet.create(in_channels=checkpoint.get('in_channels', 3), out_channels=1)
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.model = self.model.to(self.device)
         self.model.eval()

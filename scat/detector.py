@@ -63,7 +63,6 @@ class DepositDetector:
         c_value: int = 10,
         edge_margin: int = 20,
         sensitive_mode: bool = False,
-        min_circularity: float = 0.3,
         unet_model_path: Optional[str] = None
     ):
         self.min_area = min_area
@@ -72,8 +71,7 @@ class DepositDetector:
         self.c_value = c_value
         self.edge_margin = edge_margin
         self.sensitive_mode = sensitive_mode
-        self.min_circularity = min_circularity
-        
+
         # U-Net model (lazy loaded)
         self.unet_model_path = unet_model_path
         self._unet_detector = None
@@ -109,20 +107,24 @@ class DepositDetector:
         deposits = self._process_contours(all_contours, image.shape[:2])
         return deposits
     
-    def _single_level_detect(self, gray: np.ndarray) -> List[np.ndarray]:
-        """Standard adaptive threshold detection."""
+    def _binary_threshold(self, gray: np.ndarray) -> np.ndarray:
+        """Adaptive Gaussian threshold (inverse) + open/close morphology cleanup."""
         thresh = cv2.adaptiveThreshold(
-            gray, 255, 
+            gray, 255,
             cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
             cv2.THRESH_BINARY_INV,
-            self.block_size, 
+            self.block_size,
             self.c_value
         )
-        
+
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
         thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
         thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
-        
+        return thresh
+
+    def _single_level_detect(self, gray: np.ndarray) -> List[np.ndarray]:
+        """Standard adaptive threshold detection."""
+        thresh = self._binary_threshold(gray)
         contours, _ = cv2.findContours(
             thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
         )
@@ -189,8 +191,10 @@ class DepositDetector:
             mean_v = np.mean(v_channel)
             std_v = np.std(v_channel)
             
-            # Regions slightly darker than background
-            threshold_v = int(mean_v - 0.4 * std_v)
+            # Regions slightly darker than background. Clamp to a valid range:
+            # a negative threshold with THRESH_BINARY_INV zeroes out the whole
+            # mask, silently disabling this dilute-deposit detection pass.
+            threshold_v = int(np.clip(mean_v - 0.4 * std_v, 1, 254))
             _, thresh_v = cv2.threshold(v_channel, threshold_v, 255, cv2.THRESH_BINARY_INV)
             sensitive_masks.append(thresh_v)
             
@@ -322,17 +326,4 @@ class DepositDetector:
             gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
         else:
             gray = image.copy()
-            
-        thresh = cv2.adaptiveThreshold(
-            gray, 255,
-            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY_INV,
-            self.block_size,
-            self.c_value
-        )
-        
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-        thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
-        thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
-        
-        return thresh
+        return self._binary_threshold(gray)

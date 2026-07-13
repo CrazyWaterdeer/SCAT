@@ -1100,7 +1100,9 @@ class LabelingWindow(QMainWindow):
         self.detector.sensitive_mode = True  # Always match Analysis tab
         self.deposits = self.detector.detect(self.image)
         self.deposits = self.extractor.extract_features(self.image, self.deposits)
-        self.next_id = len(self.deposits)
+        # Detector assigns ids 1..N, so the next free id is max(id)+1.
+        # (len(deposits) would collide with the last detected deposit's id.)
+        self.next_id = max((d.id for d in self.deposits), default=0) + 1
         
         for item in self.viewer.deposit_items:
             self.viewer.scene.removeItem(item)
@@ -1706,6 +1708,7 @@ class LabelingWindow(QMainWindow):
                     self.viewer.scene.removeItem(item)
                 self.viewer.deposit_items.clear()
                 self.viewer.selected_item = None
+                self.viewer.selected_items.clear()
                 self.deposits.clear()
                 
                 for saved in data['deposits']:
@@ -1859,31 +1862,32 @@ class LabelingWindow(QMainWindow):
             return
         
         try:
-            # 1. Update individual CSV
+            # 1. Build the per-image deposit DataFrame. Do this unconditionally:
+            #    it is reused for the all_deposits.csv update below, which must
+            #    not depend on the deposits/ directory existing.
+            rows = []
+            for d in self.deposits:
+                rows.append({
+                    'id': d.id,
+                    'filename': filename,
+                    'x': d.centroid[0],
+                    'y': d.centroid[1],
+                    'width': d.width,
+                    'height': d.height,
+                    'area_px': d.area,
+                    'circularity': d.circularity,
+                    'aspect_ratio': d.aspect_ratio,
+                    'mean_hue': d.mean_hue,
+                    'mean_saturation': d.mean_saturation,
+                    'mean_lightness': d.mean_lightness,
+                    'label': d.label,
+                    'confidence': d.confidence
+                })
+            df = pd.DataFrame(rows)
+
             deposits_dir = output_dir / 'deposits'
             if deposits_dir.exists():
                 csv_path = deposits_dir / f"{stem}_deposits.csv"
-                
-                # Create DataFrame from deposits
-                rows = []
-                for d in self.deposits:
-                    rows.append({
-                        'id': d.id,
-                        'filename': filename,
-                        'x': d.centroid[0],
-                        'y': d.centroid[1],
-                        'width': d.width,
-                        'height': d.height,
-                        'area_px': d.area,
-                        'circularity': d.circularity,
-                        'aspect_ratio': d.aspect_ratio,
-                        'mean_hue': d.mean_hue,
-                        'mean_saturation': d.mean_saturation,
-                        'mean_lightness': d.mean_lightness,
-                        'label': d.label,
-                        'confidence': d.confidence
-                    })
-                df = pd.DataFrame(rows)
                 df.to_csv(csv_path, index=False)
                 
                 # 2. Update JSON (unified format)

@@ -141,18 +141,20 @@ class Analyzer:
         self.classifier_config = classifier_config or ClassifierConfig()
         self.classifier = get_classifier(self.classifier_config)
         self.dpi = dpi
-        self.extractor = FeatureExtractor(dpi=dpi)
-    
-    def analyze_image(self, image_path: Union[str, Path], n_flies: int = 1) -> AnalysisResult:
+
+    def analyze_image(self, image_path: Union[str, Path]) -> AnalysisResult:
         image_path = Path(image_path)
         img = Image.open(image_path)
         image = np.array(img)
         
         dpi = img.info.get('dpi', (self.dpi, self.dpi))[0]
-        self.extractor = FeatureExtractor(dpi=dpi)
-        
+        # Use a local extractor (not self.extractor): analyze_batch runs this
+        # method concurrently in a thread pool, so a shared instance attribute
+        # would let one image's DPI clobber another's mid-extraction.
+        extractor = FeatureExtractor(dpi=dpi)
+
         deposits = self.detector.detect(image)
-        deposits = self.extractor.extract_features(image, deposits)
+        deposits = extractor.extract_features(image, deposits)
         
         # Call predict for each classifier
         from .classifier import ThresholdClassifier, RandomForestClassifier, CNNClassifier

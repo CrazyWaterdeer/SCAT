@@ -313,16 +313,17 @@ class StatisticalAnalyzer:
             return list(np.minimum(p_values * n, 1.0))
         
         elif method == 'holm':
-            # Holm-Bonferroni step-down
-            sorted_indices = np.argsort(p_values)
-            corrected = np.zeros(n)
-            
-            for rank, idx in enumerate(sorted_indices):
-                corrected[idx] = p_values[idx] * (n - rank)
-            
-            # Enforce monotonicity
-            corrected = np.minimum.accumulate(corrected[np.argsort(sorted_indices)][::-1])[::-1]
-            corrected = np.minimum(corrected, 1.0)
+            # Holm-Bonferroni step-down.
+            # Sort p-values ascending; the k-th smallest (0-indexed rank) is
+            # multiplied by (n - rank). Enforce monotonic non-decreasing order
+            # via a forward cumulative maximum, then map back to original order.
+            order = np.argsort(p_values)                 # rank -> original index
+            ranked = p_values[order]                     # ascending p-values
+            multipliers = n - np.arange(n)               # n, n-1, ..., 1
+            adjusted = np.maximum.accumulate(ranked * multipliers)
+            adjusted = np.minimum(adjusted, 1.0)
+            corrected = np.empty(n)
+            corrected[order] = adjusted                  # restore original order
             return list(corrected)
         
         return list(p_values)
@@ -1121,14 +1122,15 @@ class PigmentationAnalyzer:
             valid_df = deposits_df
         
         iod_values = valid_df['iod'].dropna().values
-        area_values = valid_df['area_px'].dropna().values
-        
+
         if len(iod_values) < 2:
             return {'error': 'Insufficient data'}
-        
-        # Pigment density = IOD / Area
-        valid_mask = area_values > 0
-        pigment_density = iod_values[valid_mask] / area_values[valid_mask]
+
+        # Pigment density = IOD / Area. Drop NaNs jointly so iod and area stay
+        # row-aligned (independent dropna() calls could misalign or mismatch length).
+        pair = valid_df[['iod', 'area_px']].dropna()
+        pair = pair[pair['area_px'] > 0]
+        pigment_density = (pair['iod'] / pair['area_px']).values
         
         result = {
             'n_deposits': len(iod_values),
@@ -1150,10 +1152,11 @@ class PigmentationAnalyzer:
                 label_df = deposits_df[deposits_df['label'] == label]
                 if len(label_df) >= 2:
                     label_iod = label_df['iod'].dropna().values
-                    label_area = label_df['area_px'].dropna().values
-                    valid_mask = label_area > 0
-                    label_density = label_iod[valid_mask] / label_area[valid_mask] if len(label_iod[valid_mask]) > 0 else []
-                    
+                    # Row-aligned pigment density (joint dropna, positive area only)
+                    label_pair = label_df[['iod', 'area_px']].dropna()
+                    label_pair = label_pair[label_pair['area_px'] > 0]
+                    label_density = (label_pair['iod'] / label_pair['area_px']).values
+
                     result[f'{label}_total_iod'] = float(np.sum(label_iod))
                     result[f'{label}_mean_iod'] = float(np.mean(label_iod))
                     result[f'{label}_std_iod'] = float(np.std(label_iod))
