@@ -86,6 +86,7 @@ class AgentRunner:
     def turn(self, user_text: str) -> Iterator[RunEvent]:
         from scat.tools import call_tool, tools_for_anthropic
         from scat.agent.providers.base import set_current_provider
+        from scat.progress import AnalysisCancelled
         self.messages.append({"role": "user", "content": [{"type": "text", "text": user_text}]})
         tools_spec = tools_for_anthropic()
         total_usage: dict[str, int] = {}
@@ -141,6 +142,13 @@ class AgentRunner:
                         tool_result_blocks.append({"type": "tool_result", "tool_use_id": block["id"],
                                                    "content": _compact_tool_result(block["name"], result)})
                         yield ToolResult(block["id"], block["name"], result)
+                    except AnalysisCancelled:
+                        # User pressed Stop mid-analysis: record a valid tool_result and end the
+                        # turn (don't feed a generic error back and invite a retry).
+                        self._cancelled = True
+                        tool_result_blocks.append({"type": "tool_result", "tool_use_id": block["id"],
+                                                   "content": "Analysis cancelled by the user.", "is_error": True})
+                        yield ToolResult(block["id"], block["name"], "cancelled by user", is_error=True)
                     except Exception as e:
                         tool_result_blocks.append({"type": "tool_result", "tool_use_id": block["id"],
                                                    "content": f"ERROR: {e}", "is_error": True})

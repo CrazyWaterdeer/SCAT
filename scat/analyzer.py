@@ -208,13 +208,14 @@ class Analyzer:
         results = [None] * n_images
         completed = 0
         
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        executor = ThreadPoolExecutor(max_workers=max_workers)
+        try:
             # Submit all tasks
             future_to_idx = {
                 executor.submit(self.analyze_image, path): i
                 for i, path in enumerate(image_paths)
             }
-            
+
             # Collect results as they complete
             for future in as_completed(future_to_idx):
                 idx = future_to_idx[future]
@@ -227,11 +228,17 @@ class Analyzer:
                         filename=Path(path).name, deposits=[], dpi=self.dpi
                     )
                     print(f"Warning: Failed to analyze {path}: {e}")
-                
+
                 completed += 1
                 if progress_callback:
-                    progress_callback(completed, n_images)
-        
+                    progress_callback(completed, n_images)   # may raise to cancel the batch
+        except BaseException:
+            # A cancel (or any error) surfaced by progress_callback: drop QUEUED images instead
+            # of draining the whole batch (shutdown(wait=True) would). Already-running images
+            # finish in the background — cooperative cancel, bounded by worker count.
+            executor.shutdown(wait=False, cancel_futures=True)
+            raise
+        executor.shutdown(wait=True)
         return results
     
     def _get_safe_worker_count(self, n_images: int) -> int:

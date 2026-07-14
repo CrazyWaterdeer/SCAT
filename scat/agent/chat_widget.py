@@ -96,6 +96,7 @@ class ChatWorker(QThread):
 
     event = Signal(object)
     finished_turn = Signal()
+    progress = Signal(int, int, str)   # current, total, note — per-image during analyze_folder
 
     def __init__(self, runner, text: str):
         super().__init__()
@@ -103,9 +104,13 @@ class ChatWorker(QThread):
         self._text = text
 
     def run(self):
+        from scat.progress import run_progress
         try:
-            for ev in self._runner.turn(self._text):
-                self.event.emit(ev)
+            # Ambient progress/cancel sink for the pure-compute analyze turn; emits a queued
+            # Qt signal (thread-safe from this worker or the SDK executor thread).
+            with run_progress(lambda c, t, note="": self.progress.emit(c, t, note)):
+                for ev in self._runner.turn(self._text):
+                    self.event.emit(ev)
         except Exception as exc:  # never let the worker die silently
             self.event.emit(_SyntheticError(f"{type(exc).__name__}: {exc}"))
         finally:
@@ -292,6 +297,7 @@ class ChatDockWidget(QWidget):
         self._assistant_open = False
         self.worker = ChatWorker(self.runner, text)
         self.worker.event.connect(self._on_event)
+        self.worker.progress.connect(self._on_progress)
         self.worker.finished_turn.connect(self._on_turn_finished)
         self.worker.start()
         self._set_running(True)   # composer read-only; send button becomes Stop
@@ -331,11 +337,21 @@ class ChatDockWidget(QWidget):
             self._assistant_open = False
         # ToolUseStart: ignored (ToolUse carries the same id + the input)
 
+    def _on_progress(self, current, total, note):
+        self.status.setText(f"{note} — {current}/{total}" if note else f"{current}/{total}")
+
     def _on_turn_finished(self):
         self._set_running(False)   # composer editable again; button back to Send
+        self.status.setText(self.desc or "Assistant ready.")
         self.input.setFocus()
 
     def _stop(self):
+        # Halt the in-progress analyze batch at the next image, and end the turn.
+        try:
+            from scat.progress import request_cancel
+            request_cancel()
+        except Exception:
+            pass
         if self.runner is not None:
             try:
                 self.runner.cancel()
@@ -404,6 +420,8 @@ class ChatDockWidget(QWidget):
         We never block indefinitely on the worker. Idempotent."""
         if self.worker is not None and self.worker.isRunning():
             try:
+                from scat.progress import request_cancel
+                request_cancel()                       # halt a blocking analyze_batch
                 self.runner and self.runner.cancel()
             except Exception:
                 pass

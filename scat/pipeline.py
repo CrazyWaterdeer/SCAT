@@ -75,6 +75,7 @@ def analyze_folder_service(path: str, groups: Optional[dict] = None, model_type:
                            annotate: bool = True, visualize: bool = False, spatial: bool = False,
                            parallel: bool = True, max_workers: int = 0, save_json: bool = True,
                            image_paths: Optional[list] = None, progress_callback=None,
+                           ambient_progress: bool = False,
                            output_dir: Optional[str] = None) -> AnalyzeResult:
     """Canonical folder analysis. Superset of every caller (CLI + GUI); every param
     beyond the original signature defaults to the value that reproduces the pre-slimdown
@@ -109,7 +110,21 @@ def analyze_folder_service(path: str, groups: Optional[dict] = None, model_type:
         if len(group_names) < 2:
             warnings.append(f"stats skipped: {len(group_names)} group(s) — need >=2 to compare")
 
-    results = analyzer.analyze_batch(images, metadata=metadata, progress_callback=progress_callback,
+    # Compose the per-image callback. It always drives the caller's explicit callback (the GUI
+    # Run button's Qt bar). It ALSO drives the process-global progress/cancel channel ONLY when
+    # ambient_progress=True — the agent tool path opts in; the GUI Run path never does, so a chat
+    # turn's open sink can't leak into (or cancel) a concurrent GUI Run analysis.
+    _cb = progress_callback
+    if ambient_progress:
+        from . import progress as _pg
+
+        def _cb(current, total):
+            if progress_callback:
+                progress_callback(current, total)
+            _pg.report_progress(current, total, "analyzing images")
+            _pg.raise_if_cancelled()
+
+    results = analyzer.analyze_batch(images, metadata=metadata, progress_callback=_cb,
                                      parallel=parallel, max_workers=max_workers)
     out = Path(output_dir) if output_dir else get_timestamped_output_dir(Path(path).parent, "results")
     reporter = ReportGenerator(out)

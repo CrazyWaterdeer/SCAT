@@ -66,16 +66,18 @@ def chat_command(args):
                 break
             if not text:
                 continue
-            for ev in runner.turn(text):
-                if isinstance(ev, TextDelta):
-                    print(ev.text, end="", flush=True)
-                elif isinstance(ev, ToolUse):
-                    print(f"\n  [tool] {ev.name}({ev.input})", flush=True)
-                elif isinstance(ev, ToolResult):
-                    tag = "ERR" if ev.is_error else "ok"
-                    print(f"\n  [result:{tag}] {ev.name}", flush=True)
-                elif isinstance(ev, TurnDone):
-                    print(f"\n[turn done: {ev.stop_reason}]", flush=True)
+            from .progress import run_progress
+            with run_progress(lambda c, t, note="": print(f"\r  [{note} {c}/{t}]   ", end="", flush=True)):
+                for ev in runner.turn(text):
+                    if isinstance(ev, TextDelta):
+                        print(ev.text, end="", flush=True)
+                    elif isinstance(ev, ToolUse):
+                        print(f"\n  [tool] {ev.name}({ev.input})", flush=True)
+                    elif isinstance(ev, ToolResult):
+                        tag = "ERR" if ev.is_error else "ok"
+                        print(f"\n  [result:{tag}] {ev.name}", flush=True)
+                    elif isinstance(ev, TurnDone):
+                        print(f"\n[turn done: {ev.stop_reason}]", flush=True)
     finally:
         close = getattr(runner, "close", None)
         if close:
