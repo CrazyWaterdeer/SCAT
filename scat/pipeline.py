@@ -13,6 +13,7 @@ from .detector import DepositDetector
 from .classifier import ClassifierConfig
 from .analyzer import Analyzer, ReportGenerator
 from .config import get_timestamped_output_dir
+from .artifacts import IMAGE_SUMMARY, ALL_DEPOSITS
 
 IMAGE_GLOBS = ("*.tif", "*.tiff", "*.png", "*.jpg", "*.jpeg")
 
@@ -214,8 +215,8 @@ def analyze_folder_service(path: str, groups: Optional[dict] = None, model_type:
 def run_statistics_service(results_dir: str, group_col: str = "group") -> dict:
     from .statistics import run_comprehensive_analysis
     rd = Path(results_dir)
-    film = pd.read_csv(rd / "image_summary.csv")
-    deposits = pd.read_csv(rd / "all_deposits.csv") if (rd / "all_deposits.csv").exists() else None
+    film = pd.read_csv(rd / IMAGE_SUMMARY)
+    deposits = pd.read_csv(rd / ALL_DEPOSITS) if (rd / ALL_DEPOSITS).exists() else None
     if group_col not in film.columns or film[group_col].dropna().nunique() < 2:
         return {"skipped": True, "reason": f"<2 groups in column '{group_col}'"}
     return run_comprehensive_analysis(film, deposits_df=deposits, group_column=group_col)
@@ -225,8 +226,8 @@ def generate_report_service(results_dir: str, statistical_results: Optional[dict
                             group_by: Optional[str] = None) -> str:
     from .report import generate_report
     rd = Path(results_dir)
-    film = pd.read_csv(rd / "image_summary.csv")
-    deposits = pd.read_csv(rd / "all_deposits.csv") if (rd / "all_deposits.csv").exists() else None
+    film = pd.read_csv(rd / IMAGE_SUMMARY)
+    deposits = pd.read_csv(rd / ALL_DEPOSITS) if (rd / ALL_DEPOSITS).exists() else None
     # report expects the FLAT metrics mapping, not the whole run_comprehensive_analysis dict.
     metrics = None
     if statistical_results and not statistical_results.get("skipped"):

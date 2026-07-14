@@ -16,6 +16,8 @@ from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 
+from .artifacts import RUN_MANIFEST
+
 SCHEMA = "scat.run_manifest/1"
 
 
@@ -128,7 +130,7 @@ def write_run_manifest(output_dir, *, path=None, image_paths, model_type=None, m
         "warnings": list(warnings) if warnings else [],
     }
     try:
-        (Path(output_dir) / "run_manifest.json").write_text(
+        (Path(output_dir) / RUN_MANIFEST).write_text(
             json.dumps(manifest, indent=2, default=str), encoding="utf-8")
     except OSError:
         pass

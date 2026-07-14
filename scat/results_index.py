@@ -22,9 +22,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from .artifacts import RUN_MANIFEST as _MANIFEST, IMAGE_SUMMARY as _SUMMARY
+
 _PENDING_CAP = 50
-_MANIFEST = "run_manifest.json"
-_SUMMARY = "image_summary.csv"
 
 
 @dataclass(frozen=True)
