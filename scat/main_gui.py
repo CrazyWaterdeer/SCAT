@@ -1146,6 +1146,16 @@ class AnalysisTab(QWidget):
         if not files:
             QMessageBox.warning(self, "No Input", "Please select input image files first.")
             return
+        # Same invariant the subfolder path enforces: SCAT joins group metadata on basename, so a
+        # CSV grouping over duplicate basenames would be rejected by analyze_folder_service at run time.
+        from .grouping_util import duplicate_basenames
+        dups = duplicate_basenames(files)
+        if dups:
+            QMessageBox.warning(self, "Duplicate filenames",
+                f"Some images share a filename across folders ({', '.join(dups[:3])}…). SCAT joins "
+                "group metadata on the filename, so CSV grouping can't be applied. Use unique names "
+                "or a flat folder.")
+            return
         path, _ = QFileDialog.getOpenFileName(
             self, "Load grouping CSV", "", "CSV files (*.csv);;All files (*)")
         if not path:
