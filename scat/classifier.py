@@ -90,9 +90,11 @@ class RandomForestClassifier:
         if self.scaler:
             X = self.scaler.transform(X)
         
-        predictions = self.model.predict(X)
+        # predict_proba once, then derive labels (sklearn's forest predict IS
+        # classes_[argmax(predict_proba)]) — halves the tree traversals, byte-identical output.
         probabilities = self.model.predict_proba(X)
-        
+        predictions = self.model.classes_[np.argmax(probabilities, axis=1)]
+
         for deposit, pred, prob in zip(deposits, predictions, probabilities):
             deposit.label = pred
             deposit.confidence = float(np.max(prob))
