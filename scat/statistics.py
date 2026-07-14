@@ -31,6 +31,27 @@ def coefficient_of_variation(data) -> float:
     return float((np.std(data) / abs(mean)) * 100)
 
 
+def correct_pvalues(p_values, method: str) -> list:
+    """Canonical multiple-comparison correction ('bonferroni' | 'holm'), returning a list in the SAME
+    order as the input. Single source of truth: visualization.py used to carry a drifted copy whose
+    Holm branch mis-restored the original comparison order (a latent significance-bracket bug)."""
+    p_values = np.array(p_values)
+    n = len(p_values)
+    if method == 'bonferroni':
+        return list(np.minimum(p_values * n, 1.0))
+    if method == 'holm':
+        # Holm-Bonferroni step-down: sort ascending, the k-th smallest gets multiplier (n - rank),
+        # enforce monotone non-decreasing via a forward cumulative max, then map back to input order.
+        order = np.argsort(p_values)
+        ranked = p_values[order]
+        multipliers = n - np.arange(n)
+        adjusted = np.minimum(np.maximum.accumulate(ranked * multipliers), 1.0)
+        corrected = np.empty(n)
+        corrected[order] = adjusted
+        return list(corrected)
+    return list(p_values)
+
+
 def compare_group_values(group_values: Dict, alpha: float = 0.05) -> Dict:
     """Shared group-comparison dispatch for every compare_*_between_groups method: a two-group
     test (t / Mann-Whitney) for exactly two groups, else a multi-group test (ANOVA / Kruskal)
@@ -324,28 +345,8 @@ class StatisticalAnalyzer:
         return coefficient_of_variation(data)
     
     def _correct_pvalues(self, p_values: List[float], method: str) -> List[float]:
-        """Apply multiple comparison correction."""
-        p_values = np.array(p_values)
-        n = len(p_values)
-        
-        if method == 'bonferroni':
-            return list(np.minimum(p_values * n, 1.0))
-        
-        elif method == 'holm':
-            # Holm-Bonferroni step-down.
-            # Sort p-values ascending; the k-th smallest (0-indexed rank) is
-            # multiplied by (n - rank). Enforce monotonic non-decreasing order
-            # via a forward cumulative maximum, then map back to original order.
-            order = np.argsort(p_values)                 # rank -> original index
-            ranked = p_values[order]                     # ascending p-values
-            multipliers = n - np.arange(n)               # n, n-1, ..., 1
-            adjusted = np.maximum.accumulate(ranked * multipliers)
-            adjusted = np.minimum(adjusted, 1.0)
-            corrected = np.empty(n)
-            corrected[order] = adjusted                  # restore original order
-            return list(corrected)
-        
-        return list(p_values)
+        """Apply multiple comparison correction (delegates to the module-level canonical impl)."""
+        return correct_pvalues(p_values, method)
     
     def run_all_tests(
         self, 

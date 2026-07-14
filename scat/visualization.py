@@ -574,9 +574,11 @@ class Visualizer:
         if not p_values:
             return
         
-        # Apply multiple comparison correction for 3+ groups
+        # Apply multiple comparison correction for 3+ groups (canonical impl in statistics — this file
+        # used to carry a drifted Holm copy that mis-restored the comparison order).
         if apply_correction and len(p_values) > 1:
-            p_values = self._correct_pvalues(p_values, correction)
+            from .statistics import correct_pvalues
+            p_values = correct_pvalues(p_values, correction)
         
         # Convert p-values to stars
         annotations = []
@@ -615,29 +617,6 @@ class Visualizer:
         if annotations:
             new_ylim = y_max + y_offset * (len(annotations) + 1)
             ax.set_ylim(top=new_ylim)
-    
-    def _correct_pvalues(self, p_values: List[float], method: str) -> List[float]:
-        """Apply multiple comparison correction to p-values."""
-        p_values = np.array(p_values)
-        n = len(p_values)
-        
-        if method == 'bonferroni':
-            return list(np.minimum(p_values * n, 1.0))
-        
-        elif method == 'holm':
-            # Holm-Bonferroni step-down
-            sorted_indices = np.argsort(p_values)
-            corrected = np.zeros(n)
-            
-            for rank, idx in enumerate(sorted_indices):
-                corrected[idx] = p_values[idx] * (n - rank)
-            
-            # Enforce monotonicity
-            corrected = np.minimum.accumulate(corrected[np.argsort(sorted_indices)][::-1])[::-1]
-            corrected = np.minimum(corrected, 1.0)
-            return list(corrected)
-        
-        return list(p_values)
     
     def box_comparison(
         self,
