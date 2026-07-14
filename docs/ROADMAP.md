@@ -77,8 +77,16 @@ High-leverage: makes the just-merged agent + chat dock reach users reliably.
   - **T3.1-followup** (deferred): zip/export of a portable result bundle; multi-dataset / overlapping-run
     aggregation beyond `combine_results`'s same-folder disjoint merge; optional chat-dock display of
     `already_analyzed`.
-- [ ] **T3.2 — Runner message compaction + one context-limit force-compact-and-retry** · M · medium (spec §7/§10; only tool *results* are compacted today, runner stops at the context limit).
-- [ ] **T3.3 — Exponential backoff for 429/overloaded** · S · medium (spec §10; verify vs SDK default retries first).
+- [x] **T3.2 — Runner message compaction + context-limit force-compact-and-retry** · M · medium — DONE
+  (feat/tier3-robustness, PR #5). Reactive-only (proactive dropped — char/4 thresholds shed context too
+  early on 1M-context models): on an overflow raised before any streamed event, `_compact_history`
+  shrinks history pairing-safely (keep `messages[0]`+last 6, soft-stub old tool_result/text, drop matched
+  `(assistant tool_use, user tool_result)` pairs) and the stream retries once. **Also fixed a pre-existing
+  bug** where the fatal-error handler popped the last user message and orphaned a `tool_use` after a tool
+  round → now restores a `pre_turn` snapshot. API-backend only. Spec+plan: `…/2026-07-15-scat-runner-robustness.md`.
+- [x] **T3.3 — Backoff for 429/overloaded** · S · medium — DONE (with T3.2). Verified: the anthropic SDK
+  already does exp backoff (+jitter) on 408/409/429/≥500 at request establishment, so no hand-rolled
+  loop — just exposed `agent.max_retries` (3) + `agent.max_tokens` (4096) via config.
 - [ ] **T3.4 — Effort/thinking selector in the chat dock** · S · medium (API provider hardcodes `max_tokens=4096`, passes no thinking/effort; add a combo).
 - [ ] **T3.5 — Live model catalog** (`client.models.list()`) vs hardcoded `LATEST_MODELS` · S · medium.
 - [ ] **T3.6 — Ollama / OpenAI-compatible backends** behind `build_runner` · L · low (Provider Protocol is the clean seam).
