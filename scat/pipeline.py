@@ -70,10 +70,21 @@ def scan_folder_service(path: str) -> dict:
 
 def analyze_folder_service(path: str, groups: Optional[dict] = None, model_type: Optional[str] = None,
                            model_path: Optional[str] = None, min_area: int = 20, max_area: int = 10000,
-                           edge_margin: int = 20, circularity: float = 0.6, annotate: bool = True,
-                           visualize: bool = False, output_dir: Optional[str] = None) -> AnalyzeResult:
+                           edge_margin: int = 20, circularity: float = 0.6,
+                           sensitive_mode: bool = False, unet_model_path: Optional[str] = None,
+                           annotate: bool = True, visualize: bool = False, spatial: bool = False,
+                           parallel: bool = True, max_workers: int = 0, save_json: bool = True,
+                           image_paths: Optional[list] = None, progress_callback=None,
+                           output_dir: Optional[str] = None) -> AnalyzeResult:
+    """Canonical folder analysis. Superset of every caller (CLI + GUI); every param
+    beyond the original signature defaults to the value that reproduces the pre-slimdown
+    CLI/parity behaviour, so tests/test_pipeline_parity.py (default kwargs) stays byte-identical.
+
+    image_paths: analyse exactly this explicit list (the GUI is a multi-file picker); when
+    None, rglob the folder as before. progress_callback(current, total) drives the GUI bar.
+    """
     from .grouping_util import build_group_metadata, duplicate_basenames
-    images = list_images(path)
+    images = [Path(p) for p in image_paths] if image_paths is not None else list_images(path)
     if not images:
         raise ValueError(f"No images found in {path}")
     if groups:
@@ -83,7 +94,8 @@ def analyze_folder_service(path: str, groups: Optional[dict] = None, model_type:
                 f"Cannot group: duplicate basenames {dups[:5]} — SCAT joins group metadata on the "
                 "image basename, so grouping would mis-join. Use unique filenames or a flat folder.")
     mtype, mpath = resolve_model_type(model_type, model_path)
-    detector = DepositDetector(min_area=min_area, max_area=max_area, edge_margin=edge_margin)
+    detector = DepositDetector(min_area=min_area, max_area=max_area, edge_margin=edge_margin,
+                               sensitive_mode=sensitive_mode, unet_model_path=unet_model_path)
     cfg = ClassifierConfig(model_type=mtype, circularity_threshold=circularity, model_path=mpath)
     analyzer = Analyzer(detector=detector, classifier_config=cfg)
 
@@ -97,10 +109,11 @@ def analyze_folder_service(path: str, groups: Optional[dict] = None, model_type:
         if len(group_names) < 2:
             warnings.append(f"stats skipped: {len(group_names)} group(s) — need >=2 to compare")
 
-    results = analyzer.analyze_batch(images, metadata=metadata)
+    results = analyzer.analyze_batch(images, metadata=metadata, progress_callback=progress_callback,
+                                     parallel=parallel, max_workers=max_workers)
     out = Path(output_dir) if output_dir else get_timestamped_output_dir(Path(path).parent, "results")
     reporter = ReportGenerator(out)
-    reports = reporter.save_all(results, metadata, group_by)
+    reports = reporter.save_all(results, metadata, group_by, save_json=save_json)
     n_failed = sum(1 for r in results if r.n_total == 0)
 
     if annotate:
@@ -122,6 +135,28 @@ def analyze_folder_service(path: str, groups: Optional[dict] = None, model_type:
                                         group_by=group_by[0] if group_by else None)
         except ImportError as e:
             warnings.append(f"visualizations skipped (missing deps): {e}")
+
+    if spatial:
+        try:
+            import json
+            import numpy as np
+            from PIL import Image
+            from .spatial import SpatialAnalyzer, aggregate_spatial_stats
+            spatial_analyzer = SpatialAnalyzer()
+            spatial_results = []
+            for img_path, res in zip(images, results):
+                shape = np.array(Image.open(img_path)).shape[:2]
+                spatial_results.append(spatial_analyzer.analyze(res.deposits, shape))
+            agg = aggregate_spatial_stats(spatial_results)
+            with open(out / "spatial_stats.json", "w") as f:
+                json.dump(agg, f, default=str)
+            try:
+                from .visualization import generate_spatial_visualizations
+                generate_spatial_visualizations(spatial_results, out / "visualizations")
+            except Exception as e:
+                warnings.append(f"spatial visualizations skipped: {e}")
+        except Exception as e:  # spatial is best-effort; never abort the batch
+            warnings.append(f"spatial analysis skipped: {e}")
 
     summary = reports["film_summary"]
     return AnalyzeResult(
@@ -151,5 +186,16 @@ def generate_report_service(results_dir: str, statistical_results: Optional[dict
     metrics = None
     if statistical_results and not statistical_results.get("skipped"):
         metrics = statistical_results.get("basic", {}).get("metrics") or statistical_results
+    # The report renders a Spatial Analysis section from spatial_stats; pick up the sidecar
+    # analyze_folder_service(spatial=True) writes so the HTML matches the Results tab.
+    spatial_stats = None
+    sp = rd / "spatial_stats.json"
+    if sp.exists():
+        import json
+        try:
+            spatial_stats = json.loads(sp.read_text())
+        except Exception:
+            spatial_stats = None
     return generate_report(film, output_dir=rd, deposit_data=deposits,
-                           statistical_results=metrics, group_by=group_by, format="html")
+                           statistical_results=metrics, spatial_stats=spatial_stats,
+                           group_by=group_by, format="html")

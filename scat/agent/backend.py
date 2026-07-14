@@ -2,6 +2,18 @@ from __future__ import annotations
 import os
 from scat.agent.prompts import SYSTEM_PROMPT
 
+# The current shipping Claude models offered in the GUI model picker, newest/most-capable
+# first. SINGLE SOURCE OF TRUTH — update this when Anthropic ships newer models. IDs are
+# exact and version-pinned (there are no "-latest" aliases). Both backends take the same
+# bare id: the API path passes it to the Messages API; the subscription path passes it to
+# ClaudeAgentOptions and the `claude` CLI resolves it. Default stays claude-opus-4-8.
+LATEST_MODELS = [
+    ("Opus 4.8", "claude-opus-4-8"),
+    ("Fable 5", "claude-fable-5"),
+    ("Sonnet 5", "claude-sonnet-5"),
+    ("Haiku 4.5", "claude-haiku-4-5"),
+]
+
 
 def build_runner(backend: str = "auto", model: str = "claude-opus-4-8", max_loops: int = 40):
     """Return (runner, description). Prefers subscription unless overridden.

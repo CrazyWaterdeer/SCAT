@@ -257,13 +257,16 @@ class Analyzer:
         
         return max(1, optimal)
     
+    @staticmethod
     def generate_annotated_image(
-        self, image: np.ndarray, deposits: List[Deposit], 
+        image: np.ndarray, deposits: List,
         show_labels: bool = True, skip_artifacts: bool = False
     ) -> np.ndarray:
+        # Uses no Analyzer state — deposits only need .label/.contour/.id/.centroid, so this
+        # also accepts the lightweight objects from deposits_from_labels_json (regenerate path).
         result = image.copy()
         colors = {'rod': (255, 0, 0), 'normal': (0, 255, 0), 'artifact': (128, 128, 128), 'unknown': (255, 255, 0)}
-        
+
         for d in deposits:
             if skip_artifacts and d.label == 'artifact':
                 continue
@@ -275,9 +278,36 @@ class Analyzer:
         return result
 
 
+def deposits_from_labels_json(json_path) -> list:
+    """Reconstruct lightweight, annotate-only deposit objects from a *.labels.json file.
+
+    Used by the GUI 'regenerate report after editing' path: after a user corrects labels the
+    edited JSON is the source of truth, so we rebuild just what generate_annotated_image reads
+    (.id/.label/.contour/.centroid). Not full Deposit objects — geometry like perimeter/aspect
+    ratio isn't stored and would have to be fabricated. Prefers the saved (x, y) centroid.
+    """
+    import json
+    from types import SimpleNamespace
+    with open(json_path) as f:
+        data = json.load(f)
+    out = []
+    for d in data.get('deposits', []):
+        contour = np.array(d.get('contour', []), dtype=np.int32).reshape((-1, 1, 2))
+        if 'x' in d and 'y' in d:
+            centroid = (int(d['x']), int(d['y']))
+        elif contour.size:
+            pts = contour.reshape(-1, 2)
+            centroid = (int(pts[:, 0].mean()), int(pts[:, 1].mean()))
+        else:
+            centroid = (0, 0)
+        out.append(SimpleNamespace(id=d.get('id', 0), label=d.get('label', 'unknown'),
+                                   contour=contour, centroid=centroid))
+    return out
+
+
 class ReportGenerator:
     """Generate analysis reports."""
-    
+
     def __init__(self, output_dir: Union[str, Path]):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)

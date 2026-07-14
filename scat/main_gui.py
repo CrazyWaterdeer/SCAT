@@ -31,8 +31,8 @@ from PySide6.QtWidgets import (
     QProgressBar, QTextEdit, QTableWidget, QTableWidgetItem,
     QHeaderView, QSplitter, QLineEdit, QMessageBox, QScrollArea,
     QDialog, QKeySequenceEdit, QDialogButtonBox,
-    QGraphicsView, QGraphicsScene, QListWidget, QMenu, 
-    QRadioButton, QTreeWidget, QTreeWidgetItem, QFrame
+    QGraphicsView, QGraphicsScene, QListWidget, QMenu, QInputDialog,
+    QTreeWidget, QTreeWidgetItem, QFrame, QDockWidget
 )
 from PySide6.QtCore import Qt, QThread, Signal, QSize, QRectF
 from PySide6.QtGui import (
@@ -225,29 +225,10 @@ class SettingsDialog(QDialog):
         perf_layout.addStretch()
         
         tabs.addTab(perf_widget, "Performance")
-        
-        # Detection tab
-        detection_widget = QWidget()
-        detection_layout = QFormLayout(detection_widget)
-        
-        self.min_area_spin = QSpinBox()
-        self.min_area_spin.setRange(1, 1000)
-        self.min_area_spin.setValue(config.get("detection.min_area", 20))
-        detection_layout.addRow("Min Area:", self.min_area_spin)
-        
-        self.max_area_spin = QSpinBox()
-        self.max_area_spin.setRange(100, 50000)
-        self.max_area_spin.setValue(config.get("detection.max_area", 10000))
-        detection_layout.addRow("Max Area:", self.max_area_spin)
-        
-        self.threshold_spin = QDoubleSpinBox()
-        self.threshold_spin.setRange(0.1, 1.0)
-        self.threshold_spin.setSingleStep(0.05)
-        self.threshold_spin.setValue(config.get("detection.threshold", 0.6))
-        detection_layout.addRow("Circularity Threshold:", self.threshold_spin)
-        
-        tabs.addTab(detection_widget, "Detection")
-        
+
+        # (Detection parameters live on the Analysis tab — the single place they are edited
+        #  and the values actually used by a run. No duplicate Settings-dialog copy.)
+
         # Buttons
         button_box = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel
@@ -271,11 +252,6 @@ class SettingsDialog(QDialog):
         # Save shortcuts
         for editor in self.shortcut_editors:
             config.set_shortcut(editor.action_name, editor.get_shortcut())
-        
-        # Save detection settings
-        config.set("detection.min_area", self.min_area_spin.value())
-        config.set("detection.max_area", self.max_area_spin.value())
-        config.set("detection.threshold", self.threshold_spin.value())
         
         # Save performance settings
         config.set("performance.parallel_enabled", self.parallel_check.isChecked())
@@ -715,553 +691,60 @@ class TrainingTab(QWidget):
         QMessageBox.critical(self, "Error", f"Training failed:\n{error_msg}")
 
 
+def _results_dict_from_output(output_dir, group_by=None, image_paths=None, stats=None):
+    """Rebuild the Results-tab dict from an analysis output directory (the source of truth).
 
-class GroupWidget(QWidget):
-    """Accordion-style group widget with card header and expandable file list."""
-    filesDropped = Signal(str, list)  # group_name, filenames
-    expandRequested = Signal(str)  # group_name - request to expand (will collapse others)
-    
-    def __init__(self, group_name: str, files: List[str], parent=None):
-        super().__init__(parent)
-        self.group_name = group_name
-        self.files = files
-        self.expanded = False
-        self._hovered = False
-        
-        self.setAcceptDrops(True)
-        
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        
-        # Card header (QFrame with HBoxLayout for proper arrow positioning)
-        self.card_frame = QFrame()
-        self.card_frame.setCursor(Qt.PointingHandCursor)
-        self.card_frame.setFixedHeight(44)
-        
-        card_layout = QHBoxLayout(self.card_frame)
-        card_layout.setContentsMargins(12, 8, 12, 8)
-        card_layout.setSpacing(8)
-        
-        # Group name and file count label
-        self.name_label = QLabel()
-        self.name_label.setStyleSheet(f"color: {Theme.TEXT_PRIMARY}; font-weight: bold; background: transparent; border: none;")
-        card_layout.addWidget(self.name_label)
-        
-        card_layout.addStretch()  # Push arrow to the right
-        
-        # Arrow label (always at right end)
-        self.arrow_label = QLabel()
-        self.arrow_label.setStyleSheet(f"color: {Theme.TEXT_PRIMARY}; background: transparent; border: none;")
-        card_layout.addWidget(self.arrow_label)
-        
-        self._update_card_text()
-        self._apply_card_style()
-        layout.addWidget(self.card_frame)
-        
-        # File list (hidden by default)
-        self.file_list = QListWidget()
-        self.file_list.setSelectionMode(QListWidget.ExtendedSelection)
-        self.file_list.setMaximumHeight(150)
-        self.file_list.setVisible(False)
-        self.file_list.setStyleSheet(f"""
-            QListWidget {{
-                background-color: {Theme.BG_MEDIUM};
-                border: 1px solid {Theme.BORDER};
-                border-top: none;
-                border-radius: 0 0 6px 6px;
-                padding: 4px;
-            }}
-            QListWidget::item {{
-                padding: 3px 8px;
-                color: {Theme.TEXT_PRIMARY};
-            }}
-            QListWidget::item:selected {{
-                background-color: {Theme.PRIMARY};
-            }}
-        """)
-        self._populate_file_list()
-        layout.addWidget(self.file_list)
-    
-    def _update_card_text(self):
-        self.name_label.setText(f"{self.group_name}  ({len(self.files)} files)")
-        # Use same-family triangles for consistent size: ▼ (down) ◀ (left)
-        self.arrow_label.setText("▼" if self.expanded else "◀")
-    
-    def _apply_card_style(self):
-        if self.expanded:
-            self.card_frame.setStyleSheet(f"""
-                QFrame {{
-                    background-color: {Theme.BG_DARK};
-                    border: 1px solid {Theme.BORDER};
-                    border-bottom: none;
-                    border-radius: 6px 6px 0 0;
-                }}
-                QFrame QLabel {{
-                    border: none;
-                    background: transparent;
-                }}
-            """)
-        else:
-            border_color = Theme.TEXT_SECONDARY if self._hovered else Theme.BORDER
-            self.card_frame.setStyleSheet(f"""
-                QFrame {{
-                    background-color: {Theme.BG_DARK};
-                    border: 1px solid {border_color};
-                    border-radius: 6px;
-                }}
-                QFrame QLabel {{
-                    border: none;
-                    background: transparent;
-                }}
-            """)
-    
-    def _populate_file_list(self):
-        self.file_list.clear()
-        for f in sorted(self.files):
-            self.file_list.addItem(f)
-    
-    def mousePressEvent(self, event):
-        # Check if click is on the card frame area
-        if self.card_frame.geometry().contains(event.pos()):
-            self.expandRequested.emit(self.group_name)
-        else:
-            super().mousePressEvent(event)
-    
-    def enterEvent(self, event):
-        self._hovered = True
-        if not self.expanded:
-            self._apply_card_style()
-        super().enterEvent(event)
-    
-    def leaveEvent(self, event):
-        self._hovered = False
-        if not self.expanded:
-            self._apply_card_style()
-        super().leaveEvent(event)
-    
-    def set_expanded(self, expanded: bool):
-        self.expanded = expanded
-        self.file_list.setVisible(expanded)
-        self._update_card_text()
-        self._apply_card_style()
-    
-    def add_files(self, filenames: List[str]):
-        for f in filenames:
-            if f not in self.files:
-                self.files.append(f)
-        self._populate_file_list()
-        self._update_card_text()
-    
-    def remove_selected_files(self):
-        """Remove selected files from this group."""
-        for item in self.file_list.selectedItems():
-            filename = item.text()
-            if filename in self.files:
-                self.files.remove(filename)
-        self._populate_file_list()
-        self._update_card_text()
-    
-    def update_name(self, new_name: str):
-        self.group_name = new_name
-        self._update_card_text()
-    
-    def dragEnterEvent(self, event):
-        if event.source():
-            event.acceptProposedAction()
-    
-    def dragMoveEvent(self, event):
-        if event.source():
-            event.acceptProposedAction()
-    
-    def dropEvent(self, event):
-        source = event.source()
-        if source and hasattr(source, 'selectedItems'):
-            filenames = [item.text() for item in source.selectedItems()]
-            if filenames:
-                self.filesDropped.emit(self.group_name, filenames)
-                event.acceptProposedAction()
+    analyze_folder_service returns only aggregate scalars; the per-image/per-deposit data,
+    visualizations and spatial stats live on disk. Shared by the Run flow and 'Load results'.
+    `stats` (the full run_statistics_service dict) is flattened to basic.metrics because the
+    Results-tab renderer expects a flat {metric: comparison} mapping.
+    """
+    import json as _json
+    out = Path(output_dir)
+    summary_path = out / "image_summary.csv"
+    if not summary_path.exists():
+        summary_path = out / "film_summary.csv"  # backward compatibility
+    film_summary = pd.read_csv(summary_path)
+    dep_path = out / "all_deposits.csv"
+    deposit_data = pd.read_csv(dep_path) if dep_path.exists() else None
 
+    viz_results = {}
+    viz_dir = out / "visualizations"
+    if viz_dir.exists():
+        for png in viz_dir.glob("*.png"):
+            viz_results[png.stem] = str(png)
 
-class DroppableContainer(QWidget):
-    """Container that detects drops on empty space."""
-    emptyDropped = Signal(list)  # filenames
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setAcceptDrops(True)
-    
-    def dragEnterEvent(self, event):
-        if event.source():
-            event.acceptProposedAction()
-    
-    def dragMoveEvent(self, event):
-        if event.source():
-            event.acceptProposedAction()
-    
-    def dropEvent(self, event):
-        # Only handle if dropped on empty space (not on a group widget)
-        child = self.childAt(event.position().toPoint())
-        # Check if we're on empty space
-        if child is None:
-            source = event.source()
-            if source and hasattr(source, 'selectedItems'):
-                filenames = [item.text() for item in source.selectedItems()]
-                if filenames:
-                    self.emptyDropped.emit(filenames)
-                    event.acceptProposedAction()
-                    return
-        event.ignore()
+    spatial_stats = {}
+    sp_path = out / "spatial_stats.json"
+    if sp_path.exists():
+        try:
+            spatial_stats = _json.loads(sp_path.read_text())
+        except Exception:
+            spatial_stats = {}
 
+    if group_by is None and "group" in film_summary.columns:
+        if film_summary["group"].dropna().nunique() > 1:
+            group_by = "group"
 
-class GroupEditorDialog(QDialog):
-    """Dialog for grouping files into conditions with accordion-style UI."""
-    
-    def __init__(self, file_list: List[str], parent=None, existing_groups: Dict[str, List[str]] = None):
-        super().__init__(parent)
-        self.file_list = file_list
-        self.groups: Dict[str, List[str]] = existing_groups.copy() if existing_groups else {}
-        self.metadata_df = None
-        self.group_widgets: Dict[str, GroupWidget] = {}
-        self.expanded_group: Optional[str] = None
-        
-        self.setWindowTitle("Group Editor")
-        self.setMinimumSize(750, 550)
-        
-        self._setup_ui()
-        self._populate_files()
-        self._rebuild_groups()
-    
-    def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        
-        splitter = QSplitter(Qt.Horizontal)
-        
-        # Left: Available files
-        left_widget = QWidget()
-        left_layout = QVBoxLayout(left_widget)
-        left_layout.addWidget(QLabel("Available Files (drag to groups, or right-click):"))
-        
-        self.file_list_widget = QListWidget()
-        self.file_list_widget.setSelectionMode(QListWidget.ExtendedSelection)
-        self.file_list_widget.setDragEnabled(True)
-        self.file_list_widget.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.file_list_widget.customContextMenuRequested.connect(self._show_file_context_menu)
-        left_layout.addWidget(self.file_list_widget)
-        
-        splitter.addWidget(left_widget)
-        
-        # Right: Groups
-        right_widget = QWidget()
-        right_layout = QVBoxLayout(right_widget)
-        right_layout.addWidget(QLabel("Groups (click to expand, right-click to rename):"))
-        
-        # New group button
-        group_btn_layout = QHBoxLayout()
-        add_group_btn = QPushButton("+ New Group")
-        add_group_btn.clicked.connect(self._add_group)
-        group_btn_layout.addWidget(add_group_btn)
-        group_btn_layout.addStretch()
-        right_layout.addLayout(group_btn_layout)
-        
-        # Groups scroll area with droppable container
-        self.groups_scroll = QScrollArea()
-        self.groups_scroll.setWidgetResizable(True)
-        self.groups_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        
-        self.scroll_content = DroppableContainer()
-        self.scroll_content.emptyDropped.connect(self._create_group_from_drop)
-        self.groups_layout = QVBoxLayout(self.scroll_content)
-        self.groups_layout.setSpacing(8)
-        self.groups_layout.setContentsMargins(4, 4, 4, 4)
-        self.groups_layout.addStretch()
-        
-        self.groups_scroll.setWidget(self.scroll_content)
-        right_layout.addWidget(self.groups_scroll)
-        
-        splitter.addWidget(right_widget)
-        splitter.setSizes([320, 430])
-        
-        layout.addWidget(splitter)
-        
-        # Column name
-        col_layout = QHBoxLayout()
-        col_layout.addWidget(QLabel("Group Column Name:"))
-        self.column_name_edit = QLineEdit("condition")
-        self.column_name_edit.setMaximumWidth(200)
-        col_layout.addWidget(self.column_name_edit)
-        col_layout.addStretch()
-        layout.addLayout(col_layout)
-        
-        # Buttons
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
-        
-        save_csv_btn = QPushButton("Save as CSV")
-        save_csv_btn.clicked.connect(self._save_csv)
-        btn_layout.addWidget(save_csv_btn)
-        
-        apply_btn = QPushButton("Apply && Close")
-        apply_btn.setStyleSheet(Theme.button_style(Theme.PRIMARY))
-        apply_btn.clicked.connect(self._apply_and_close)
-        btn_layout.addWidget(apply_btn)
-        
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.clicked.connect(self.reject)
-        btn_layout.addWidget(cancel_btn)
-        
-        layout.addLayout(btn_layout)
-    
-    def _populate_files(self):
-        for f in self.file_list:
-            self.file_list_widget.addItem(Path(f).name)
-    
-    def _rebuild_groups(self):
-        """Rebuild all group widgets."""
-        
-        # Clear existing widgets
-        while self.groups_layout.count() > 1:  # Keep stretch
-            item = self.groups_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-        
-        self.group_widgets.clear()
-        self.expanded_group = None
-        
-        # Create group widgets
-        for group_name in sorted(self.groups.keys()):
-            self._create_group_widget(group_name)
-    
-    def _create_group_widget(self, group_name: str):
-        """Create a single group widget."""
-        files = self.groups.get(group_name, [])
-        widget = GroupWidget(group_name, files, self.scroll_content)
-        widget.expandRequested.connect(self._on_expand_requested)
-        widget.filesDropped.connect(self._on_files_dropped)
-        
-        # Context menu for the card frame
-        widget.card_frame.setContextMenuPolicy(Qt.CustomContextMenu)
-        widget.card_frame.customContextMenuRequested.connect(
-            lambda pos, n=group_name: self._show_group_context_menu(pos, n)
-        )
-        
-        # Context menu for the file list
-        widget.file_list.setContextMenuPolicy(Qt.CustomContextMenu)
-        widget.file_list.customContextMenuRequested.connect(
-            lambda pos, n=group_name: self._show_file_list_context_menu(pos, n)
-        )
-        
-        # Insert before stretch
-        self.groups_layout.insertWidget(self.groups_layout.count() - 1, widget)
-        self.group_widgets[group_name] = widget
-    
-    def _on_expand_requested(self, group_name: str):
-        """Handle accordion expansion - only one group can be expanded at a time."""
-        if self.expanded_group == group_name:
-            # Collapse current
-            if group_name in self.group_widgets:
-                self.group_widgets[group_name].set_expanded(False)
-            self.expanded_group = None
-        else:
-            # Collapse previous
-            if self.expanded_group and self.expanded_group in self.group_widgets:
-                self.group_widgets[self.expanded_group].set_expanded(False)
-            
-            # Expand new
-            if group_name in self.group_widgets:
-                self.group_widgets[group_name].set_expanded(True)
-            self.expanded_group = group_name
-    
-    def _on_files_dropped(self, group_name: str, filenames: List[str]):
-        """Handle files dropped on a group widget."""
-        if group_name not in self.groups:
-            return
-        
-        for filename in filenames:
-            if filename not in self.groups[group_name]:
-                self.groups[group_name].append(filename)
-        
-        # Update widget
-        if group_name in self.group_widgets:
-            self.group_widgets[group_name].add_files(filenames)
-    
-    def _create_group_from_drop(self, filenames: List[str]):
-        """Create new group from files dropped on empty space."""
-        from PySide6.QtWidgets import QInputDialog
-        name, ok = QInputDialog.getText(self, "New Group", "Group name:")
-        if ok and name:
-            if name in self.groups:
-                QMessageBox.warning(self, "Duplicate", f"Group '{name}' already exists.")
-                return
-            self.groups[name] = list(filenames)
-            self._create_group_widget(name)
-    
-    def _show_file_context_menu(self, pos):
-        """Context menu for available files list."""
-        menu = QMenu(self)
-        
-        if self.groups:
-            for group_name in sorted(self.groups.keys()):
-                action = menu.addAction(f"Add to '{group_name}'")
-                action.triggered.connect(lambda checked, g=group_name: self._add_selected_to_group(g))
-            menu.addSeparator()
-        
-        new_group_action = menu.addAction("Create new group with selection...")
-        new_group_action.triggered.connect(self._add_group)
-        
-        menu.exec(self.file_list_widget.mapToGlobal(pos))
-    
-    def _show_group_context_menu(self, pos, group_name: str):
-        """Context menu for group card."""
-        menu = QMenu(self)
-        
-        rename_action = menu.addAction("Rename Group")
-        rename_action.triggered.connect(lambda: self._rename_group(group_name))
-        
-        menu.addSeparator()
-        
-        delete_action = menu.addAction("Delete Group")
-        delete_action.triggered.connect(lambda: self._remove_group(group_name))
-        
-        widget = self.group_widgets.get(group_name)
-        if widget:
-            menu.exec(widget.card_frame.mapToGlobal(pos))
-    
-    def _show_file_list_context_menu(self, pos, group_name: str):
-        """Context menu for expanded file list."""
-        widget = self.group_widgets.get(group_name)
-        if not widget:
-            return
-        
-        selected = widget.file_list.selectedItems()
-        if not selected:
-            return
-        
-        menu = QMenu(self)
-        remove_action = menu.addAction("Remove from group")
-        remove_action.triggered.connect(lambda: self._remove_files_from_group(group_name))
-        menu.exec(widget.file_list.mapToGlobal(pos))
-    
-    def _add_group(self):
-        """Add a new group."""
-        from PySide6.QtWidgets import QInputDialog
-        name, ok = QInputDialog.getText(self, "New Group", "Group name:")
-        if ok and name:
-            if name in self.groups:
-                QMessageBox.warning(self, "Duplicate", f"Group '{name}' already exists.")
-                return
-            self.groups[name] = []
-            # Auto-add selected files
-            for item in self.file_list_widget.selectedItems():
-                filename = item.text()
-                if filename not in self.groups[name]:
-                    self.groups[name].append(filename)
-            self._create_group_widget(name)
-    
-    def _rename_group(self, old_name: str):
-        """Rename a group."""
-        from PySide6.QtWidgets import QInputDialog
-        new_name, ok = QInputDialog.getText(self, "Rename Group", "New name:", text=old_name)
-        if ok and new_name and new_name != old_name:
-            if new_name in self.groups:
-                QMessageBox.warning(self, "Duplicate", f"Group '{new_name}' already exists.")
-                return
-            
-            # Update data
-            self.groups[new_name] = self.groups.pop(old_name)
-            
-            # Update widget
-            if old_name in self.group_widgets:
-                widget = self.group_widgets.pop(old_name)
-                widget.update_name(new_name)
-                widget.group_name = new_name
-                self.group_widgets[new_name] = widget
-            
-            # Update expanded state
-            if self.expanded_group == old_name:
-                self.expanded_group = new_name
-    
-    def _remove_group(self, group_name: str):
-        """Remove a group."""
-        if group_name in self.groups:
-            del self.groups[group_name]
-        
-        if group_name in self.group_widgets:
-            self.group_widgets[group_name].deleteLater()
-            del self.group_widgets[group_name]
-        
-        if self.expanded_group == group_name:
-            self.expanded_group = None
-    
-    def _add_selected_to_group(self, group_name: str):
-        """Add selected files from available list to a group."""
-        for item in self.file_list_widget.selectedItems():
-            filename = item.text()
-            if filename not in self.groups[group_name]:
-                self.groups[group_name].append(filename)
-        
-        if group_name in self.group_widgets:
-            # Sync files
-            self.group_widgets[group_name].files = self.groups[group_name]
-            self.group_widgets[group_name]._populate_file_list()
-            self.group_widgets[group_name]._update_card_text()
-    
-    def _remove_files_from_group(self, group_name: str):
-        """Remove selected files from a group."""
-        widget = self.group_widgets.get(group_name)
-        if not widget:
-            return
-        
-        widget.remove_selected_files()
-        # Sync back to self.groups
-        self.groups[group_name] = widget.files.copy()
-    
-    def _generate_metadata(self) -> pd.DataFrame:
-        # Sync data from widgets
-        for group_name, widget in self.group_widgets.items():
-            self.groups[group_name] = widget.files.copy()
-        
-        column_name = self.column_name_edit.text() or "condition"
-        records = []
-        
-        for group_name, files in self.groups.items():
-            for filename in files:
-                records.append({
-                    'filename': filename,
-                    column_name: group_name
-                })
-        
-        grouped_files = set()
-        for files in self.groups.values():
-            grouped_files.update(files)
-        
-        for f in self.file_list:
-            filename = Path(f).name
-            if filename not in grouped_files:
-                records.append({
-                    'filename': filename,
-                    column_name: 'ungrouped'
-                })
-        
-        return pd.DataFrame(records)
-    
-    def _save_csv(self):
-        df = self._generate_metadata()
-        path, _ = QFileDialog.getSaveFileName(self, "Save Metadata", "", "CSV (*.csv)")
-        if path:
-            df.to_csv(path, index=False)
-            QMessageBox.information(self, "Saved", f"Metadata saved to:\n{path}")
-    
-    def _apply_and_close(self):
-        self.metadata_df = self._generate_metadata()
-        self.accept()
-    
-    def get_metadata(self) -> Optional[pd.DataFrame]:
-        return self.metadata_df
+    stats_results = {}
+    if stats and not stats.get("skipped"):
+        stats_results = stats.get("basic", {}).get("metrics", {}) or {}
+
+    return {
+        "output_dir": str(out),
+        "film_summary": film_summary,   # holds image_summary; key kept for compatibility
+        "deposit_data": deposit_data,
+        "viz_results": viz_results,
+        "spatial_stats": spatial_stats,
+        "stats_results": stats_results,
+        "group_by": group_by,
+        "image_paths": list(image_paths) if image_paths else [],
+    }
+
 
 class AnalysisTab(QWidget):
     """Analysis tab for running analysis on images."""
-    
+
     analysis_complete = Signal(dict)
     
     def __init__(self):
@@ -1342,12 +825,22 @@ class AnalysisTab(QWidget):
         self.use_groups.toggled.connect(self._on_use_groups_toggled)
         groups_layout.addWidget(self.use_groups)
         
-        # Create button
-        self.create_groups_btn = QPushButton("Create Groups...")
-        self.create_groups_btn.clicked.connect(self._open_group_editor)
-        groups_layout.addWidget(self.create_groups_btn)
-        
-        # Groups tree (expandable - click to show files)
+        # Deterministic grouping: derive {file: group} from each file's parent subfolder
+        # (SCAT's "one folder per condition" convention). Replaces the drag-drop editor.
+        self.autogroup_btn = QPushButton("Group by subfolder")
+        self.autogroup_btn.setToolTip(
+            "Assign each selected image to a group named after its parent subfolder.\n"
+            "Double-click a group in the list below to rename it.")
+        # wrap: QPushButton.clicked passes a `checked` bool that would shadow `announce`
+        self.autogroup_btn.clicked.connect(lambda: self._autogroup_by_subfolder(announce=True))
+        groups_layout.addWidget(self.autogroup_btn)
+
+        self.groups_hint = QLabel("Select images, then group by subfolder. Double-click a group to rename.")
+        self.groups_hint.setWordWrap(True)
+        self.groups_hint.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; font-size: 11px;")
+        groups_layout.addWidget(self.groups_hint)
+
+        # Groups tree (expandable - click to show files; group nodes are editable to rename)
         self.groups_tree = QTreeWidget()
         self.groups_tree.setHeaderHidden(True)
         self.groups_tree.setMinimumHeight(150)
@@ -1356,6 +849,9 @@ class AnalysisTab(QWidget):
         self.groups_tree.setAnimated(True)
         # Single click to expand/collapse
         self.groups_tree.itemClicked.connect(self._on_group_tree_clicked)
+        # Right-click a group to rename it (the review/correct affordance)
+        self.groups_tree.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.groups_tree.customContextMenuRequested.connect(self._on_groups_context_menu)
         groups_layout.addWidget(self.groups_tree)
         
         groups_group.setLayout(groups_layout)
@@ -1373,40 +869,6 @@ class AnalysisTab(QWidget):
         # Update groups UI state
         self._on_use_groups_toggled(self.use_groups.isChecked())
         
-        # Analysis Mode
-        mode_group = QGroupBox("Analysis Mode")
-        mode_layout = QVBoxLayout()
-        mode_layout.setSpacing(8)
-        mode_layout.setContentsMargins(10, 12, 10, 10)
-        
-        self.mode_quick = QRadioButton("Quick Analysis")
-        self.mode_quick.setChecked(True)
-        self.mode_quick.setToolTip(
-            "Detection and classification only.\n"
-            "Review and edit results in Results tab, then generate report."
-        )
-        mode_layout.addWidget(self.mode_quick)
-        
-        quick_desc = QLabel("   Detect and classify only. Review results before generating report.")
-        quick_desc.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; font-size: 11px;")
-        mode_layout.addWidget(quick_desc)
-        
-        self.mode_full = QRadioButton("Full Analysis")
-        self.mode_full.setToolTip(
-            "Complete analysis including report generation.\n"
-            "Best for well-trained models where manual review is not needed."
-        )
-        mode_layout.addWidget(self.mode_full)
-        
-        full_desc = QLabel("   Complete analysis with statistics and report. Best for trained models.")
-        full_desc.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; font-size: 11px;")
-        mode_layout.addWidget(full_desc)
-        
-        self.mode_quick.toggled.connect(self._on_mode_changed)
-        
-        mode_group.setLayout(mode_layout)
-        layout.addWidget(mode_group)
-        
         # Options
         options_group = QGroupBox("Options")
         options_layout = QFormLayout()
@@ -1422,7 +884,7 @@ class AnalysisTab(QWidget):
         classifier_label.setStyleSheet("background-color: transparent;")
         options_layout.addRow(classifier_label, self.model_type)
         
-        # Report-related options (disabled in Quick mode)
+        # Report / visualization options (always available; the report is a follow-up action)
         self.annotate = QCheckBox("Generate annotated images")
         self.annotate.setChecked(config.get("analysis.annotate", True))
         options_layout.addRow(self.annotate)
@@ -1449,12 +911,8 @@ class AnalysisTab(QWidget):
         options_layout.addRow(self.save_json)
         
         options_group.setLayout(options_layout)
-        self.options_group = options_group  # Store reference for mode toggle
         layout.addWidget(options_group)
-        
-        # Initialize mode state (Quick mode disables report options)
-        self._on_mode_changed(True)
-        
+
         # Detection settings
         detect_group = QGroupBox("Detection Settings")
         detect_layout = QFormLayout()
@@ -1531,37 +989,11 @@ class AnalysisTab(QWidget):
         config.set("detection.max_area", self.max_area.value())
         config.set("detection.threshold", self.threshold.value())
     
-    def _on_mode_changed(self, quick_mode: bool):
-        """Enable/disable report options based on analysis mode."""
-        # In Quick mode, disable report-related options
-        report_widgets = [
-            (self.annotate, 'annotate'),
-            (self.visualize, 'visualize'),
-            (self.spatial, 'spatial'),
-            (self.stats, 'stats'),
-            (self.report, 'report'),
-        ]
-
-        for widget, config_key in report_widgets:
-            widget.setEnabled(not quick_mode)
-            if quick_mode:
-                widget.setChecked(False)
-            else:
-                # Restore each option from its saved config default, otherwise
-                # switching Quick -> Full would leave a Full analysis with every
-                # report/visualization option silently unchecked.
-                widget.setChecked(config.get(f"analysis.{config_key}", True))
-        
-        # Update Options group title to indicate state
-        if quick_mode:
-            self.options_group.setTitle("Options (Report options available in Full mode)")
-        else:
-            self.options_group.setTitle("Options")
-    
     def _on_use_groups_toggled(self, checked):
         """Enable/disable groups UI based on checkbox."""
-        self.create_groups_btn.setEnabled(checked)
+        self.autogroup_btn.setEnabled(checked)
         self.groups_tree.setEnabled(checked)
+        self.groups_hint.setEnabled(checked)
     
     def _on_group_tree_clicked(self, item, column):
         """Toggle expand/collapse on single click for parent items."""
@@ -1574,16 +1006,17 @@ class AnalysisTab(QWidget):
         self.groups_tree.clear()
         
         for group_name, files in sorted(group_data.items()):
-            # Parent item (group name with count)
+            # Parent item (group name with count); stash the raw name for rename lookup
             parent = QTreeWidgetItem([f"{group_name} ({len(files)} files)"])
+            parent.setData(0, Qt.UserRole, group_name)
             parent.setExpanded(False)
-            
+
             # Child items (file names)
             for filename in sorted(files):
                 child = QTreeWidgetItem([f"  {filename}"])
                 child.setForeground(0, QColor(Theme.TEXT_SECONDARY))
                 parent.addChild(child)
-            
+
             self.groups_tree.addTopLevelItem(parent)
     
     def _browse_input(self):
@@ -1601,13 +1034,21 @@ class AnalysisTab(QWidget):
         
         if files:
             self._selected_files = files
-            config.set("last_input_dir", str(Path(files[0]).parent))
+            # Store the common ancestor (not just files[0].parent) so a later 'Load Previous
+            # Results' + edit can recursively find originals across sibling condition folders.
+            try:
+                root = os.path.commonpath([str(Path(f).parent) for f in files])
+            except ValueError:
+                root = str(Path(files[0]).parent)
+            config.set("last_input_dir", root)
             self._update_input_display()
-            
-            # Reset groups when new files are selected
+
+            # Re-derive groups from the new selection's subfolders (deterministic, no dialog)
             self._group_data = {}
             self._metadata = None
             self.groups_tree.clear()
+            if self.use_groups.isChecked():
+                self._autogroup_by_subfolder(announce=False)
     
     def _update_input_display(self):
         """Update the input path display."""
@@ -1625,44 +1066,71 @@ class AnalysisTab(QWidget):
         """Get list of selected image files."""
         return [Path(f) for f in self._selected_files]
     
-    def _open_group_editor(self):
-        """Open the group editor dialog to create metadata."""
+    def _autogroup_by_subfolder(self, announce=True):
+        """Derive {group: [basename]} deterministically from each file's parent subfolder.
+
+        No LLM / no [agent] extra — groups come from the folder layout the user already has
+        ("one folder per condition"). Basenames must be unique across the selection (SCAT joins
+        group metadata on basename); on a collision we clear grouping and warn. Grouping only
+        engages when there are >=2 distinct subfolders; a single common folder means "no groups".
+        """
         files = self._get_image_files()
-        
         if not files:
-            QMessageBox.warning(self, "No Input", "Please select an input folder or files first.")
+            if announce:
+                QMessageBox.warning(self, "No Input", "Please select input image files first.")
             return
-        
-        file_paths = [str(f) for f in files]
-        
-        # Pass existing groups if any
-        existing_groups = getattr(self, '_group_data', None)
-        
-        try:
-            dialog = GroupEditorDialog(file_paths, self, existing_groups)
-            result = dialog.exec()
-            if result:
-                metadata = dialog.get_metadata()
-                if metadata is not None and len(metadata) > 0:
-                    # Store metadata in memory
-                    self._metadata = metadata
-                    
-                    # Build group data for the list
-                    group_col = metadata.columns[1]  # Second column is the group
-                    group_data = {}
-                    for group_name in metadata[group_col].unique():
-                        if group_name != 'ungrouped':
-                            files = metadata[metadata[group_col] == group_name]['filename'].tolist()
-                            group_data[group_name] = files
-                    
-                    # Update internal storage
-                    self._group_data = group_data
-                    
-                    # Update the groups tree
-                    self._update_groups_list(group_data)
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
+        from .grouping_util import duplicate_basenames
+        dups = duplicate_basenames(files)
+        if dups:
+            self._group_data = {}
+            self._metadata = None
+            self.groups_tree.clear()
+            self.groups_hint.setText(
+                f"Duplicate filenames across folders ({', '.join(dups[:3])}…) — grouping skipped. "
+                "Use unique filenames or a flat folder.")
+            if announce:
+                QMessageBox.warning(self, "Duplicate filenames",
+                    "Some images share a filename across subfolders. SCAT joins group metadata on "
+                    "the filename, so grouping was skipped. Use unique names or a flat folder.")
+            return
+        group_data: dict = {}
+        for f in files:
+            group_data.setdefault(f.parent.name or "ungrouped", []).append(f.name)
+        real = {g: v for g, v in group_data.items() if g and g != "ungrouped"}
+        if len(real) < 2:
+            real = {}  # a single shared folder is not a comparison grouping
+        self._metadata = None
+        self._update_groups_list(real)
+        if real:
+            self.groups_hint.setText(
+                f"{len(real)} group(s) from subfolders. Right-click a group to rename.")
+        else:
+            self.groups_hint.setText(
+                "All selected files share one folder — no groups. "
+                "Organize images into per-condition subfolders to compare.")
+
+    def _on_groups_context_menu(self, pos):
+        """Right-click a top-level group node to rename it (review/correct)."""
+        item = self.groups_tree.itemAt(pos)
+        if item is None or item.parent() is not None:
+            return  # only group (top-level) nodes are renameable
+        old = item.data(0, Qt.UserRole)
+        if not old:
+            return
+        menu = QMenu(self)
+        rename_action = menu.addAction("Rename group…")
+        chosen = menu.exec(self.groups_tree.viewport().mapToGlobal(pos))
+        if chosen != rename_action:
+            return
+        new, ok = QInputDialog.getText(self, "Rename group", "New group name:", text=str(old))
+        new = (new or "").strip()
+        if not ok or not new or new == old or old not in self._group_data:
+            return
+        data = dict(self._group_data)
+        moved = data.pop(old, [])
+        data[new] = data.get(new, []) + moved  # merge if the target name already exists
+        self._update_groups_list(data)
+        self.groups_hint.setText(f"{len(data)} group(s). Right-click a group to rename.")
     
     def _run_analysis(self):
         image_files = self._get_image_files()
@@ -1700,149 +1168,52 @@ class AnalysisTab(QWidget):
         self.worker.start()
     
     def _do_analysis(self, output_dir: str):
-        from PIL import Image
-        
-        output_path = Path(output_dir)
-        
-        # Use pre-computed image files from _run_analysis
-        image_paths = [Path(f) for f in self._image_files_for_analysis]
-        
-        if not image_paths:
+        """Run the canonical pipeline services (mirrors cli.analyze_command), then rebuild the
+        Results-tab dict from the output dir. Executes on the WorkerThread."""
+        from .pipeline import analyze_folder_service, run_statistics_service, generate_report_service
+
+        image_files = list(self._image_files_for_analysis)
+        if not image_files:
             raise ValueError("No images to analyze")
-        
-        model_types = ['threshold', 'rf', 'cnn']
-        model_type = model_types[self.model_type.currentIndex()]
-        
-        config_obj = ClassifierConfig(
+
+        model_type = ['threshold', 'rf', 'cnn'][self.model_type.currentIndex()]
+
+        # Groups: invert the {group: [basename]} review panel into {basename: group}
+        groups = None
+        if self.use_groups.isChecked() and self._group_data:
+            groups = {fn: g for g, files in self._group_data.items() for fn in files}
+
+        res = analyze_folder_service(
+            path=str(Path(image_files[0]).parent),
+            image_paths=image_files,
+            groups=groups,
             model_type=model_type,
-            circularity_threshold=self.threshold.value(),
-            model_path=self.model_path.path() or None
-        )
-        
-        # Get detection model path (U-Net)
-        detection_model = self.detection_model_path.path() or None
-        
-        detector = DepositDetector(
+            model_path=self.model_path.path() or None,
             min_area=self.min_area.value(),
             max_area=self.max_area.value(),
-            sensitive_mode=True,  # Always use sensitive detection (if no U-Net)
-            unet_model_path=detection_model
+            circularity=self.threshold.value(),
+            sensitive_mode=True,  # historical GUI default (sensitive multi-level detection)
+            unet_model_path=self.detection_model_path.path() or None,
+            annotate=self.annotate.isChecked(),
+            visualize=self.visualize.isChecked(),
+            spatial=self.spatial.isChecked(),
+            parallel=config.get("performance.parallel_enabled", True),
+            max_workers=config.get("performance.worker_count", 0),
+            save_json=self.save_json.isChecked(),
+            progress_callback=lambda c, t: self.worker.progress.emit(c, t),
+            output_dir=output_dir,
         )
-        
-        analyzer = Analyzer(detector=detector, classifier_config=config_obj)
-        
-        # Use in-memory metadata if available and use_groups is checked
-        metadata = None
-        group_by = None
-        if self.use_groups.isChecked():
-            if self._group_data:  # In-memory groups from GroupEditor
-                # Create metadata DataFrame from group data
-                rows = []
-                for group_name, files in self._group_data.items():
-                    for filename in files:
-                        rows.append({'filename': filename, 'group': group_name})
-                if rows:
-                    metadata = pd.DataFrame(rows)
-                    group_by = ['group']
-            elif hasattr(self, '_metadata') and self._metadata is not None:
-                metadata = self._metadata
-                # Rename second column to 'group' for consistency
-                if len(metadata.columns) > 1:
-                    metadata = metadata.rename(columns={metadata.columns[1]: 'group'})
-                    group_by = ['group']
-        
-        # Get parallel processing settings
-        parallel_enabled = config.get("performance.parallel_enabled", True)
-        worker_count = config.get("performance.worker_count", 0)  # 0 = auto
-        
-        # Analyze images (potentially in parallel)
-        def progress_cb(current, total):
-            self.worker.progress.emit(current, total)
-        
-        results = analyzer.analyze_batch(
-            image_paths,
-            progress_callback=progress_cb,
-            parallel=parallel_enabled,
-            max_workers=worker_count
-        )
-        
-        # Spatial analysis (sequential - depends on image dimensions)
-        spatial_results = []
-        if self.spatial.isChecked():
-            from .spatial import SpatialAnalyzer
-            spatial_analyzer = SpatialAnalyzer()
-            for path, result in zip(image_paths, results):
-                img = np.array(Image.open(path))
-                spatial_result = spatial_analyzer.analyze(result.deposits, img.shape[:2])
-                spatial_results.append(spatial_result)
-        
-        reporter = ReportGenerator(output_path)
-        reports = reporter.save_all(results, metadata, group_by, save_json=self.save_json.isChecked())
-        
-        if self.annotate.isChecked():
-            annotated_dir = output_path / 'annotated'
-            annotated_dir.mkdir(exist_ok=True)
-            for path, result in zip(image_paths, results):
-                img = np.array(Image.open(path))
-                annotated = analyzer.generate_annotated_image(
-                    img, result.deposits, show_labels=True, skip_artifacts=True
-                )
-                Image.fromarray(annotated).save(annotated_dir / f"{path.stem}_annotated.png")
-        
-        viz_results = {}
-        if self.visualize.isChecked():
-            from .visualization import generate_all_visualizations, generate_spatial_visualizations
-            viz_dir = output_path / 'visualizations'
-            viz_results = generate_all_visualizations(
-                reports['film_summary'], reports['deposit_data'], viz_dir,
-                group_by=group_by[0] if group_by else None
-            )
-            if spatial_results:
-                spatial_viz = generate_spatial_visualizations(spatial_results, viz_dir)
-                viz_results.update(spatial_viz)
-        
-        stats_results = {}
-        if self.stats.isChecked() and group_by:
-            from .statistics import generate_statistics_report
-            # Check if group column exists in film_summary
-            if group_by[0] in reports['film_summary'].columns:
-                stats_results = generate_statistics_report(reports['film_summary'], group_column=group_by[0])
-            else:
-                # Log warning - group column not found
-                print(f"Warning: Group column '{group_by[0]}' not found in film_summary. "
-                      f"Available columns: {list(reports['film_summary'].columns)}")
-        
-        spatial_stats = {}
-        if spatial_results:
-            from .spatial import aggregate_spatial_stats
-            spatial_stats = aggregate_spatial_stats(spatial_results)
-        
+
+        stats = None
+        if self.stats.isChecked() and len(res.groups) >= 2:
+            stats = run_statistics_service(res.output_dir, group_col="group")
+
         if self.report.isChecked():
-            from .report import generate_report
-            generate_report(
-                film_summary=reports['film_summary'],
-                output_dir=output_path,
-                deposit_data=reports['deposit_data'],
-                spatial_stats=spatial_stats,
-                statistical_results=stats_results,
-                visualization_paths=viz_results,
-                group_by=group_by[0] if group_by else None
-            )
-        
-        # Determine if this was a Quick mode analysis
-        is_quick_mode = self.mode_quick.isChecked()
-        
-        return {
-            'film_summary': reports['film_summary'],
-            'deposit_data': reports['deposit_data'],
-            'spatial_stats': spatial_stats,
-            'stats_results': stats_results,
-            'viz_results': viz_results,
-            'output_dir': str(output_path),
-            'image_paths': [str(p) for p in image_paths],
-            'group_by': group_by[0] if group_by else None,
-            'is_quick_mode': is_quick_mode
-        }
+            generate_report_service(res.output_dir, statistical_results=stats, group_by="group")
+
+        group_by = "group" if res.groups else None
+        return _results_dict_from_output(res.output_dir, group_by=group_by,
+                                         image_paths=image_files, stats=stats)
     
     def _on_progress(self, current, total):
         import time
@@ -1890,7 +1261,6 @@ class ResultsTab(QWidget):
     def __init__(self):
         super().__init__()
         self.results = None
-        self._report_pending = False  # Track if regeneration is needed after editing
         self._setup_ui()
     
     def _setup_ui(self):
@@ -1935,8 +1305,8 @@ class ResultsTab(QWidget):
         
         self.generate_report_btn = QPushButton("📊 Generate Report")
         self.generate_report_btn.setToolTip(
-            "Generate annotated images, statistics, visualizations, and HTML report.\n"
-            "Use after Quick Analysis or after editing results."
+            "Regenerate annotated images, statistics, visualizations, and the HTML report.\n"
+            "Use after editing/correcting results in the labeling window."
         )
         self.generate_report_btn.clicked.connect(self._generate_report)
         buttons_layout.addWidget(self.generate_report_btn)
@@ -1985,23 +1355,14 @@ class ResultsTab(QWidget):
     def load_results(self, results: dict):
         self.results = results
         film_summary = results['film_summary']
-        
-        # Set report pending flag if Quick mode was used
-        self._report_pending = results.get('is_quick_mode', False)
-        
+
         total_normal = film_summary['n_normal'].sum()
         total_rod = film_summary['n_rod'].sum()
         total_artifact = film_summary['n_artifact'].sum()
         mean_rod_frac = film_summary['rod_fraction'].mean()
-        
-        # Show mode status in summary
-        mode_text = ""
-        if self._report_pending:
-            mode_text = "<p style='color: #DA4E42;'><b>⚠ Quick Analysis:</b> Click 'Generate Report' when ready.</p>"
-        
+
         summary_text = f"""
         <h3>Summary</h3>
-        {mode_text}
         <p><b>Total Images:</b> {len(film_summary)}</p>
         <p><b>Total Deposits:</b> {film_summary['n_total'].sum():.0f}</p>
         <p><b>Normal:</b> {total_normal:.0f} | <b>ROD:</b> {total_rod:.0f} | <b>Artifact:</b> {total_artifact:.0f}</p>
@@ -2313,26 +1674,14 @@ class ResultsTab(QWidget):
         filename = self.summary_table.item(row, 0).text()
         output_dir = Path(self.results['output_dir'])
         
-        # Open LabelingWindow in EDIT_MODE
-        # Find original image
-        image_path = None
+        # Find original image: in-session exact paths → recursive fallback → annotated image
         stem = Path(filename).stem
-        
-        # Try input_dir from config
-        input_dir = config.get("last_input_dir", "")
-        if input_dir:
-            for ext in ['.tif', '.tiff', '.png', '.jpg', '.jpeg', '.TIF', '.TIFF']:
-                candidate = Path(input_dir) / f"{stem}{ext}"
-                if candidate.exists():
-                    image_path = str(candidate)
-                    break
-        
-        # Fallback to annotated image
+        found = self._find_original_image(filename)
+        image_path = str(found) if found else None
         if not image_path:
             annotated_path = output_dir / 'annotated' / f"{stem}_annotated.png"
             if annotated_path.exists():
                 image_path = str(annotated_path)
-        
         if not image_path:
             QMessageBox.warning(self, "Not Found", f"Original image not found for {filename}")
             return
@@ -2426,11 +1775,8 @@ class ResultsTab(QWidget):
         all_deposits_path = output_dir / 'all_deposits.csv'
         if all_deposits_path.exists():
             self.results['deposit_data'] = pd.read_csv(all_deposits_path)
-        
-        # Mark that report regeneration is needed after editing
-        self.results['is_quick_mode'] = True  # Treat as Quick mode (needs report generation)
-        
-        # Refresh display
+
+        # Refresh display (regenerate the report on demand via the always-on button)
         self.load_results(self.results)
     
     def _open_folder(self):
@@ -2444,6 +1790,30 @@ class ResultsTab(QWidget):
             else:  # Linux
                 subprocess.run(['xdg-open', path])
     
+    def _find_original_image(self, filename):
+        """Locate an original image. Prefers an EXACT basename match among the paths captured
+        at analysis time (handles per-condition subfolders), then a stem match, then a recursive
+        search under the common input root (for disk-loaded results). Returns a Path or None."""
+        stem = Path(filename).stem
+        exts = {'.tif', '.tiff', '.png', '.jpg', '.jpeg'}
+        session = [Path(p) for p in ((self.results or {}).get('image_paths') or [])]
+        for pp in session:                        # 1a. exact basename, in-session
+            if pp.name == filename and pp.exists():
+                return pp
+        for pp in session:                        # 1b. stem match, in-session
+            if pp.stem == stem and pp.exists():
+                return pp
+        input_dir = config.get("last_input_dir", "")
+        if input_dir and Path(input_dir).exists():
+            base = Path(input_dir)
+            for m in base.rglob(filename):        # 2a. exact filename under the root
+                if m.is_file():
+                    return m
+            for m in base.rglob(f"{stem}.*"):     # 2b. stem.* image fallback
+                if m.suffix.lower() in exts:
+                    return m
+        return None
+
     def _generate_report(self):
         """Regenerate annotated images, statistics and report after editing."""
         if not self.results:
@@ -2451,8 +1821,7 @@ class ResultsTab(QWidget):
             return
         
         output_dir = Path(self.results['output_dir'])
-        input_dir = config.get("last_input_dir", "")
-        
+
         if not output_dir.exists():
             QMessageBox.critical(self, "Error", f"Output directory not found: {output_dir}")
             return
@@ -2481,116 +1850,58 @@ class ResultsTab(QWidget):
             self.progress.setValue(10)
             QApplication.processEvents()
             
-            # 1. Regenerate annotated images
+            # 1. Regenerate annotated images from the (possibly edited) labels JSON,
+            #    reusing analyzer.generate_annotated_image instead of an inline cv2 annotator.
+            from .analyzer import Analyzer, deposits_from_labels_json
             annotated_dir = output_dir / 'annotated'
             annotated_dir.mkdir(exist_ok=True)
             deposits_dir = output_dir / 'deposits'
-            
-            colors = {'rod': (255, 0, 0), 'normal': (0, 255, 0), 'artifact': (128, 128, 128)}
-            
+
             for idx, row in image_summary.iterrows():
-                filename = row['filename']
-                stem = Path(filename).stem
-                
-                # Find original image
-                image_path = None
-                if input_dir:
-                    for ext in ['.tif', '.tiff', '.png', '.jpg', '.TIF', '.TIFF', '.PNG', '.JPG']:
-                        candidate = Path(input_dir) / f"{stem}{ext}"
-                        if candidate.exists():
-                            image_path = candidate
-                            break
-                
-                if image_path:
+                stem = Path(row['filename']).stem
+                json_path = deposits_dir / f"{stem}.labels.json"
+                image_path = self._find_original_image(row['filename'])
+                # save_json=False runs write no labels JSON -> nothing to redraw; skip cleanly.
+                if image_path and json_path.exists():
                     image = cv2.imread(str(image_path))
                     if image is not None:
                         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-                        result = image.copy()
-                        
-                        # Load JSON for contours
-                        json_path = deposits_dir / f"{stem}.labels.json"
-                        if json_path.exists():
-                            with open(json_path) as f:
-                                json_data = json.load(f)
-                            
-                            for d in json_data.get('deposits', []):
-                                label = d.get('label', 'unknown')
-                                # Skip artifacts in annotated images
-                                if label == 'artifact':
-                                    continue
-                                
-                                contour = np.array(d['contour'])
-                                # Handle different contour shapes: (N,2), (N,1,2), etc.
-                                if contour.ndim == 3:
-                                    contour = contour.reshape(-1, 2)
-                                elif contour.ndim == 1:
-                                    # Flat array - try to reshape
-                                    contour = contour.reshape(-1, 2)
-                                
-                                color = colors.get(label, (255, 255, 0))
-                                cv2.drawContours(result, [contour.astype(np.int32)], -1, color, 1)
-                                
-                                # Draw ID
-                                if len(contour) > 0 and contour.shape[1] >= 2:
-                                    cx = int(np.mean(contour[:, 0]))
-                                    cy = int(np.mean(contour[:, 1]))
-                                    cv2.putText(result, str(d['id']), (cx + 5, cy - 5),
-                                               cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
-                            
-                            result_bgr = cv2.cvtColor(result, cv2.COLOR_RGB2BGR)
-                            cv2.imwrite(str(annotated_dir / f"{stem}_annotated.png"), result_bgr)
-                
-                self.progress.setValue(10 + int(40 * (idx + 1) / len(image_summary)))
+                        deposits = deposits_from_labels_json(json_path)
+                        annotated = Analyzer.generate_annotated_image(
+                            image, deposits, show_labels=True, skip_artifacts=True)
+                        annotated_bgr = cv2.cvtColor(annotated, cv2.COLOR_RGB2BGR)
+                        cv2.imwrite(str(annotated_dir / f"{stem}_annotated.png"), annotated_bgr)
+                self.progress.setValue(10 + int(40 * (idx + 1) / max(len(image_summary), 1)))
                 QApplication.processEvents()
-            
-            # 2. Regenerate statistics and visualizations
+
+            # 2. Visualizations + statistics + HTML report via the canonical services.
+            from .pipeline import run_statistics_service, generate_report_service
             from .visualization import generate_all_visualizations
-            from .statistics import run_comprehensive_analysis
-            
+
+            group_by = self.results.get('group_by')
             viz_dir = output_dir / 'visualizations'
             viz_results = generate_all_visualizations(
-                image_summary, deposit_data, viz_dir,
-                group_by=self.results.get('group_by')
-            )
-            
+                image_summary, deposit_data, viz_dir, group_by=group_by)
             self.progress.setValue(70)
             QApplication.processEvents()
-            
-            # Run comprehensive statistical analysis
-            stats_results = run_comprehensive_analysis(
-                film_summary=image_summary,
-                deposits_df=deposit_data,
-                group_column=self.results.get('group_by')
-            )
-            
+
+            stats = run_statistics_service(str(output_dir), group_col=group_by or 'group')
             self.progress.setValue(80)
             QApplication.processEvents()
-            
-            # 3. Regenerate HTML report
-            from .report import ReportGenerator
-            reporter = ReportGenerator(output_dir)
-            reporter.generate_html_report(
-                film_summary=image_summary,
-                deposit_data=deposit_data, 
-                statistical_results=stats_results.get('basic', {}).get('metrics', {}),
-                visualization_paths=viz_results,
-                group_by=self.results.get('group_by')
-            )
-            
+
+            generate_report_service(str(output_dir), statistical_results=stats, group_by=group_by)
             self.progress.setValue(100)
-            
-            # Update results and refresh display
+
+            # Update results and refresh display (Results tab wants the flat metrics mapping)
             self.results['film_summary'] = image_summary  # Keep key for compatibility
-            self.results['comprehensive_stats'] = stats_results  # Store comprehensive results
+            self.results['comprehensive_stats'] = stats
             self.results['deposit_data'] = deposit_data
             self.results['viz_results'] = viz_results
-            self.results['is_quick_mode'] = False  # Report generated, no longer quick mode
-            self._report_pending = False
-            
-            # Hide progress bar
+            self.results['stats_results'] = (
+                {} if not stats or stats.get('skipped')
+                else stats.get('basic', {}).get('metrics', {}) or {})
+
             self.progress.setVisible(False)
-            
-            # Reload results to update UI
             self.load_results(self.results)
             QMessageBox.information(self, "Success", "Report generated successfully!")
             
@@ -2631,36 +1942,9 @@ class ResultsTab(QWidget):
             return
         
         try:
-            # Load data
-            image_summary = pd.read_csv(summary_path)
-            deposit_data = pd.read_csv(deposits_path) if deposits_path.exists() else None
-            
-            # Load visualization results
-            viz_results = {}
-            viz_dir = output_dir / 'visualizations'
-            if viz_dir.exists():
-                for img_file in viz_dir.glob('*.png'):
-                    viz_results[img_file.stem] = str(img_file)
-            
-            # Determine group_by from metadata if available
-            group_by = None
-            if 'group' in image_summary.columns:
-                groups = image_summary['group'].dropna().unique()
-                if len(groups) > 1:
-                    group_by = 'group'
-            
-            # Build results dictionary
-            self.results = {
-                'output_dir': str(output_dir),
-                'film_summary': image_summary,  # Keep 'film_summary' key for compatibility
-                'deposit_data': deposit_data,
-                'viz_results': viz_results,
-                'group_by': group_by,
-                'is_quick_mode': False  # Loaded results are complete
-            }
-            
+            # Rebuild via the shared helper (also picks up spatial_stats.json + auto group_by).
+            self.results = _results_dict_from_output(output_dir)
             self.load_results(self.results)
-            
             QMessageBox.information(self, "Success", f"Loaded results from:\n{output_dir}")
             
         except Exception as e:
@@ -2699,11 +1983,17 @@ class MainWindow(QMainWindow):
         header_layout.addWidget(header)
         
         header_layout.addStretch()
-        
+
+        self.assistant_btn = QPushButton("💬 Assistant")
+        self.assistant_btn.setCheckable(True)
+        self.assistant_btn.setToolTip("Show/hide the conversational assistant panel")
+        self.assistant_btn.clicked.connect(self._toggle_chat_dock)
+        header_layout.addWidget(self.assistant_btn)
+
         settings_btn = QPushButton("⚙ Settings")
         settings_btn.clicked.connect(self._open_settings)
         header_layout.addWidget(settings_btn)
-        
+
         layout.addLayout(header_layout)
         
         subtitle = QLabel("Spot Classification and Analysis Tool for Drosophila Excreta")
@@ -2762,9 +2052,39 @@ class MainWindow(QMainWindow):
         
         setup_layout.addWidget(self.setup_sub_tabs)
         self.tabs.addTab(self.setup_tab, "Setup")
-        
+
+        # Conversational assistant dock (lazy — the agent stack is optional)
+        self._build_chat_dock()
+
         self.statusBar().showMessage("Ready")
-    
+
+    def _build_chat_dock(self):
+        """Add the Assistant dock. Imported lazily so `import scat.main_gui` and the core GUI
+        keep working without the [agent] extra; the widget itself only needs PySide6."""
+        self.chat_widget = None
+        self.chat_dock = QDockWidget("Assistant", self)
+        self.chat_dock.setObjectName("assistantDock")
+        try:
+            from .agent.chat_widget import ChatDockWidget
+            self.chat_widget = ChatDockWidget()
+            self.chat_dock.setWidget(self.chat_widget)
+        except Exception as exc:  # PySide-only import should not fail, but degrade gracefully
+            placeholder = QLabel(f"Assistant unavailable: {exc}")
+            placeholder.setWordWrap(True)
+            placeholder.setStyleSheet("color: gray; padding: 12px;")
+            self.chat_dock.setWidget(placeholder)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.chat_dock)
+        self.chat_dock.setMinimumWidth(320)
+        # Open with a roomy panel (the sizeHint prefers ~440; this pins the initial split).
+        self.resizeDocks([self.chat_dock], [460], Qt.Horizontal)
+        visible = config.get("window.chat_visible", True)
+        self.chat_dock.setVisible(visible)
+        self.assistant_btn.setChecked(visible)
+        self.chat_dock.visibilityChanged.connect(self.assistant_btn.setChecked)
+
+    def _toggle_chat_dock(self, checked):
+        self.chat_dock.setVisible(checked)
+
     def _setup_shortcuts(self):
         # Global shortcuts
         QShortcut(QKeySequence(config.get_shortcut("quit")), self, self.close)
@@ -2806,23 +2126,13 @@ class MainWindow(QMainWindow):
         config.set("window.width", self.width(), auto_save=False)
         config.set("window.height", self.height(), auto_save=False)
         config.set("window.maximized", self.isMaximized())
-    
+        if getattr(self, "chat_dock", None) is not None:
+            config.set("window.chat_visible", self.chat_dock.isVisible())
+
     def closeEvent(self, event):
-        # Check if report generation is pending
-        if hasattr(self, 'results_tab') and self.results_tab._report_pending:
-            reply = QMessageBox.question(
-                self, "Report Not Generated",
-                "You have analysis results but the report has not been generated.\n\n"
-                "Click 'Generate Report' in Results tab to create annotated images,\n"
-                "statistics, and HTML report.\n\n"
-                "Do you want to exit anyway?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
-            )
-            if reply == QMessageBox.No:
-                event.ignore()
-                return
-        
+        # Tear down the agent runner (subscription backend owns a daemon asyncio loop)
+        if getattr(self, "chat_widget", None) is not None:
+            self.chat_widget.shutdown()
         self._save_window_state()
         event.accept()
 
