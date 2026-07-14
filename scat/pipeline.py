@@ -173,6 +173,16 @@ def analyze_folder_service(path: str, groups: Optional[dict] = None, model_type:
         except Exception as e:  # spatial is best-effort; never abort the batch
             warnings.append(f"spatial analysis skipped: {e}")
 
+    # Reproducibility sidecar: a self-describing manifest that travels with the results.
+    # Additive (new file) — does not touch the CSVs the parity gate diffs.
+    from . import manifest as _manifest
+    _manifest.write_run_manifest(
+        out, path=path, image_paths=[str(p) for p in images], model_type=mtype, model_path=mpath,
+        circularity=circularity, groups=groups, group_column=(group_by[0] if group_by else None),
+        detection={"min_area": min_area, "max_area": max_area, "edge_margin": edge_margin,
+                   "sensitive_mode": sensitive_mode, "unet_model_path": unet_model_path},
+        warnings=warnings)
+
     summary = reports["film_summary"]
     return AnalyzeResult(
         output_dir=str(out), n_images=len(results),

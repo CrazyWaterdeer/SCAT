@@ -44,19 +44,20 @@ High-leverage: makes the just-merged agent + chat dock reach users reliably.
 
 ## 🟡 Tier 2 — Scientific reproducibility
 
-- [ ] **T2.1 — Provenance run-header enrichment** · M · high
+- [x] **T2.1 — Provenance run-header enrichment** · M · high — DONE (feat/tier2): `scat/manifest.py`
+  writes `run_manifest.json` (dataset fingerprint + version/commit + model+hash + grouping + params)
+  into every results dir; `provenance.start_session` writes a redacted session header.
   `provenance.py` logs per-tool calls only; `read_session()` is never read back. Add a run header:
   dataset fingerprint (folder + file count + hash of sorted basenames/sizes), SCAT version + git commit,
   config snapshot, model id + classifier-model path/hash, and the grouping mapping. Spec §7 calls this
   the basis for a future "methods" section — and it's the natural first slice/manifest of T3.1 (bundles).
   *Where:* `provenance.py:11-18,80`, spec §7.
 
-- [ ] **T2.2 — statistics.py: unify CV + dedup the 5 `compare_*_between_groups`** · M · medium
-  ~18 inline CV sites compute `std/mean*100` with a **different** formula than the existing
-  `_coefficient_of_variation` helper (no `abs`, guard is `mean>0` not `==0`, no NaN filter, no n≥2) — a
-  real inconsistency. Route them through the helper, and extract a shared `_compare_metric_between_groups`
-  for the 5 near-identical analyzer methods (~150 lines dedup). Behavior-changing → add tests first.
-  *Where:* `statistics.py:289` (helper) + inline CV sites (866…2451); `compare_*` at 903/1218/1521/1759/2410.
+- [x] **T2.2 — statistics.py: unify CV + dedup the 5 `compare_*_between_groups`** · M · medium — DONE
+  (feat/tier2). Canonical module-level `coefficient_of_variation` (n<2→NaN, NaN-skip, abs) replaces
+  17 inline `std/mean*100` sites; the old inline formula reported a misleading `0` for n=1 groups.
+  CV is descriptive (not inferential) so significance tests are unaffected; no prior data to preserve
+  (user's call). Shared `compare_group_values` dispatch helper dedups all 5 compare_* methods.
 
 ---
 

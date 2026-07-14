@@ -51,3 +51,23 @@ def test_pigment_density_handles_misaligned_nans():
     assert abs(res["mean_pigment_density"] - 3.5) < 1e-9
     # normal label: 10/5=2.0 (row1 dropped) -> 2.0
     assert abs(res["normal_mean_pigment_density"] - 2.0) < 1e-9
+
+
+def test_coefficient_of_variation_canonical():
+    import numpy as np
+    from scat.statistics import coefficient_of_variation as cv
+    assert np.isnan(cv([5.0]))                    # CV of one sample is undefined (was 0)
+    assert not np.isnan(cv([1.0, 2.0, np.nan]))   # NaN skipped -> computed over the rest
+    assert abs(cv([10.0, 12.0, 8.0]) - float(np.std([10, 12, 8]) / 10 * 100)) < 1e-9
+    assert np.isnan(cv([-1.0, 1.0]))              # mean 0 -> NaN
+    assert np.isnan(cv([]))                       # empty -> NaN
+
+
+def test_compare_group_values_dispatch():
+    import numpy as np
+    from scat.statistics import compare_group_values
+    two = compare_group_values({"a": np.array([1., 2, 3, 4]), "b": np.array([3., 4, 5, 6])})
+    assert two.get("group1_name") == "a" and two.get("group2_name") == "b"
+    multi = compare_group_values({"a": np.array([1., 2, 3]), "b": np.array([2., 3, 4]),
+                                  "c": np.array([5., 6, 7])})
+    assert "overall_test" in multi or "pairwise_comparisons" in multi
