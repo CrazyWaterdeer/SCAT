@@ -71,3 +71,29 @@ def test_compare_group_values_dispatch():
     multi = compare_group_values({"a": np.array([1., 2, 3]), "b": np.array([2., 3, 4]),
                                   "c": np.array([5., 6, 7])})
     assert "overall_test" in multi or "pairwise_comparisons" in multi
+
+
+def test_correct_pvalues_holm_restores_input_order():
+    from scat.statistics import correct_pvalues
+    # unsorted input; Holm must return values mapped back to the ORIGINAL positions
+    out = correct_pvalues([0.04, 0.01, 0.03], "holm")
+    # sort asc [0.01@1,0.03@2,0.04@0] * [3,2,1] = [0.03,0.06,0.04]; cummax=[0.03,0.06,0.06]
+    assert abs(out[1] - 0.03) < 1e-9 and abs(out[0] - 0.06) < 1e-9 and abs(out[2] - 0.06) < 1e-9
+
+
+def test_correct_pvalues_bonferroni_and_passthrough():
+    from scat.statistics import correct_pvalues
+    assert correct_pvalues([0.02, 0.5], "bonferroni") == [0.04, 1.0]
+    assert correct_pvalues([0.02, 0.5], "none") == [0.02, 0.5]
+
+
+def test_analyzer_delegates_to_module_correct_pvalues():
+    from scat.statistics import correct_pvalues, StatisticalAnalyzer
+    p = [0.04, 0.01, 0.03, 0.2, 0.005]
+    assert StatisticalAnalyzer()._correct_pvalues(p, "holm") == correct_pvalues(p, "holm")
+
+
+def test_visualization_uses_canonical_correct_pvalues():
+    # the drifted Visualizer._correct_pvalues copy is gone; viz delegates to statistics
+    from scat import visualization
+    assert not hasattr(visualization.Visualizer, "_correct_pvalues")

@@ -3,6 +3,7 @@ Configuration management for SCAT.
 Saves and loads user settings to/from JSON file.
 """
 
+import copy
 import json
 from pathlib import Path
 from typing import Any, Dict
@@ -130,12 +131,14 @@ class Config:
                 return self._merge_defaults(loaded)
             except (json.JSONDecodeError, IOError):
                 pass
-        return DEFAULT_CONFIG.copy()
-    
+        return copy.deepcopy(DEFAULT_CONFIG)
+
     def _merge_defaults(self, loaded: Dict) -> Dict:
         """Merge loaded config with defaults for missing keys."""
-        result = DEFAULT_CONFIG.copy()
-        
+        # deepcopy, NOT shallow .copy(): deep_update recurses into nested dicts, so a shallow copy
+        # would mutate the shared nested dicts of the module-global DEFAULT_CONFIG in place.
+        result = copy.deepcopy(DEFAULT_CONFIG)
+
         def deep_update(base: Dict, update: Dict):
             for key, value in update.items():
                 if key in base and isinstance(base[key], dict) and isinstance(value, dict):
@@ -192,7 +195,7 @@ class Config:
     
     def reset_shortcuts(self):
         """Reset all shortcuts to defaults."""
-        self._data['shortcuts'] = DEFAULT_CONFIG['shortcuts'].copy()
+        self._data['shortcuts'] = copy.deepcopy(DEFAULT_CONFIG['shortcuts'])
         self.save()
     
     @property
