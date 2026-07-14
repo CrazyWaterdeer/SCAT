@@ -23,7 +23,6 @@ from datetime import datetime
 from pathlib import Path
 
 _PENDING_CAP = 50
-_MAX_RUNS_IN_LEDGER = 20
 _MANIFEST = "run_manifest.json"
 _SUMMARY = "image_summary.csv"
 
@@ -235,28 +234,3 @@ def analysis_status(folder, *, image_paths=None, search_roots=None) -> dict:
             "latest_results_dir": records[-1].results_dir if records else None, "runs": runs,
             "note": "analyzed = basename seen in a prior run; runs may use different params — not "
                     "reusable for whole-experiment stats without combine_results"}
-
-
-def format_ledger(payload, *, max_chars: int = 1500) -> str:
-    """Compact, deterministic, hard char-capped text from a find_analyses list or an analysis_status dict."""
-    lines: list[str] = []
-    if isinstance(payload, dict):
-        st = payload.get("status")
-        if st == "complete":
-            lines.append(f"Already fully analyzed ({payload['n_current']} images) -> {payload['results_dir']}")
-        elif st == "partial":
-            lines.append(f"{payload['n_analyzed']}/{payload['n_current']} images already analyzed, "
-                         f"{payload['n_pending']} pending; latest results {payload.get('latest_results_dir')}")
-        elif st == "ambiguous":
-            lines.append(f"Prior results exist but cannot be mapped: {payload.get('reason')}")
-        elif st == "none":
-            lines.append(f"No prior analysis for these {payload['n_current']} images.")
-    else:
-        for r in list(payload)[:_MAX_RUNS_IN_LEDGER]:
-            g = f" groups={r.groups}" if r.groups else ""
-            lines.append(f"- {r.results_dir} ({r.n_images} imgs{g}) [{r.status}] {r.created_at or ''}".rstrip())
-        extra = len(payload) - _MAX_RUNS_IN_LEDGER
-        if extra > 0:
-            lines.append(f"  +{extra} more")
-    text = "\n".join(lines)
-    return text if len(text) <= max_chars else text[:max_chars] + "…"

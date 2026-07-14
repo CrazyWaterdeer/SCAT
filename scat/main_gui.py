@@ -19,7 +19,7 @@ if sys.platform == 'win32':
         pass  # Ignore on non-Windows or if it fails
 import json
 from pathlib import Path
-from typing import Optional, Dict, List
+from typing import List
 import numpy as np
 import pandas as pd
 import cv2
@@ -29,10 +29,10 @@ from PySide6.QtWidgets import (
     QPushButton, QLabel, QFileDialog, QTabWidget, QGroupBox,
     QSpinBox, QDoubleSpinBox, QFormLayout, QComboBox, QCheckBox,
     QProgressBar, QTextEdit, QTableWidget, QTableWidgetItem,
-    QHeaderView, QSplitter, QLineEdit, QMessageBox, QScrollArea,
+    QHeaderView, QLineEdit, QMessageBox, QScrollArea,
     QDialog, QKeySequenceEdit, QDialogButtonBox,
-    QGraphicsView, QGraphicsScene, QListWidget, QMenu, QInputDialog,
-    QTreeWidget, QTreeWidgetItem, QFrame, QDockWidget
+    QGraphicsView, QGraphicsScene, QMenu, QInputDialog,
+    QTreeWidget, QTreeWidgetItem, QDockWidget
 )
 from PySide6.QtCore import Qt, QThread, Signal, QSize, QRectF
 from PySide6.QtGui import (
@@ -41,9 +41,6 @@ from PySide6.QtGui import (
 )
 
 # Import SCAT modules
-from .detector import DepositDetector
-from .classifier import ClassifierConfig
-from .analyzer import Analyzer, ReportGenerator
 from .config import config, get_timestamped_output_dir
 from .ui_common import (
     Theme, NoScrollSpinBox, NoScrollDoubleSpinBox, NoScrollComboBox,

@@ -156,12 +156,12 @@ def calculate_acidity_index(hue: float) -> float:
     # Normalize hue to 0-1 scale (inverted: lower hue = higher acidity)
     hue_clamped = max(HUE_AT_PH_MIN, min(HUE_AT_PH_MAX, hue))
     acidity = 1.0 - (hue_clamped - HUE_AT_PH_MIN) / (HUE_AT_PH_MAX - HUE_AT_PH_MIN)
-    
+
     return round(max(0.0, min(1.0, acidity)), 3)
 
 
-# Legacy function for backward compatibility
+# Backward-compatibility alias (kept for external scripts; internal code uses estimate_ph_category).
 def estimate_ph(hue: float) -> str:
-    """Estimate pH category from BPB hue value. (Deprecated: use estimate_ph_category)"""
+    """Deprecated alias for estimate_ph_category."""
     return estimate_ph_category(hue)
 
