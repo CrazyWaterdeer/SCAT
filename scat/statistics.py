@@ -65,6 +65,52 @@ def compare_group_values(group_values: Dict, alpha: float = 0.05) -> Dict:
     return analyzer.compare_multiple_groups(group_values, correction='holm')
 
 
+def _compare_metric_between_groups(film_summary, group_column, metric_column, alpha, *,
+                                   include_median: bool) -> Dict:
+    """Shared body of the pigmentation/size/density/morphology group comparisons — they live on four
+    different analyzer classes but differ only in the metric column and whether the per-group stats
+    include a median (compare_ph is bespoke: pH transform + different keys, so it stays separate).
+    Per-group descriptive stats (n/mean/std/[median]/cv) over the non-NaN metric values, then the
+    shared significance dispatch. Key order/values match each metric's original output exactly."""
+    if metric_column not in film_summary.columns:
+        return {'error': f'{metric_column} column not found'}
+
+    if group_column not in film_summary.columns:
+        return {'error': f'{group_column} column not found'}
+
+    groups = [g for g in film_summary[group_column].unique()
+              if g != 'ungrouped' and pd.notna(g)]
+
+    if len(groups) < 2:
+        return {'error': 'Need at least 2 groups for comparison'}
+
+    group_data = {}
+    group_stats = {}
+    for group in groups:
+        values = film_summary[film_summary[group_column] == group][metric_column].dropna().values
+        if len(values) >= 2:
+            group_data[group] = values
+            stats = {'n': len(values), 'mean': float(np.mean(values)), 'std': float(np.std(values))}
+            if include_median:
+                stats['median'] = float(np.median(values))
+            stats['cv'] = coefficient_of_variation(values)
+            group_stats[group] = stats
+
+    valid_groups = list(group_data.keys())
+
+    if len(valid_groups) < 2:
+        return {'error': 'Insufficient data in groups', 'group_statistics': group_stats}
+
+    comparison = compare_group_values(group_data, alpha)
+
+    return {
+        'metric': metric_column,
+        'group_statistics': group_stats,
+        'n_groups': len(valid_groups),
+        'comparison': comparison
+    }
+
+
 class StatisticalAnalyzer:
     """Statistical analysis for excreta data."""
     
@@ -1021,62 +1067,9 @@ class PigmentationAnalyzer:
         group_column: str,
         iod_column: str = 'total_iod'
     ) -> Dict:
-        """
-        Compare pigmentation between experimental groups.
-        
-        Args:
-            film_summary: DataFrame with film-level data
-            group_column: Column name for grouping
-            iod_column: IOD column to compare
-            
-        Returns:
-            Dict with group comparison results
-        """
-        if iod_column not in film_summary.columns:
-            return {'error': f'{iod_column} column not found'}
-        
-        if group_column not in film_summary.columns:
-            return {'error': f'{group_column} column not found'}
-        
-        groups = [g for g in film_summary[group_column].unique() 
-                  if g != 'ungrouped' and pd.notna(g)]
-        
-        if len(groups) < 2:
-            return {'error': 'Need at least 2 groups for comparison'}
-        
-        # Group statistics
-        group_stats = {}
-        group_data = {}
-        
-        for group in groups:
-            values = film_summary[film_summary[group_column] == group][iod_column].dropna().values
-            if len(values) >= 2:
-                group_stats[group] = {
-                    'n': len(values),
-                    'mean': float(np.mean(values)),
-                    'std': float(np.std(values)),
-                    'median': float(np.median(values)),
-                    'cv': coefficient_of_variation(values)
-                }
-                group_data[group] = values
-        
-        valid_groups = list(group_data.keys())
-        
-        if len(valid_groups) < 2:
-            return {
-                'error': 'Insufficient data in groups',
-                'group_statistics': group_stats
-            }
-        
-        # Statistical comparison
-        comparison = compare_group_values(group_data, self.alpha)
-        
-        return {
-            'metric': iod_column,
-            'group_statistics': group_stats,
-            'n_groups': len(valid_groups),
-            'comparison': comparison
-        }
+        """Compare pigmentation (IOD) between experimental groups."""
+        return _compare_metric_between_groups(
+            film_summary, group_column, iod_column, self.alpha, include_median=True)
 
 
 def analyze_pigmentation(
@@ -1315,58 +1308,9 @@ class SizeDistributionAnalyzer:
         group_column: str,
         size_column: str = 'normal_mean_area'
     ) -> Dict:
-        """
-        Compare deposit size between experimental groups.
-        
-        Args:
-            film_summary: DataFrame with film-level data
-            group_column: Column name for grouping
-            size_column: Size metric column to compare
-            
-        Returns:
-            Dict with group comparison results
-        """
-        if size_column not in film_summary.columns:
-            return {'error': f'{size_column} column not found'}
-        
-        if group_column not in film_summary.columns:
-            return {'error': f'{group_column} column not found'}
-        
-        groups = [g for g in film_summary[group_column].unique() 
-                  if g != 'ungrouped' and pd.notna(g)]
-        
-        if len(groups) < 2:
-            return {'error': 'Need at least 2 groups for comparison'}
-        
-        # Group data
-        group_data = {}
-        group_stats = {}
-        
-        for group in groups:
-            values = film_summary[film_summary[group_column] == group][size_column].dropna().values
-            if len(values) >= 2:
-                group_data[group] = values
-                group_stats[group] = {
-                    'n': len(values),
-                    'mean': float(np.mean(values)),
-                    'std': float(np.std(values)),
-                    'cv': coefficient_of_variation(values)
-                }
-        
-        valid_groups = list(group_data.keys())
-        
-        if len(valid_groups) < 2:
-            return {'error': 'Insufficient data in groups', 'group_statistics': group_stats}
-        
-        # Statistical comparison
-        comparison = compare_group_values(group_data, self.alpha)
-        
-        return {
-            'metric': size_column,
-            'group_statistics': group_stats,
-            'n_groups': len(valid_groups),
-            'comparison': comparison
-        }
+        """Compare deposit size between experimental groups."""
+        return _compare_metric_between_groups(
+            film_summary, group_column, size_column, self.alpha, include_median=False)
 
 
 def analyze_size_distribution(
@@ -1544,59 +1488,9 @@ class DensityAnalyzer:
         group_column: str,
         density_metric: str = 'n_total'
     ) -> Dict:
-        """
-        Compare deposit density between experimental groups.
-        
-        Args:
-            film_summary: DataFrame with film-level data
-            group_column: Column name for grouping
-            density_metric: Metric to compare ('n_total', 'rod_fraction', etc.)
-            
-        Returns:
-            Dict with group comparison results
-        """
-        if density_metric not in film_summary.columns:
-            return {'error': f'{density_metric} column not found'}
-        
-        if group_column not in film_summary.columns:
-            return {'error': f'{group_column} column not found'}
-        
-        groups = [g for g in film_summary[group_column].unique() 
-                  if g != 'ungrouped' and pd.notna(g)]
-        
-        if len(groups) < 2:
-            return {'error': 'Need at least 2 groups for comparison'}
-        
-        # Group data
-        group_data = {}
-        group_stats = {}
-        
-        for group in groups:
-            values = film_summary[film_summary[group_column] == group][density_metric].dropna().values
-            if len(values) >= 2:
-                group_data[group] = values
-                group_stats[group] = {
-                    'n': len(values),
-                    'mean': float(np.mean(values)),
-                    'std': float(np.std(values)),
-                    'median': float(np.median(values)),
-                    'cv': coefficient_of_variation(values)
-                }
-        
-        valid_groups = list(group_data.keys())
-        
-        if len(valid_groups) < 2:
-            return {'error': 'Insufficient data in groups', 'group_statistics': group_stats}
-        
-        # Statistical comparison
-        comparison = compare_group_values(group_data, self.alpha)
-        
-        return {
-            'metric': density_metric,
-            'group_statistics': group_stats,
-            'n_groups': len(valid_groups),
-            'comparison': comparison
-        }
+        """Compare deposit density ('n_total', 'rod_fraction', ...) between experimental groups."""
+        return _compare_metric_between_groups(
+            film_summary, group_column, density_metric, self.alpha, include_median=True)
     
     def calculate_activity_index(
         self,
@@ -2186,58 +2080,9 @@ class MorphologyAnalyzer:
         group_column: str,
         metric_column: str = 'normal_mean_circularity'
     ) -> Dict:
-        """
-        Compare morphology metrics between experimental groups.
-        
-        Args:
-            film_summary: DataFrame with film-level data
-            group_column: Column name for grouping
-            metric_column: Morphology metric to compare
-            
-        Returns:
-            Dict with group comparison results
-        """
-        if metric_column not in film_summary.columns:
-            return {'error': f'{metric_column} column not found'}
-        
-        if group_column not in film_summary.columns:
-            return {'error': f'{group_column} column not found'}
-        
-        groups = [g for g in film_summary[group_column].unique() 
-                  if g != 'ungrouped' and pd.notna(g)]
-        
-        if len(groups) < 2:
-            return {'error': 'Need at least 2 groups for comparison'}
-        
-        # Group data
-        group_data = {}
-        group_stats = {}
-        
-        for group in groups:
-            values = film_summary[film_summary[group_column] == group][metric_column].dropna().values
-            if len(values) >= 2:
-                group_data[group] = values
-                group_stats[group] = {
-                    'n': len(values),
-                    'mean': float(np.mean(values)),
-                    'std': float(np.std(values)),
-                    'cv': coefficient_of_variation(values)
-                }
-        
-        valid_groups = list(group_data.keys())
-        
-        if len(valid_groups) < 2:
-            return {'error': 'Insufficient data in groups', 'group_statistics': group_stats}
-        
-        # Statistical comparison
-        comparison = compare_group_values(group_data, self.alpha)
-        
-        return {
-            'metric': metric_column,
-            'group_statistics': group_stats,
-            'n_groups': len(valid_groups),
-            'comparison': comparison
-        }
+        """Compare morphology metrics between experimental groups."""
+        return _compare_metric_between_groups(
+            film_summary, group_column, metric_column, self.alpha, include_median=False)
     
     def detect_morphological_outliers(
         self,
