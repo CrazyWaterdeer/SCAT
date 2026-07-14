@@ -1,166 +1,170 @@
-# T3.1 — Durable context ledger + resume + self-contained result bundles
+# T3.1 — Durable context ledger + resume + result discovery
 
-**Roadmap:** T3.1 (Tier 3, L · high). **Spec refs:** §4.1 / §7 / §13 "Later". **Branch:** `feat/t3.1-context-ledger`.
-**Builds on:** T2.1 (`run_manifest.json` — this spec's on-disk source of truth is that manifest + `image_summary.csv`).
+**Roadmap:** T3.1 (Tier 3, was L · high — Codex-informed rescope to ~M). **Spec refs:** §4.1 / §7 / §13 "Later".
+**Branch:** `feat/t3.1-context-ledger`. **Builds on:** T2.1 (`run_manifest.json`).
 
 ## Problem
 
 Both runners get a **static** `SYSTEM_PROMPT` at construction (`backend.py:36,45`) and nothing ever
-injects "what has already been analyzed." The prompt even ends with *"Treat any injected
+tells the agent "what has already been analyzed." The prompt even ends with *"Treat any injected
 session/progress context as authoritative — do not re-analyze images already done"* — a promise no
-code keeps today. Consequences:
+code keeps. Consequences:
 
-1. **Re-analysis.** Ask "analyze /data/exp1", come back later (new `scat chat`, or the same chat after
-   context compaction) and say "finish exp1" → the agent re-runs every image from scratch. Wasteful and
-   it silently produces a *second* results dir, fragmenting the outputs.
-2. **No resume / no progress memory.** There is no "7/12 done, 5 pending" state that survives a restart
-   or a compaction. The durable record already exists on disk (T2.1's `run_manifest.json` +
-   `image_summary.csv`) but nothing reads it back.
-3. **Prior results are undiscoverable to the agent.** To "run stats on the exp1 results I made
-   yesterday" the user must paste the timestamped `results_YYYYmmdd_HHMMSS/` path by hand — the agent
-   can't list what's on disk.
+1. **Re-analysis.** "Analyze /data/exp1"; later (new `scat chat`, or the same chat after compaction)
+   "finish exp1" → the agent re-runs every image and silently writes a *second* results dir.
+2. **No resume / progress memory** that survives a restart or compaction, though the durable record
+   already exists on disk (T2.1's `run_manifest.json` + `image_summary.csv`).
+3. **Prior results are undiscoverable to the agent** — "run stats on yesterday's exp1 results" forces
+   the user to paste a timestamped `results_YYYYmmdd_HHMMSS/` path by hand.
 
-## What already exists (reuse, don't rebuild)
+## Ground facts (verified in code)
 
-- **`run_manifest.json`** in every results dir (T2.1): `dataset.path`, `dataset.{n_images,sha256,sample}`,
-  `model`, `grouping.{column,mapping}`, `detection`, `warnings`, `created_at`, `scat_version`,
-  `git_commit`. The self-describing, portable record — a results dir is *already* a "self-contained
-  bundle" of metadata. Its `dataset.sample` is only the first 10 relpaths, so it is **not** the
-  authoritative per-image list.
-- **`image_summary.csv`** in every results dir: one row per analyzed image, column `filename` — the
-  **authoritative exact list** of images that run analyzed.
-- Results dirs are written by `get_timestamped_output_dir(Path(path).parent, "results")` →
-  `results_<YYYYmmdd_HHMMSS>/` **as a sibling of the analyzed folder** (or its parent when a single file).
-- The agent's recipe already calls `scan_folder(path)` **first, every time** (`prompts.py:9`).
+- **`image_summary.csv`** has one row per analyzed image, column `filename`, and that value is the
+  image **basename** (`analyzer.py:169` `filename=image_path.name`; failure path `:228` likewise). It
+  is the authoritative per-image record — but **basename-only**: there is no relpath/abspath anywhere,
+  so resume matching is *inherently* basename-level.
+- **`run_manifest.json`** (written **last**, `pipeline.py:179`, after the CSVs at `:131`): `dataset.path`,
+  `dataset.sha256` (order-independent hash over sorted `relpath:size` — a **whole-dataset** fingerprint),
+  `dataset.{n_images,sample[:10]}`, `model`, `grouping.{column,mapping}`, `detection`, `warnings`,
+  `created_at`, `scat_version`, `git_commit`. Because it is written last, **manifest present ⇒ the run
+  finished and the CSV exists**; a CSV with no manifest ⇒ a crashed/in-progress run.
+- Results dirs: `get_timestamped_output_dir(Path(path).parent, "results")` →
+  `results_<YYYYmmdd_HHMMSS>/` **as a sibling of the analyzed folder** (parent of the file for a single
+  file).
+- The agent recipe already calls `scan_folder(path)` **first, every turn** (`prompts.py:9`).
+- `analyze_folder_service` **already accepts `image_paths`** and **refuses grouping on duplicate
+  basenames** (`pipeline.py:88,92`). `scan_folder_service`, `run_statistics_service`,
+  `generate_report_service` are all core (no agent deps) — the packaging guard applies to any new core
+  module too.
 
-## Design
+## Design — discovery + tool-pull, not per-turn injection
 
-Three slices, smallest-blast-radius first. Slices 1 + 3 are core (no agent/LLM deps, uniform across
-both backends, purely derived from on-disk artifacts — the roadmap's "rebuild from on-disk results").
-Slice 2 is the runner-level always-on ledger the roadmap literally asks for.
+The whole feature is a **core** on-disk index (`scat/results_index.py`) surfaced two ways the agent
+already reaches for: enriched `scan_folder` output (the recipe's first call) and an explicit
+`list_analyses` tool it can pull any turn. **No runner changes, no per-turn system/user-text injection,
+no backend divergence** — that was the original plan's over-build (see "Codex review — incorporated",
+points 4/5). The manifest+CSV on disk *are* the durable ledger; we read them back.
 
-### `scat/results_index.py` (NEW, core — json + pandas + pathlib only)
+### `scat/results_index.py` (NEW, core — json + pandas + pathlib only, no agent/pydantic/anthropic)
 
-The single on-disk "ledger builder." No agent, pydantic, or anthropic imports (packaging guard applies).
+- `find_analyses(search_roots) -> list[AnalysisRecord]` — for each root (a folder we might have written
+  results beside), glob its **direct children** `results_*/run_manifest.json` (and accept a root that is
+  itself a results dir). For each: parse the manifest, read the sibling `image_summary.csv` for the exact
+  basename set. Record `{results_dir, created_at, dataset_path (resolved), dataset_sha256, n_images,
+  analyzed_basenames:frozenset, groups, model, detection, warnings, status}` where `status` ∈
+  {`complete`, `partial` (CSV but no/*unreadable* manifest), `unreadable`}. **Best-effort**: never
+  raises; a dir that can't be read becomes a `skipped` entry with a reason (surfaced, not silently
+  dropped — Codex trap). Deterministic order: parse `created_at`; sort by (parsed_ts or epoch-0, then
+  `results_dir`) so missing/dup timestamps don't make ordering nondeterministic.
+- `analysis_status(folder, *, image_paths=None, search_roots=None) -> dict` — the analysed-vs-pending
+  delta for one target folder, computed in **two tiers of confidence**:
+  1. **Fingerprint-verified complete (strong).** Compute `manifest.dataset_fingerprint(current_images)`;
+     if any discovered run covering `folder` has `dataset_sha256 == that fingerprint`, the folder was
+     analyzed **exactly** by that run → `{status:"complete", n_pending:0, verified:true,
+     results_dir:…}`. Immune to basename ambiguity (whole-dataset hash). This is the headline resume
+     case: reuse that dir for stats/report, re-analyze nothing.
+  2. **Per-image delta (basename, guarded).** Otherwise, if the **current** image set has **unique
+     basenames**, classify each current image analyzed/pending by basename membership across covering
+     runs → `{status:"partial"|"none", n_current, n_analyzed, n_pending, pending:[…capped],
+     latest_results_dir, verified:false}`. If the current set has **duplicate basenames**, refuse a
+     numeric split: `{status:"ambiguous", reason:"duplicate basenames — cannot map results by basename",
+     runs:[…]}` and let the agent handle it (never emit unsafe counts — Codex 1).
+  - "Covers `folder`" is **exact resolved-path equality**: `Path(dataset_path).resolve() ==
+    Path(folder).resolve()` (or single-file parent). No descendant/prefix matching in v1 — it invites
+    false positives on nested experiments (Codex 2). Stale-same-name folders are handled by tier 1
+    (fingerprint mismatch ⇒ not "complete") and tier 2's `verified:false` labeling.
+- `format_ledger(records|status, *, max_chars=1500) -> str` — compact, deterministic, **hard char-cap**
+  (not just item counts — Codex trap) plain text. Manifests carry no secrets (T2.1 F3), so nothing to
+  redact.
 
-- `find_analyses(search_roots) -> list[AnalysisRecord]` — for each root, glob for `*/run_manifest.json`
-  (results dirs are direct children of the folders we search; also accept the root itself being a
-  results dir). Read each manifest; read the sibling `image_summary.csv` for the exact `filename` set.
-  Returns records `{results_dir, created_at, dataset_path, n_images, analyzed_filenames:set, groups,
-  model, sha256, warnings}`. Best-effort: a dir with a malformed manifest or missing CSV is skipped,
-  never raises. Deterministic order (sort by `created_at` then `results_dir`).
-- `analysis_status(folder, *, image_paths=None) -> dict` — the "analysed vs pending" delta for one
-  target folder. Enumerate current images via `pipeline.list_images(folder)` (or the explicit
-  `image_paths`); discover analyses whose `dataset_path` covers `folder` (scan `folder`'s parent for
-  sibling results dirs); classify each current image as **analyzed** (its basename ∈ some covering
-  run's `analyzed_filenames`) or **pending**. Return
-  `{folder, n_current, n_analyzed, n_pending, pending:[names…capped], latest_results_dir, runs:[…]}`.
-  Matching is by **basename** — consistent with how SCAT joins group metadata (`grouping_util`,
-  `analyze_folder_service`'s duplicate-basename guard), so the same key space is used end to end.
-- `format_ledger(records|status) -> str` — compact, deterministic, **token-bounded** plain text for
-  injection (cap the number of runs and the pending list; summarize the rest as "+N more"). No secrets
-  (manifests carry none — T2.1 F3 already redacts the provenance snapshot; manifests never held keys).
+### Slice 1 — `scan_folder` reports resume status (turn-1, both backends, zero runner changes)
 
-### Slice 1 — enrich `scan_folder` with resume status (turn 1, both backends, zero runner changes)
+`scan_folder_service(path)` gains an **additive** key `already_analyzed =
+results_index.analysis_status(path)` (best-effort; omit the key on any error — never break scan; parity
+gate untouched, no CSV change). Because the recipe scans first, the agent sees resume state on the very
+first turn of a *fresh* process — no session state needed. Update `prompts.py` step 1: read
+`already_analyzed`; if `status=="complete"`, **reuse `results_dir`** for stats/report and re-analyze
+nothing; if `partial`, offer pending-only (see Slice 3) and be explicit it's a separate dir; if
+`ambiguous`, tell the user about the basename clash.
 
-`scan_folder_service(path)` (`pipeline.py:57`) gains an **additive** key
-`already_analyzed = results_index.analysis_status(path)` (best-effort; on any error omit the key, never
-break scan). Because the recipe calls `scan_folder` first, the agent sees "7/12 already analyzed, 5
-pending, prior results at <dir>" on the **very first turn of a fresh session** — resume works after a
-full restart with no session state at all. Update `prompts.py` step 1 to tell the agent to **read
-`already_analyzed` and, when images are already done, offer to analyze only the pending ones / reuse the
-existing results dir for stats+report** instead of blindly re-running.
+### Slice 2 — `list_analyses` tool + `get_context_ledger` (pull the ledger any turn)
 
-Note: `analyze_folder` today always analyzes *all* images it globs. Resuming "only the pending"
-requires passing the pending subset. `analyze_folder_service` **already accepts `image_paths`** (added
-for the GUI multi-file picker) — so the agent can call `analyze_folder(path, image_paths=<pending>,
-groups=…)`. No new pipeline capability needed; only the `analyze_folder` **tool** must expose
-`image_paths` (it currently doesn't forward it — verify and add). **Open question for review:** merging
-a pending-only run with the prior run's results dir is out of scope for v1 — a pending-only run writes
-its *own* results dir, and stats/report run per-dir. Document this limitation; do not silently produce
-partial stats. (See Risk R3.)
+A `list_analyses(folder=None) -> list` **@tool** over `find_analyses` (default roots = cwd + any folder
+the agent has scanned; explicit `folder` scans beside it). Returns each run's
+`{results_dir, dataset_path, created_at, n_images, groups, status}` so the agent can answer "run stats
+on yesterday's exp1 results" without a hand-pasted path, and can **re-pull the ledger after a
+compaction** instead of relying on always-injected state (Codex 4's "explicit tool the agent can call
+every turn"). Prompt guidance: when resuming/continuing prior work or unsure what's done, call
+`list_analyses` / re-`scan_folder`. This replaces the dropped per-turn-injection design.
 
-### Slice 2 — always-on ledger injected each turn (survives mid-session compaction)
+### Slice 3 (last, cuttable) — correct partial resume via strict `combine_results`
 
-Slice 1 covers a fresh start but not the case where, mid-session, the agent already scanned and the tool
-result was **compacted away** (`runner.py` caps tool results at 6000 chars). Inject a compact ledger
-every turn so it can't be lost:
-
-- **`AgentRunner` (API path).** Add `context_provider: Callable[[], str] | None = None`. At the top of
-  `turn()`, compute `ledger = context_provider()` (best-effort; empty on error) and stream with an
-  **effective system prompt** `system_prompt + "\n\n<session_context>\n{ledger}\n</session_context>"`.
-  The system prompt is **ephemeral** — passed to `provider.stream(...)`, never appended to
-  `self.messages` — so it is recomputed fresh each turn and never bloats history. ✅
-- **`ClaudeSubscriptionRunner`.** `system_prompt` is baked into `ClaudeAgentOptions` at connect and the
-  session persists via `resume`; we must **not** reconnect per turn (that discards the session). Inject
-  the ledger as a `<session_context>…</session_context>` **preamble prepended to `user_text`** inside
-  `turn()` before `client.query(...)`. The chat widget / CLI render the *typed* text themselves (the
-  runner only drives assistant-side events), so the preamble is **invisible in the UI**. The SDK owns
-  its own history; re-sending the small bounded ledger each turn is mildly redundant but always current,
-  and the system prompt already instructs "treat the latest injected context as authoritative."
-- **Scope of the ledger.** The runner tracks the set of folder paths seen in `scan_folder` /
-  `analyze_folder` tool-call arguments this session (a cheap `set`), and `context_provider` =
-  `lambda: results_index.format_ledger(results_index.find_analyses(seen_roots ∪ their parents))`. Empty
-  set (turn 1, nothing scanned yet) → empty ledger → no-op; Slice 1 covers turn 1.
-
-**This is the one deliberate backend divergence** (system-prompt vs user-text injection) — it exists
-because the two runners manage conversation history differently. Flagged for Codex.
-
-### Slice 3 — discovery tool (make prior results addressable) + bundle self-containedness
-
-- A `list_analyses(folder=None)` **@tool** over `results_index.find_analyses` so the agent can answer
-  "run stats on yesterday's exp1 results" without the user pasting a timestamped path. Returns each
-  run's `{results_dir, dataset_path, created_at, n_images, groups}`.
-- **Result bundles:** T2.1 already made a results dir self-describing (manifest + CSVs + optional
-  report/annotations/spatial). For v1 "self-contained" = *discoverable + reproducible-from-metadata*,
-  which `run_manifest.json` + `image_summary.csv` already deliver. An explicit export/zip of a bundle is
-  **deferred** (note it in ROADMAP as T3.1-followup) — it adds packaging surface without new
-  reproducibility information. **Open question for review:** is a zip/export in-scope for "self-contained
-  result bundles," or is metadata-completeness + discovery the right v1 cut?
+Pending-only analysis writes its own dir, so whole-experiment stats over "the original + the new"
+images would span two dirs. Rather than "just re-run everything" (which defeats resume — Codex 3) or
+silently reporting a partial dir as whole, add a **guarded** `combine_results_service(dirs, output_dir)`
+(core) that concatenates `image_summary.csv` + `all_deposits.csv` from **compatible** runs into one new
+dir + a merge manifest, then stats/report run on the merged dir normally. **Compatibility is enforced,
+not assumed:** identical `model` + `detection` params, identical `grouping.column`, consistent
+per-basename group label, and **no basename collisions across dirs** (last-writer-wins would corrupt the
+join); on any mismatch it **refuses with a specific reason**. Exposed as a `combine_results` tool.
+Prompt: for "analyze the N new images and give me combined stats", analyze pending-only → `combine_results`
+→ stats/report. If Slice 3 slips, Slices 1–2 still ship a correct feature (complete-run reuse + discovery
++ honest partial handling); this slice is explicitly droppable.
 
 ## Verification
 
-- `tests/test_results_index.py`: `find_analyses` discovers a written results dir and reads the exact
-  `filename` set from `image_summary.csv`; skips a malformed/partial dir without raising; deterministic
-  order. `analysis_status` on a folder with a prior partial run reports the right analyzed/pending split
-  by basename; a folder with no prior results → all pending; explicit `image_paths` honored.
-- `tests/test_pipeline.py` (extend): `scan_folder_service` includes `already_analyzed` after a real
-  `analyze_folder_service` run on the synth dir; the pending set shrinks to 0 after a full run; the key
-  is omitted/empty (never raises) when there are no results dirs. **Parity gate untouched** — no CSV
-  output changes.
-- `tests/test_runner_context.py`: `AgentRunner.turn()` with a stub provider that echoes the system
-  prompt shows the `<session_context>` block present and updated across turns, and **absent from
-  `self.messages`** (ephemeral). Subscription: unit-test the `user_text` preamble assembly in isolation
-  (no live SDK) — a helper `_with_ledger(user_text, ledger)` so it's testable without a CLI spawn.
-- `tests/test_chat_widget.py` / `test_cli.py` (extend): a `list_analyses` tool call round-trips; the
-  injected preamble is **not** echoed into the visible transcript.
-- Packaging guard (`test_core_imports_without_agent.py`): `import scat.results_index` works **without**
-  the `[agent]` extra. Full suite green.
+- `tests/test_results_index.py`: `find_analyses` discovers a written dir and reads the exact basename
+  set; a malformed manifest → `skipped` with reason (no raise); a CSV-without-manifest → `partial`;
+  deterministic order with missing/dup `created_at`. `analysis_status`: (a) fingerprint match on the
+  same folder → `complete, verified, n_pending=0`; (b) a strict-subset prior run + unique basenames →
+  correct `partial` split; (c) duplicate current basenames → `ambiguous`, no counts; (d) no prior
+  results → `none`, all pending; (e) explicit `image_paths` honored; (f) resolved-path equality (a
+  `./exp1` vs absolute `/…/exp1` still matches; a *different* same-named folder does **not**).
+- `tests/test_pipeline.py` (extend): `scan_folder_service` includes a correct `already_analyzed` after a
+  real `analyze_folder_service` run on `synth_dir`; `complete` after a full run; key omitted/empty and
+  never raising when no results dirs exist. **Parity gate green** (no CSV output change).
+- `tests/test_combine.py` (Slice 3): compatible dirs merge (row counts add, manifest records sources);
+  mismatched model/params/grouping or colliding basenames → refused with reason; stats run on the merged
+  dir.
+- `tests/test_cli.py`/`test_chat_widget.py` (extend): `list_analyses` tool round-trips through the tool
+  registry; the tool loop handles it.
+- Packaging guard (`test_core_imports_without_agent.py`): `import scat.results_index` (+ `scat.combine`
+  if added) works **without** the `[agent]` extra. Full suite green.
+
+## Codex review — incorporated
+
+Codex (gpt-5.5, xhigh) reviewed the first draft; folded in:
+- **1 (basename delta unsafe):** verified `image_summary.csv.filename` is basename-only, so relpath
+  matching is impossible. Added the **two-tier** model — fingerprint-verified `complete` (strong,
+  ambiguity-immune) first, guarded basename delta only when **current basenames are unique**, and an
+  explicit **`ambiguous`** status (no numeric counts) when they collide. No unsafe counts ever emitted.
+- **2 (discovery misses/stale):** canonicalized to **`Path.resolve()`** equality for "covers", dropped
+  descendant matching, label unverified basename matches `verified:false`, and use the manifest
+  `dataset.sha256` as the strong guard against a stale same-named folder.
+- **4 & 5 (subscription preamble weak / Slice 2 over-built):** **dropped per-turn injection entirely.**
+  Primary durable mechanism is the enriched `scan_folder` (recipe calls it first) + an explicit
+  `list_analyses` tool the agent pulls when resuming/after compaction. Removes the backend divergence,
+  stale-preamble accumulation, and token growth; shrinks scope to ~M.
+- **3 (pending-only fragmentation):** complete-run reuse is the correct headline; for partial work,
+  added the strict, compatibility-checked **`combine_results`** (Slice 3) so whole-experiment stats are
+  *correct across runs* instead of "just re-run everything" — while never presenting a partial dir as
+  whole.
+- **Traps:** surface `skipped` dirs with reasons; timestamp-safe deterministic ordering; manifest-last
+  ⇒ presence implies a complete run (CSV-without-manifest = partial); char-hard-capped ledger; verify
+  the `analyze_folder` **tool** forwards `image_paths` and still refuses dup basenames.
 
 ## Risks
 
-- **R1 — cross-folder / moved trees.** `analysis_status` finds results dirs as *siblings of the input
-  folder*; if the user moved the results elsewhere, discovery misses them. Mitigation: also honor an
-  explicit `search_roots` (config `agent.results_search_roots`, default = input folder's parent) so the
-  user can point at an archive. Manifest's `dataset.sha256` lets us confirm a found run really matches
-  the current folder's contents (guard against a stale same-named folder).
-- **R2 — basename collisions across subfolders.** Matching by basename mirrors SCAT's existing join key,
-  and `analyze_folder_service` already refuses grouping on duplicate basenames — so within a groupable
-  dataset basenames are unique. For an ungrouped tree with dup basenames, `analysis_status` may
-  over-count "analyzed"; surface a `basename_collision: true` flag rather than silently miscount.
-- **R3 — pending-only resume fragments outputs.** Analyzing only the pending images writes a *new*
-  results dir; stats/report over "the whole experiment" then need *both* dirs, which v1 does not merge.
-  Mitigation for v1: the agent, on seeing partial prior work, **recommends re-running the full folder
-  into one dir** (correct, simple) OR explicitly tells the user the pending-only run is separate. A
-  proper merge/append is deferred. Do **not** let the agent emit stats over a partial dir as if whole.
-- **R4 — ledger token cost.** A workspace with hundreds of runs → a huge ledger. `format_ledger` caps
-  runs + pending names and summarizes the tail; the injected block is hard-bounded (like the runner's
-  6000-char tool-result cap).
-- **R5 — stale git_commit / created_at in manifest** — informational only; never used for matching
-  (we match on path + basename + optional sha256). No correctness impact.
+- **R1 — moved/archived results.** Sibling scan misses relocated dirs. Honor `agent.results_search_roots`
+  (config, default = input folder's parent) so a user can point at an archive.
+- **R2 — stale same-named folder.** Tier-1 fingerprint mismatch prevents a false `complete`; tier-2
+  labels basename matches `verified:false`. No silent false positives.
+- **R3 — combine correctness.** `combine_results` refuses incompatible runs rather than producing a
+  wrong merge; the failure mode is "won't combine, told you why", never a corrupt joined dataset.
+- **R4 — ledger token cost.** `format_ledger` char-caps; `list_analyses` returns bounded rows.
 
-## Deliberately out of scope (v1)
+## Out of scope (v1)
 
-Merging/appending pending runs into an existing results dir; zip/export of a bundle; a cross-machine
-results registry; parsing the user's free-text message to pre-seed the ledger (the `scan_folder`-first
-recipe covers turn-1 resume without it).
+Cross-machine results registry; zip/export of a bundle (metadata-complete dirs + discovery already give
+"self-contained"); descendant/nested-folder auto-aggregation; parsing user free-text to pre-seed the
+ledger (scan-first covers turn-1 resume).
