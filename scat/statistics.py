@@ -11,6 +11,39 @@ from itertools import combinations
 # scipy is imported lazily when needed
 
 
+def coefficient_of_variation(data) -> float:
+    """Canonical coefficient of variation (%) = std / |mean| * 100, over the non-NaN values.
+
+    The single correct implementation used everywhere (previously duplicated ~18x inline as
+    ``std/mean*100 if mean>0 else nan``, which was wrong for two cases): CV of a single sample
+    is undefined (return NaN, not the misleading 0 a lone value gives), and missing values are
+    skipped (pandas-style) rather than propagating NaN through the whole group. CV is a
+    descriptive consistency metric — it does not feed the significance tests, so this changes
+    only degenerate groups (n<2 or with NaNs), to their honest values.
+    """
+    data = np.asarray(data, dtype=float)
+    data = data[~np.isnan(data)]
+    if len(data) < 2:
+        return np.nan
+    mean = np.mean(data)
+    if mean == 0:
+        return np.nan
+    return float((np.std(data) / abs(mean)) * 100)
+
+
+def compare_group_values(group_values: Dict, alpha: float = 0.05) -> Dict:
+    """Shared group-comparison dispatch for every compare_*_between_groups method: a two-group
+    test (t / Mann-Whitney) for exactly two groups, else a multi-group test (ANOVA / Kruskal)
+    with Holm correction, over a {group_name: values} mapping (insertion order preserved)."""
+    analyzer = StatisticalAnalyzer(alpha=alpha)
+    names = list(group_values.keys())
+    if len(names) == 2:
+        return analyzer.compare_two_groups(
+            group_values[names[0]], group_values[names[1]],
+            group1_name=names[0], group2_name=names[1])
+    return analyzer.compare_multiple_groups(group_values, correction='holm')
+
+
 class StatisticalAnalyzer:
     """Statistical analysis for excreta data."""
     
@@ -287,22 +320,8 @@ class StatisticalAnalyzer:
         return (float(mean - margin), float(mean + margin))
     
     def _coefficient_of_variation(self, data: np.ndarray) -> float:
-        """Calculate coefficient of variation (CV) as percentage.
-        
-        CV = (std / mean) * 100
-        Lower CV indicates more consistent/reproducible measurements.
-        """
-        data = np.array(data)
-        data = data[~np.isnan(data)]
-        
-        if len(data) < 2:
-            return np.nan
-        
-        mean = np.mean(data)
-        if mean == 0:
-            return np.nan
-        
-        return float((np.std(data) / abs(mean)) * 100)
+        """CV (%) — delegates to the canonical module-level coefficient_of_variation."""
+        return coefficient_of_variation(data)
     
     def _correct_pvalues(self, p_values: List[float], method: str) -> List[float]:
         """Apply multiple comparison correction."""
@@ -863,7 +882,7 @@ class pHAnalyzer:
             'mean_hue': float(np.mean(hue_values)),
             'std_hue': float(np.std(hue_values)),
             # pH heterogeneity (CV of pH values)
-            'ph_cv': float(np.std(ph_values) / np.mean(ph_values) * 100) if np.mean(ph_values) > 0 else np.nan
+            'ph_cv': coefficient_of_variation(ph_values)
         }
     
     def analyze_film_ph(self, film_summary: pd.DataFrame, hue_column: str = 'normal_mean_hue') -> Dict:
@@ -897,7 +916,7 @@ class pHAnalyzer:
             'std_acidity_index': float(np.std(acidity_indices)),
             'mean_hue': float(np.mean(hue_values)),
             'std_hue': float(np.std(hue_values)),
-            'ph_cv': float(np.std(ph_values) / np.mean(ph_values) * 100) if np.mean(ph_values) > 0 else np.nan
+            'ph_cv': coefficient_of_variation(ph_values)
         }
     
     def compare_ph_between_groups(
@@ -972,31 +991,12 @@ class pHAnalyzer:
         }
         
         # Use StatisticalAnalyzer for comparison
-        stat_analyzer = StatisticalAnalyzer(alpha=self.alpha)
-        
         results = {
             'metric': 'estimated_ph',
             'group_statistics': group_stats,
             'n_groups': len(valid_groups)
         }
-        
-        if len(valid_groups) == 2:
-            # Two-group comparison
-            names = valid_groups
-            comparison = stat_analyzer.compare_two_groups(
-                group_ph_data[names[0]], 
-                group_ph_data[names[1]],
-                group1_name=names[0],
-                group2_name=names[1]
-            )
-            results['comparison'] = comparison
-        else:
-            # Multiple group comparison
-            comparison = stat_analyzer.compare_multiple_groups(
-                group_ph_data,
-                correction='holm'
-            )
-            results['comparison'] = comparison
+        results['comparison'] = compare_group_values(group_ph_data, self.alpha)
         
         return results
     
@@ -1139,11 +1139,11 @@ class PigmentationAnalyzer:
             'mean_iod': float(np.mean(iod_values)),
             'std_iod': float(np.std(iod_values)),
             'median_iod': float(np.median(iod_values)),
-            'iod_cv': float(np.std(iod_values) / np.mean(iod_values) * 100) if np.mean(iod_values) > 0 else np.nan,
+            'iod_cv': coefficient_of_variation(iod_values),
             # Pigment density (IOD per area)
             'mean_pigment_density': float(np.mean(pigment_density)),
             'std_pigment_density': float(np.std(pigment_density)),
-            'pigment_density_cv': float(np.std(pigment_density) / np.mean(pigment_density) * 100) if np.mean(pigment_density) > 0 else np.nan,
+            'pigment_density_cv': coefficient_of_variation(pigment_density),
         }
         
         # By deposit type if available
@@ -1192,7 +1192,7 @@ class PigmentationAnalyzer:
             'mean_total_iod': float(np.mean(total_iod)),
             'std_total_iod': float(np.std(total_iod)),
             'median_total_iod': float(np.median(total_iod)),
-            'total_iod_cv': float(np.std(total_iod) / np.mean(total_iod) * 100) if np.mean(total_iod) > 0 else np.nan
+            'total_iod_cv': coefficient_of_variation(total_iod)
         }
         
         # Per-fly normalization if n_flies available
@@ -1203,7 +1203,7 @@ class PigmentationAnalyzer:
             
             result['mean_iod_per_fly'] = float(np.mean(iod_per_fly))
             result['std_iod_per_fly'] = float(np.std(iod_per_fly))
-            result['iod_per_fly_cv'] = float(np.std(iod_per_fly) / np.mean(iod_per_fly) * 100) if np.mean(iod_per_fly) > 0 else np.nan
+            result['iod_per_fly_cv'] = coefficient_of_variation(iod_per_fly)
         
         # Normal vs ROD IOD if available
         for col in ['normal_total_iod', 'rod_total_iod', 'normal_mean_iod', 'rod_mean_iod']:
@@ -1256,7 +1256,7 @@ class PigmentationAnalyzer:
                     'mean': float(np.mean(values)),
                     'std': float(np.std(values)),
                     'median': float(np.median(values)),
-                    'cv': float(np.std(values) / np.mean(values) * 100) if np.mean(values) > 0 else np.nan
+                    'cv': coefficient_of_variation(values)
                 }
                 group_data[group] = values
         
@@ -1269,16 +1269,7 @@ class PigmentationAnalyzer:
             }
         
         # Statistical comparison
-        stat_analyzer = StatisticalAnalyzer(alpha=self.alpha)
-        
-        if len(valid_groups) == 2:
-            names = valid_groups
-            comparison = stat_analyzer.compare_two_groups(
-                group_data[names[0]], group_data[names[1]],
-                group1_name=names[0], group2_name=names[1]
-            )
-        else:
-            comparison = stat_analyzer.compare_multiple_groups(group_data, correction='holm')
+        comparison = compare_group_values(group_data, self.alpha)
         
         return {
             'metric': iod_column,
@@ -1432,7 +1423,7 @@ class SizeDistributionAnalyzer:
             'median_area': float(np.median(areas)),
             'min_area': float(np.min(areas)),
             'max_area': float(np.max(areas)),
-            'area_cv': float(np.std(areas) / np.mean(areas) * 100) if np.mean(areas) > 0 else np.nan,
+            'area_cv': coefficient_of_variation(areas),
             # Size class counts
             'n_small': n_small,
             'n_medium': n_medium,
@@ -1466,7 +1457,7 @@ class SizeDistributionAnalyzer:
                     result[f'{label}_mean_area'] = float(np.mean(label_areas))
                     result[f'{label}_std_area'] = float(np.std(label_areas))
                     result[f'{label}_median_area'] = float(np.median(label_areas))
-                    result[f'{label}_area_cv'] = float(np.std(label_areas) / np.mean(label_areas) * 100) if np.mean(label_areas) > 0 else np.nan
+                    result[f'{label}_area_cv'] = coefficient_of_variation(label_areas)
         
         return result
     
@@ -1559,7 +1550,7 @@ class SizeDistributionAnalyzer:
                     'n': len(values),
                     'mean': float(np.mean(values)),
                     'std': float(np.std(values)),
-                    'cv': float(np.std(values) / np.mean(values) * 100) if np.mean(values) > 0 else np.nan
+                    'cv': coefficient_of_variation(values)
                 }
         
         valid_groups = list(group_data.keys())
@@ -1568,16 +1559,7 @@ class SizeDistributionAnalyzer:
             return {'error': 'Insufficient data in groups', 'group_statistics': group_stats}
         
         # Statistical comparison
-        stat_analyzer = StatisticalAnalyzer(alpha=self.alpha)
-        
-        if len(valid_groups) == 2:
-            names = valid_groups
-            comparison = stat_analyzer.compare_two_groups(
-                group_data[names[0]], group_data[names[1]],
-                group1_name=names[0], group2_name=names[1]
-            )
-        else:
-            comparison = stat_analyzer.compare_multiple_groups(group_data, correction='holm')
+        comparison = compare_group_values(group_data, self.alpha)
         
         return {
             'metric': size_column,
@@ -1732,7 +1714,7 @@ class DensityAnalyzer:
             'mean_deposits_per_film': float(np.mean(n_total)),
             'std_deposits_per_film': float(np.std(n_total)),
             'median_deposits_per_film': float(np.median(n_total)),
-            'deposits_cv': float(np.std(n_total) / np.mean(n_total) * 100) if np.mean(n_total) > 0 else np.nan
+            'deposits_cv': coefficient_of_variation(n_total)
         }
         
         # Per-fly normalization
@@ -1744,7 +1726,7 @@ class DensityAnalyzer:
                 deposits_per_fly = n_total[valid_mask] / n_flies[valid_mask]
                 result['mean_deposits_per_fly'] = float(np.mean(deposits_per_fly))
                 result['std_deposits_per_fly'] = float(np.std(deposits_per_fly))
-                result['deposits_per_fly_cv'] = float(np.std(deposits_per_fly) / np.mean(deposits_per_fly) * 100) if np.mean(deposits_per_fly) > 0 else np.nan
+                result['deposits_per_fly_cv'] = coefficient_of_variation(deposits_per_fly)
         
         # ROD fraction statistics
         if 'rod_fraction' in film_summary.columns:
@@ -1752,7 +1734,7 @@ class DensityAnalyzer:
             if len(rod_frac) > 0:
                 result['mean_rod_fraction'] = float(np.mean(rod_frac))
                 result['std_rod_fraction'] = float(np.std(rod_frac))
-                result['rod_fraction_cv'] = float(np.std(rod_frac) / np.mean(rod_frac) * 100) if np.mean(rod_frac) > 0 else np.nan
+                result['rod_fraction_cv'] = coefficient_of_variation(rod_frac)
         
         return result
     
@@ -1798,7 +1780,7 @@ class DensityAnalyzer:
                     'mean': float(np.mean(values)),
                     'std': float(np.std(values)),
                     'median': float(np.median(values)),
-                    'cv': float(np.std(values) / np.mean(values) * 100) if np.mean(values) > 0 else np.nan
+                    'cv': coefficient_of_variation(values)
                 }
         
         valid_groups = list(group_data.keys())
@@ -1807,16 +1789,7 @@ class DensityAnalyzer:
             return {'error': 'Insufficient data in groups', 'group_statistics': group_stats}
         
         # Statistical comparison
-        stat_analyzer = StatisticalAnalyzer(alpha=self.alpha)
-        
-        if len(valid_groups) == 2:
-            names = valid_groups
-            comparison = stat_analyzer.compare_two_groups(
-                group_data[names[0]], group_data[names[1]],
-                group1_name=names[0], group2_name=names[1]
-            )
-        else:
-            comparison = stat_analyzer.compare_multiple_groups(group_data, correction='holm')
+        comparison = compare_group_values(group_data, self.alpha)
         
         return {
             'metric': density_metric,
@@ -2314,12 +2287,12 @@ class MorphologyAnalyzer:
             'mean_circularity': float(np.mean(circularity)),
             'std_circularity': float(np.std(circularity)),
             'median_circularity': float(np.median(circularity)),
-            'circularity_cv': float(np.std(circularity) / np.mean(circularity) * 100) if np.mean(circularity) > 0 else np.nan,
+            'circularity_cv': coefficient_of_variation(circularity),
             # Aspect ratio statistics
             'mean_aspect_ratio': float(np.mean(aspect_ratio)),
             'std_aspect_ratio': float(np.std(aspect_ratio)),
             'median_aspect_ratio': float(np.median(aspect_ratio)),
-            'aspect_ratio_cv': float(np.std(aspect_ratio) / np.mean(aspect_ratio) * 100) if np.mean(aspect_ratio) > 0 else np.nan,
+            'aspect_ratio_cv': coefficient_of_variation(aspect_ratio),
             # Shape classification counts
             'shape_counts': shape_counts,
             # Shape classification fractions
@@ -2448,7 +2421,7 @@ class MorphologyAnalyzer:
                     'n': len(values),
                     'mean': float(np.mean(values)),
                     'std': float(np.std(values)),
-                    'cv': float(np.std(values) / np.mean(values) * 100) if np.mean(values) > 0 else np.nan
+                    'cv': coefficient_of_variation(values)
                 }
         
         valid_groups = list(group_data.keys())
@@ -2457,16 +2430,7 @@ class MorphologyAnalyzer:
             return {'error': 'Insufficient data in groups', 'group_statistics': group_stats}
         
         # Statistical comparison
-        stat_analyzer = StatisticalAnalyzer(alpha=self.alpha)
-        
-        if len(valid_groups) == 2:
-            names = valid_groups
-            comparison = stat_analyzer.compare_two_groups(
-                group_data[names[0]], group_data[names[1]],
-                group1_name=names[0], group2_name=names[1]
-            )
-        else:
-            comparison = stat_analyzer.compare_multiple_groups(group_data, correction='holm')
+        comparison = compare_group_values(group_data, self.alpha)
         
         return {
             'metric': metric_column,
