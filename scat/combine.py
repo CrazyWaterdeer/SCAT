@@ -125,10 +125,24 @@ def combine_results_service(results_dirs, output_dir: Optional[str] = None) -> d
               if gcol and gcol in combined_summary.columns else [])
     mapping = (dict(zip(names, combined_summary[gcol].astype(str)))
                if gcol and gcol in combined_summary.columns else None)
+    dataset_path = next(iter(dpaths))
+    # If the merge reconstitutes the WHOLE source folder (the common resume case: full run +
+    # pending run == every image), recompute the real whole-dataset fingerprint so a later scan
+    # recognizes this combined dir as fingerprint-verified complete. Otherwise leave it None (honest:
+    # a partial union is not the whole folder). Best-effort — the folder may have moved.
+    sha = None
+    try:
+        from .pipeline import list_images
+        folder_imgs = list_images(dataset_path)
+        folder_bn = [Path(p).name for p in folder_imgs]
+        if folder_bn and set(folder_bn) == set(names) and len(folder_bn) == len(set(folder_bn)):
+            sha = _manifest.dataset_fingerprint([str(p) for p in folder_imgs]).get("sha256")
+    except Exception:
+        sha = None
     man = {
         "schema": _manifest.SCHEMA, "created_at": _manifest._now_iso(), **_manifest.run_context(),
-        "dataset": {"path": next(iter(dpaths)), "n_images": int(names.nunique()),
-                    "sha256": None, "sample": sorted(set(names))[:10]},  # synthesized dir — no raw fingerprint
+        "dataset": {"path": dataset_path, "n_images": int(names.nunique()),
+                    "sha256": sha, "sample": sorted(set(names))[:10]},
         "model": manifests[0].get("model"), "detection": manifests[0].get("detection"),
         "grouping": ({"column": gcol, "mapping": mapping} if mapping else None),
         "warnings": [], "combined_from": [dir_ for dir_, _, _, _ in loaded],

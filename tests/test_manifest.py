@@ -47,6 +47,16 @@ def test_write_run_manifest(tmp_path):
     assert disk["detection"]["min_area"] == 20 and disk["warnings"] == ["w"]
 
 
+def test_run_manifest_stores_absolute_dataset_path(tmp_path):
+    """A relative dataset path would later resolve against a different cwd and miss the run on resume."""
+    img = tmp_path / "x.tif"; img.write_bytes(b"i")
+    out = tmp_path / "out"; out.mkdir()
+    manifest.write_run_manifest(out, path="some/relative/dir", image_paths=[str(img)],
+                                model_type="rf", model_path=None)
+    disk = json.loads((out / "run_manifest.json").read_text())
+    assert Path(disk["dataset"]["path"]).is_absolute()
+
+
 def test_dataset_fingerprint_disambiguates_subfolders(tmp_path):
     """Same basename+size in different subfolders must NOT collide (Codex F1)."""
     (tmp_path / "ctrl").mkdir(); (tmp_path / "treated").mkdir()

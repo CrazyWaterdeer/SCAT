@@ -82,6 +82,9 @@ def test_analysis_status_partial(tmp_path):
     assert st["status"] == "partial" and st["verified"] is False
     assert st["n_analyzed"] == 1 and st["n_pending"] == 2
     assert set(st["pending"]) == {"b.tif", "c.tif"}
+    # pending_paths must be FULL, existing paths (not bare basenames) so a resume can open them
+    assert {Path(p).name for p in st["pending_paths"]} == {"b.tif", "c.tif"}
+    assert all(Path(p).exists() for p in st["pending_paths"])
 
 
 def test_analysis_status_ambiguous_duplicate_current_basenames(tmp_path):

@@ -89,6 +89,39 @@ def test_combine_overlap_identical_kept_once(tmp_path):
     assert list(merged["filename"]).count("x.tif") == 1 and res["n_images"] == 3
 
 
+def test_analyze_folder_resolves_relative_image_paths(synth_dir, tmp_path, monkeypatch):
+    """A resume passing folder-relative image paths from a different cwd must still open them
+    (they get resolved against `path`), not silently fail (Codex P2)."""
+    exp = tmp_path / "exp"; exp.mkdir()
+    f = sorted(synth_dir.glob("*.tif"))[0]
+    shutil.copy(f, exp / f.name)
+    monkeypatch.chdir(tmp_path)                                 # cwd != the dataset folder
+    res = analyze_folder_service(str(exp), image_paths=[f.name],   # bare basename
+                                 output_dir=str(tmp_path / "r"), annotate=False)
+    assert res.n_images == 1 and res.n_failed == 0             # opened & analyzed, not a failed placeholder
+
+
+def test_combine_recomputes_fingerprint_for_whole_folder(synth_dir, tmp_path):
+    """When the merge reconstitutes the whole source folder, the combined dir gets a real
+    fingerprint so a later scan recognizes it as fingerprint-verified complete (Codex P2)."""
+    exp = tmp_path / "exp"; exp.mkdir()
+    ctrl = sorted(synth_dir.glob("ctrl_*.tif"))[:2]
+    treat = sorted(synth_dir.glob("treat_*.tif"))[:2]
+    for f in ctrl + treat:
+        shutil.copy(f, exp / f.name)                       # exactly the 4 we analyze == whole folder
+    a = analyze_folder_service(str(exp), groups={ctrl[0].name: "C", treat[0].name: "T"},
+                               image_paths=[str(exp / ctrl[0].name), str(exp / treat[0].name)],
+                               output_dir=str(tmp_path / "resA"), annotate=False)
+    b = analyze_folder_service(str(exp), groups={ctrl[1].name: "C", treat[1].name: "T"},
+                               image_paths=[str(exp / ctrl[1].name), str(exp / treat[1].name)],
+                               output_dir=str(tmp_path / "resB"), annotate=False)
+    combine_results_service([a.output_dir, b.output_dir], output_dir=str(tmp_path / "merged"))
+    man = json.loads((tmp_path / "merged" / "run_manifest.json").read_text())
+    assert man["dataset"]["sha256"] is not None
+    from scat.results_index import analysis_status
+    assert analysis_status(str(exp))["status"] == "complete"   # verified-complete via the merged dir
+
+
 def test_combine_grouped_stats_integration(synth_dir, tmp_path):
     exp = tmp_path / "exp"; exp.mkdir()
     for f in sorted(synth_dir.glob("*.tif")):

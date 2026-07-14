@@ -11,8 +11,9 @@ Pipeline recipe for "analyze this folder":
    - status "complete": these images were ALREADY analyzed — do NOT re-analyze. Reuse
      the given `results_dir` for run_statistics/generate_report, and say so.
    - status "partial"/"none" with pending images: analyze ONLY the pending ones via
-     analyze_folder(path, image_paths=<pending>, groups=…). Tell the user this writes a
-     SEPARATE results dir; whole-experiment stats over old+new need combine_results (if
+     analyze_folder(path, image_paths=<already_analyzed.pending_paths>, groups=…) — pass the
+     FULL paths from `pending_paths`, not the bare `pending` basenames. Tell the user this writes
+     a SEPARATE results dir; whole-experiment stats over old+new need combine_results (if
      available) or a full re-run — never run stats over a partial dir as if it were whole.
    - status "ambiguous": duplicate basenames prevent mapping prior results — tell the user.
 2. **Infer the experimental grouping yourself from the filenames** (do not expect a

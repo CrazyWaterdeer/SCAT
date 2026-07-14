@@ -93,7 +93,19 @@ def analyze_folder_service(path: str, groups: Optional[dict] = None, model_type:
     None, rglob the folder as before. progress_callback(current, total) drives the GUI bar.
     """
     from .grouping_util import build_group_metadata, duplicate_basenames
-    images = [Path(p) for p in image_paths] if image_paths is not None else list_images(path)
+    if image_paths is not None:
+        # Resolve entries that were passed as bare basenames / folder-relative (e.g. an agent
+        # forwarding scan_folder's pending list): try them relative to `path` before giving up, so a
+        # resume doesn't fail just because the process cwd differs from the dataset folder.
+        base = Path(path)
+        images = []
+        for p in image_paths:
+            pp = Path(p)
+            if not pp.is_absolute() and not pp.exists() and (base / p).exists():
+                pp = base / p
+            images.append(pp)
+    else:
+        images = list_images(path)
     if not images:
         raise ValueError(f"No images found in {path}")
     if groups:

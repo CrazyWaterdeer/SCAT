@@ -225,11 +225,13 @@ def analysis_status(folder, *, image_paths=None, search_roots=None) -> dict:
     seen: set[str] = set()
     for r in records:
         seen |= r.analyzed_basenames
-    pending = [b for b in cur_bn if b not in seen]
-    analyzed = [b for b in cur_bn if b in seen]
+    pending_p = [p for p in current if p.name not in seen]      # keep the real paths, not just names
+    n_analyzed = n_current - len(pending_p)
     return {"status": "partial" if records else "none", "verified": False,
-            "n_current": n_current, "n_analyzed": len(analyzed), "n_pending": len(pending),
-            "pending": pending[:_PENDING_CAP], "pending_truncated": len(pending) > _PENDING_CAP,
+            "n_current": n_current, "n_analyzed": n_analyzed, "n_pending": len(pending_p),
+            "pending": [p.name for p in pending_p][:_PENDING_CAP],
+            "pending_paths": [str(p) for p in pending_p][:_PENDING_CAP],   # pass THESE to analyze_folder
+            "pending_truncated": len(pending_p) > _PENDING_CAP,
             "latest_results_dir": records[-1].results_dir if records else None, "runs": runs,
             "note": "analyzed = basename seen in a prior run; runs may use different params — not "
                     "reusable for whole-experiment stats without combine_results"}

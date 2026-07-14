@@ -98,6 +98,15 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _abspath(p) -> str:
+    """Store an ABSOLUTE dataset path: a relative one would later be resolved against a different
+    process cwd and silently fail to match the same folder on a resume (results_index)."""
+    try:
+        return str(Path(p).resolve())
+    except OSError:
+        return str(p)
+
+
 def write_run_manifest(output_dir, *, path=None, image_paths, model_type=None, model_path=None,
                        circularity=None, groups=None, group_column=None, detection=None,
                        warnings=None) -> dict:
@@ -107,7 +116,7 @@ def write_run_manifest(output_dir, *, path=None, image_paths, model_type=None, m
         "schema": SCHEMA,
         "created_at": _now_iso(),
         **run_context(),
-        "dataset": {"path": str(path) if path is not None else None,
+        "dataset": {"path": _abspath(path) if path is not None else None,
                     **dataset_fingerprint(image_paths)},
         # classifier settings (type/model/circularity) vs detector knobs are kept separate
         "model": {"type": model_type,
