@@ -61,12 +61,9 @@ class SpatialAnalyzer:
         if self._scipy_loaded:
             return
         from scipy import ndimage
-        from scipy.spatial.distance import cdist, pdist
-        from scipy.stats import pearsonr
+        from scipy.spatial.distance import cdist
         self.ndimage = ndimage
         self.cdist = cdist
-        self.pdist = pdist
-        self.pearsonr = pearsonr
         self._scipy_loaded = True
     
     def analyze(
@@ -207,7 +204,7 @@ class SpatialAnalyzer:
         """
         Divide image into quadrants and test for uniform distribution.
         """
-        from scipy.stats import chi2_contingency, chisquare
+        from scipy.stats import chisquare
         
         mid_x, mid_y = width / 2, height / 2
         

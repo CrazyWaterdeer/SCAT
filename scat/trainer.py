@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 import numpy as np
 import cv2
+from PIL import Image
 
 from .detector import Deposit
 from .features import FeatureExtractor
@@ -427,7 +428,7 @@ class CNNTrainer:
         test_loader = DataLoader(test_dataset, batch_size=batch_size)
         
         # Create model
-        self.model = models.resnet18(pretrained=True)
+        self.model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
         
         # Freeze early layers
         for param in list(self.model.parameters())[:-10]:
@@ -506,8 +507,8 @@ class CNNTrainer:
             'train_size': len(X_train),
             'test_size': len(X_test),
             'final_accuracy': history['test_acc'][-1],
-            'classification_report': classification_report(label_names, pred_names),
-            'confusion_matrix': confusion_matrix(label_names, pred_names).tolist(),
+            'classification_report': _classification_report(label_names, pred_names),
+            'confusion_matrix': _confusion_matrix(label_names, pred_names).tolist(),
             'history': history
         }
         
@@ -536,7 +537,7 @@ class CNNTrainer:
         self.patch_size = checkpoint['patch_size']
         
         # Recreate model architecture
-        self.model = models.resnet18(pretrained=False)
+        self.model = models.resnet18(weights=None)
         self.model.fc = nn.Sequential(
             nn.Dropout(0.3),
             nn.Linear(self.model.fc.in_features, len(self.class_names))

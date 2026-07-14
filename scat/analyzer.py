@@ -141,18 +141,20 @@ class Analyzer:
         self.classifier_config = classifier_config or ClassifierConfig()
         self.classifier = get_classifier(self.classifier_config)
         self.dpi = dpi
-        self.extractor = FeatureExtractor(dpi=dpi)
-    
-    def analyze_image(self, image_path: Union[str, Path], n_flies: int = 1) -> AnalysisResult:
+
+    def analyze_image(self, image_path: Union[str, Path]) -> AnalysisResult:
         image_path = Path(image_path)
         img = Image.open(image_path)
         image = np.array(img)
         
         dpi = img.info.get('dpi', (self.dpi, self.dpi))[0]
-        self.extractor = FeatureExtractor(dpi=dpi)
-        
+        # Use a local extractor (not self.extractor): analyze_batch runs this
+        # method concurrently in a thread pool, so a shared instance attribute
+        # would let one image's DPI clobber another's mid-extraction.
+        extractor = FeatureExtractor(dpi=dpi)
+
         deposits = self.detector.detect(image)
-        deposits = self.extractor.extract_features(image, deposits)
+        deposits = extractor.extract_features(image, deposits)
         
         # Call predict for each classifier
         from .classifier import ThresholdClassifier, RandomForestClassifier, CNNClassifier
@@ -255,13 +257,16 @@ class Analyzer:
         
         return max(1, optimal)
     
+    @staticmethod
     def generate_annotated_image(
-        self, image: np.ndarray, deposits: List[Deposit], 
+        image: np.ndarray, deposits: List,
         show_labels: bool = True, skip_artifacts: bool = False
     ) -> np.ndarray:
+        # Uses no Analyzer state — deposits only need .label/.contour/.id/.centroid, so this
+        # also accepts the lightweight objects from deposits_from_labels_json (regenerate path).
         result = image.copy()
         colors = {'rod': (255, 0, 0), 'normal': (0, 255, 0), 'artifact': (128, 128, 128), 'unknown': (255, 255, 0)}
-        
+
         for d in deposits:
             if skip_artifacts and d.label == 'artifact':
                 continue
@@ -273,9 +278,36 @@ class Analyzer:
         return result
 
 
+def deposits_from_labels_json(json_path) -> list:
+    """Reconstruct lightweight, annotate-only deposit objects from a *.labels.json file.
+
+    Used by the GUI 'regenerate report after editing' path: after a user corrects labels the
+    edited JSON is the source of truth, so we rebuild just what generate_annotated_image reads
+    (.id/.label/.contour/.centroid). Not full Deposit objects — geometry like perimeter/aspect
+    ratio isn't stored and would have to be fabricated. Prefers the saved (x, y) centroid.
+    """
+    import json
+    from types import SimpleNamespace
+    with open(json_path) as f:
+        data = json.load(f)
+    out = []
+    for d in data.get('deposits', []):
+        contour = np.array(d.get('contour', []), dtype=np.int32).reshape((-1, 1, 2))
+        if 'x' in d and 'y' in d:
+            centroid = (int(d['x']), int(d['y']))
+        elif contour.size:
+            pts = contour.reshape(-1, 2)
+            centroid = (int(pts[:, 0].mean()), int(pts[:, 1].mean()))
+        else:
+            centroid = (0, 0)
+        out.append(SimpleNamespace(id=d.get('id', 0), label=d.get('label', 'unknown'),
+                                   contour=contour, centroid=centroid))
+    return out
+
+
 class ReportGenerator:
     """Generate analysis reports."""
-    
+
     def __init__(self, output_dir: Union[str, Path]):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)

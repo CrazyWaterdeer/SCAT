@@ -108,11 +108,32 @@ class CNNClassifier:
         self.patch_size = patch_size
         self.model = None
         self.device = None
-    
+        self.class_names = ['artifact', 'normal', 'rod']
+
     def load(self, path: Path):
         import torch
+        import torch.nn as nn
+        from torchvision import models
+
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.model = torch.load(path, map_location=self.device)
+        checkpoint = torch.load(path, map_location=self.device)
+
+        if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+            # Checkpoint saved by CNNTrainer.save: rebuild the ResNet18 head and
+            # load the weights (the raw dict is not a callable nn.Module).
+            self.class_names = checkpoint.get('class_names', self.class_names)
+            self.patch_size = checkpoint.get('patch_size', self.patch_size)
+            model = models.resnet18(weights=None)
+            model.fc = nn.Sequential(
+                nn.Dropout(0.3),
+                nn.Linear(model.fc.in_features, len(self.class_names))
+            )
+            model.load_state_dict(checkpoint['model_state_dict'])
+            self.model = model.to(self.device)
+        else:
+            # Legacy checkpoint: a full nn.Module was pickled directly.
+            self.model = checkpoint
+
         self.model.eval()
     
     def _preprocess_patch(self, patch: np.ndarray) -> np.ndarray:
@@ -137,7 +158,7 @@ class CNNClassifier:
             probs = torch.softmax(outputs, dim=1)
             preds = torch.argmax(probs, dim=1)
         
-        labels = ['artifact', 'normal', 'rod']
+        labels = self.class_names
         for deposit, pred, prob in zip(deposits, preds.cpu().numpy(), probs.cpu().numpy()):
             deposit.label = labels[pred]
             deposit.confidence = float(prob[pred])
@@ -149,7 +170,7 @@ class CNNClassifier:
         import torch.nn as nn
         from torchvision import models
         
-        model = models.resnet18(pretrained=True)
+        model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
         for param in list(model.parameters())[:-10]:
             param.requires_grad = False
         model.fc = nn.Sequential(nn.Dropout(0.3), nn.Linear(model.fc.in_features, num_classes))

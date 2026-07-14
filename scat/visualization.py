@@ -4,6 +4,7 @@ Provides PCA, clustering, density plots, and comparison charts.
 Publication-ready figures with GraphPad Prism-like styling.
 """
 
+import warnings
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -177,8 +178,6 @@ _to_rgba = None
 _sns = None
 _PCA = None
 _StandardScaler = None
-_KMeans = None
-_AgglomerativeClustering = None
 
 HAS_MATPLOTLIB = False
 HAS_SEABORN = False
@@ -188,7 +187,7 @@ HAS_SKLEARN = False
 def _load_viz_libs():
     """Lazy load visualization libraries."""
     global _viz_libs_loaded, _plt, _mpatches, _to_rgba, _sns
-    global _PCA, _StandardScaler, _KMeans, _AgglomerativeClustering
+    global _PCA, _StandardScaler
     global HAS_MATPLOTLIB, HAS_SEABORN, HAS_SKLEARN
     
     if _viz_libs_loaded:
@@ -220,11 +219,8 @@ def _load_viz_libs():
     try:
         from sklearn.decomposition import PCA
         from sklearn.preprocessing import StandardScaler
-        from sklearn.cluster import KMeans, AgglomerativeClustering
         _PCA = PCA
         _StandardScaler = StandardScaler
-        _KMeans = KMeans
-        _AgglomerativeClustering = AgglomerativeClustering
         HAS_SKLEARN = True
     except ImportError:
         pass

@@ -30,7 +30,6 @@ DEFAULT_CONFIG = {
     "last_input_dir": "",
     "last_output_dir": "",
     "last_model_path": "",
-    "last_metadata_path": "",
     "last_image_dir": "",      # For labeling - image open
     "last_label_dir": "",      # For labeling - label save/load
     
@@ -38,11 +37,9 @@ DEFAULT_CONFIG = {
     "detection": {
         "min_area": 20,
         "max_area": 10000,
-        "threshold": 0.6,
-        "edge_margin": 20,
-        "sensitive_mode": False
+        "threshold": 0.6
     },
-    
+
     # Analysis options
     "analysis": {
         "model_type": "rf",
@@ -50,10 +47,16 @@ DEFAULT_CONFIG = {
         "visualize": True,
         "spatial": True,
         "stats": True,
-        "report": True,
-        "group_by": ""
+        "report": True
     },
-    
+
+    # AI agent (non-secret selection only; ANTHROPIC_API_KEY comes from the env)
+    "agent": {
+        "backend": "auto",   # auto | subscription | api
+        "model": "claude-opus-4-8",
+        "max_loops": 40
+    },
+
     # Training settings
     "training": {
         "model_type": "rf",

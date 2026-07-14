@@ -30,11 +30,16 @@ dev = [
     "pyinstaller>=6.0.0",
 ]
 deep = [
-    "torch>=1.9.0",
-    "torchvision>=0.10.0",
+    "torch>=1.12.0",
+    "torchvision>=0.13.0",
 ]
 pdf = [
     "weasyprint>=52.0",
+]
+agent = [
+    "pydantic>=2.0",
+    "anthropic>=0.40",
+    "claude-agent-sdk>=0.1.0",
 ]
 
 [project.scripts]
@@ -53,3 +58,4 @@ packages = ["scat"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+pythonpath = ["."]
