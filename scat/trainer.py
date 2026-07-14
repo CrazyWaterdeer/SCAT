@@ -11,7 +11,6 @@ import numpy as np
 import cv2
 from PIL import Image
 
-from .detector import Deposit
 from .features import FeatureExtractor
 
 # Lazy imports for sklearn (loaded on first use)

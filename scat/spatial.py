@@ -339,22 +339,6 @@ class SpatialAnalyzer:
         }
 
 
-def analyze_spatial_batch(
-    results_list: List[Tuple[List[Deposit], Tuple[int, int]]]
-) -> List[SpatialResult]:
-    """
-    Analyze spatial distribution for multiple images.
-    
-    Args:
-        results_list: List of (deposits, image_shape) tuples
-        
-    Returns:
-        List of SpatialResult objects
-    """
-    analyzer = SpatialAnalyzer()
-    return [analyzer.analyze(deposits, shape) for deposits, shape in results_list]
-
-
 def aggregate_spatial_stats(spatial_results: List[SpatialResult]) -> Dict:
     """
     Aggregate spatial statistics across multiple images.

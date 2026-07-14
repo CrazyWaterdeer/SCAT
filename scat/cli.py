@@ -4,7 +4,6 @@ Command-line interface for SCAT.
 
 import argparse
 import sys
-from pathlib import Path
 
 
 def analyze_command(args):

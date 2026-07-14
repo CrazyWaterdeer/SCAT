@@ -6,7 +6,7 @@ Generates HTML and PDF reports from analysis results.
 import base64
 from pathlib import Path
 from datetime import datetime
-from typing import List, Dict, Optional, Union
+from typing import Dict, Optional, Union
 import numpy as np
 import pandas as pd
 from io import BytesIO
@@ -22,8 +22,8 @@ except ImportError:
 
 # Import color constants from visualization for consistency
 from .visualization import (
-    DEFAULT_GRAY, PASTEL_PALETTE, CONTROL_COLOR, DEPOSIT_COLORS,
-    get_palette, apply_publication_style, hue_to_rgb
+    DEFAULT_GRAY, PASTEL_PALETTE, DEPOSIT_COLORS,
+    apply_publication_style, hue_to_rgb
 )
 
 

@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QFileDialog, QGraphicsView, QGraphicsScene, 
     QGraphicsPathItem, QGraphicsRectItem, QToolBar, QSplitter, QGroupBox,
-    QSpinBox, QDoubleSpinBox, QFormLayout, QTableWidget, QCheckBox, QComboBox,
+    QSpinBox, QDoubleSpinBox, QFormLayout, QTableWidget, QCheckBox,
     QTableWidgetItem, QHeaderView, QButtonGroup, QRadioButton, QScrollArea, QFrame
 )
 from PySide6.QtCore import Qt, QRectF, QTimer, Signal
@@ -103,8 +103,8 @@ class DepositGraphicsItem(QGraphicsPathItem):
     def paint(self, painter, option, widget=None):
         """Override to prevent Qt's default selection dotted line and optionally draw ID."""
         from PySide6.QtWidgets import QStyle
-        from PySide6.QtGui import QFont, QFontDatabase
-        
+        from PySide6.QtGui import QFont
+
         # Remove the selected state to prevent default selection rectangle
         option.state &= ~QStyle.State_Selected
         super().paint(painter, option, widget)
@@ -1699,8 +1699,7 @@ class LabelingWindow(QMainWindow):
     def _load_edit_data(self):
         """Load data from edit_data dict (for EDIT_MODE)."""
         from PIL import Image
-        import pandas as pd
-        
+
         image_path = self.edit_data.get('image_path')
         if image_path and Path(image_path).exists():
             self.image = np.array(Image.open(image_path))

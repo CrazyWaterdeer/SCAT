@@ -199,8 +199,7 @@ class Analyzer:
         
         # Parallel processing with ThreadPoolExecutor
         from concurrent.futures import ThreadPoolExecutor, as_completed
-        import os
-        
+
         # Determine worker count
         if max_workers <= 0:
             max_workers = self._get_safe_worker_count(n_images)

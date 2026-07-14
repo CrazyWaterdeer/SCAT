@@ -5,7 +5,7 @@ Saves and loads user settings to/from JSON file.
 
 import json
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 from datetime import datetime
 
 
