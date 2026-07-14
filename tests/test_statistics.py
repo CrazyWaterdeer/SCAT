@@ -97,3 +97,46 @@ def test_visualization_uses_canonical_correct_pvalues():
     # the drifted Visualizer._correct_pvalues copy is gone; viz delegates to statistics
     from scat import visualization
     assert not hasattr(visualization.Visualizer, "_correct_pvalues")
+
+
+def test_compare_metric_between_groups_preserves_output_shapes():
+    """The shared body (used by the pigmentation/size/density/morphology wrappers on 4 different
+    classes) must reproduce each metric's exact output — median only when include_median=True."""
+    import pandas as pd
+    from scat.statistics import _compare_metric_between_groups as cmp
+    df = pd.DataFrame({
+        "group": ["A", "A", "B", "B", "A", "B"],
+        "total_iod": [1.0, 2, 3, 4, 1.5, 3.5],
+        "normal_mean_area": [10., 11, 20, 21, 12, 22],
+    })
+    with_med = cmp(df, "group", "total_iod", 0.05, include_median=True)         # pigmentation/density
+    no_med = cmp(df, "group", "normal_mean_area", 0.05, include_median=False)   # size/morphology
+    for r, metric in [(with_med, "total_iod"), (no_med, "normal_mean_area")]:
+        assert set(r) == {"metric", "group_statistics", "n_groups", "comparison"}
+        assert r["metric"] == metric and r["n_groups"] == 2
+    assert list(with_med["group_statistics"]["A"].keys()) == ["n", "mean", "std", "median", "cv"]
+    assert list(no_med["group_statistics"]["A"].keys()) == ["n", "mean", "std", "cv"]
+
+
+def test_compare_metric_error_paths_preserved():
+    import pandas as pd
+    from scat.statistics import _compare_metric_between_groups as cmp
+    df = pd.DataFrame({"group": ["A", "B"], "total_iod": [1.0, 2.0]})
+    assert "column not found" in cmp(df, "group", "nope", 0.05, include_median=False)["error"]
+    assert "column not found" in cmp(df, "nogroup", "total_iod", 0.05, include_median=True)["error"]
+    one = pd.DataFrame({"group": ["A", "A"], "total_iod": [1.0, 2.0]})
+    assert "at least 2 groups" in cmp(one, "group", "total_iod", 0.05, include_median=True)["error"]
+
+
+def test_domain_analyzer_wrappers_delegate():
+    """Each public compare_* wrapper (on its own analyzer class) still returns the right shape."""
+    import pandas as pd
+    from scat.statistics import (PigmentationAnalyzer, SizeDistributionAnalyzer,
+                                  DensityAnalyzer, MorphologyAnalyzer)
+    df = pd.DataFrame({"group": ["A", "A", "B", "B"], "total_iod": [1., 2, 3, 4],
+                       "normal_mean_area": [10., 11, 20, 21], "n_total": [5, 6, 7, 8],
+                       "normal_mean_circularity": [0.8, 0.82, 0.6, 0.62]})
+    assert PigmentationAnalyzer().compare_pigmentation_between_groups(df, "group")["n_groups"] == 2
+    assert SizeDistributionAnalyzer().compare_size_between_groups(df, "group")["n_groups"] == 2
+    assert DensityAnalyzer().compare_density_between_groups(df, "group")["n_groups"] == 2
+    assert MorphologyAnalyzer().compare_morphology_between_groups(df, "group")["n_groups"] == 2
