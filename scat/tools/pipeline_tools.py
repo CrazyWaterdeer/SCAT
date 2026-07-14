@@ -47,3 +47,10 @@ def list_analyses(folder: Optional[str] = None) -> dict:
     roots = _search_roots(folder)
     return {"analyses": [run_brief(r) for r in find_analyses(roots)],
             "search_roots": [str(r) for r in roots]}
+
+
+@tool(description="Merge several COMPATIBLE results dirs (same dataset folder, identical model/detection/grouping) into ONE new results dir you can then run_statistics/generate_report on. Use after a pending-only resume run to get correct whole-experiment stats over old+new images. Refuses (with a reason) if the runs are incompatible or an overlapping image differs between them.")
+def combine_results(results_dirs: list[str], output_dir: Optional[str] = None) -> dict:
+    """Concatenate compatible results dirs into one merged dir; returns its path + counts."""
+    from scat.combine import combine_results_service
+    return combine_results_service(results_dirs, output_dir=output_dir)
