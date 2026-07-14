@@ -55,6 +55,8 @@ DEFAULT_CONFIG = {
         "backend": "auto",   # auto | subscription | api
         "model": "claude-opus-4-8",
         "max_loops": 40,
+        "max_tokens": 4096,   # API backend: max output tokens per request
+        "max_retries": 3,     # API backend: SDK retry count for 408/409/429/5xx (SDK does the backoff)
         # Extra dirs to scan for prior results (T3.1 resume). Empty = just the analyzed
         # folder's parent (where results dirs are written as siblings).
         "results_search_roots": []

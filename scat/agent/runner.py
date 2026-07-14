@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json
+import re
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any
@@ -53,6 +54,82 @@ def _compact_value(v: Any, depth: int = 0) -> Any:
     return v
 
 
+_KEEP_RECENT = 6
+_STUB_OVER = 800
+# Match only genuine context-overflow errors (NOT any 400 — a bad schema / tool_use error is a 400 too,
+# and compaction can't fix those). Deliberately does not match a bare "context".
+_CTX_RE = re.compile(
+    r"prompt is too long|input length and .*exceed|exceed\w*\s+context|"
+    r"context (?:window|length|limit)|too many tokens|maximum context", re.I)
+
+
+def _is_context_limit_error(exc: Exception) -> bool:
+    """Provider-agnostic: a context-window overflow (so the runner needs no `anthropic` import)."""
+    status = getattr(exc, "status_code", None)
+    if status is not None and status != 400:      # if the exc exposes a status, a non-400 is not this
+        return False
+    return bool(_CTX_RE.search(str(exc)))
+
+
+def _block_ids(blocks: list, key: str, btype: str) -> list[str] | None:
+    """Ordered ids of blocks of `btype` (via `key`), or None if a duplicate id is present."""
+    ids = [b.get(key) for b in blocks if isinstance(b, dict) and b.get("type") == btype]
+    return ids if len(ids) == len(set(ids)) else None
+
+
+def _soft_rewrite(msg: dict) -> dict:
+    """Return a COPY with only lossy-but-structure-safe shrinks: stub oversized tool_result content,
+    truncate text blocks. tool_use.input and every id/name/type/is_error field are preserved so the
+    tool_use<->tool_result pairing the API requires is never disturbed. Never mutates the input."""
+    content = msg.get("content")
+    if not isinstance(content, list):
+        return dict(msg)
+    new_blocks = []
+    for b in content:
+        if not isinstance(b, dict):
+            new_blocks.append(b); continue
+        bt = b.get("type")
+        if bt == "tool_result" and isinstance(b.get("content"), str) and len(b["content"]) > _STUB_OVER:
+            nb = dict(b); nb["content"] = "[earlier result elided to save context]"; new_blocks.append(nb)
+        elif bt == "text" and isinstance(b.get("text"), str):
+            nb = dict(b); nb["text"] = _truncate_text(b["text"]); new_blocks.append(nb)
+        else:
+            new_blocks.append(b)   # tool_use (input kept as-is) and anything else: unchanged
+    out = dict(msg); out["content"] = new_blocks
+    return out
+
+
+def _compact_history(messages: list[dict]) -> list[dict]:
+    """Aggressive one-shot compaction used to recover from a context-limit overflow. Keeps messages[0]
+    (the task) and the last _KEEP_RECENT messages (the live work) verbatim; soft-rewrites other
+    survivors; and drops whole matched adjacent (assistant tool_use, user tool_result) round-pairs from
+    the unprotected middle. Pairing-safe: drops BOTH sides of a pair, only on exact non-empty dup-free
+    id-set equality, never touching the protected boundary."""
+    n = len(messages)
+    protected = {0, *range(max(0, n - _KEEP_RECENT), n)}
+    drop: set[int] = set()
+    i = 1
+    while i < n - 1:
+        a, u = messages[i], messages[i + 1]
+        if (i not in protected and (i + 1) not in protected
+                and isinstance(a, dict) and a.get("role") == "assistant"
+                and isinstance(u, dict) and u.get("role") == "user"
+                and isinstance(a.get("content"), list) and isinstance(u.get("content"), list)
+                and all(isinstance(b, dict) and b.get("type") in ("text", "tool_use") for b in a["content"])
+                and u["content"] and all(isinstance(b, dict) and b.get("type") == "tool_result" for b in u["content"])):
+            use_ids = _block_ids(a["content"], "id", "tool_use")
+            res_ids = _block_ids(u["content"], "tool_use_id", "tool_result")
+            if use_ids and res_ids and set(use_ids) == set(res_ids):
+                drop.add(i); drop.add(i + 1); i += 2; continue
+        i += 1
+    out = []
+    for idx, m in enumerate(messages):
+        if idx in drop:
+            continue
+        out.append(m if idx in protected else _soft_rewrite(m))
+    return out
+
+
 def _compact_tool_result(tool_name: str, output: Any) -> str:
     text = _stringify_output(_compact_value(output))
     if len(text) <= _MAX_TOOL_RESULT_CHARS:
@@ -87,6 +164,10 @@ class AgentRunner:
         from scat.tools import call_tool, tools_for_anthropic
         from scat.agent.providers.base import set_current_provider
         from scat.progress import AnalysisCancelled
+        # Snapshot BEFORE appending: on a fatal error we restore this exact list, which drops the whole
+        # failed turn (and any in-turn compaction) and is always a valid history — unlike popping the
+        # "last user" message, which orphans a preceding tool_use after a tool round.
+        pre_turn = list(self.messages)
         self.messages.append({"role": "user", "content": [{"type": "text", "text": user_text}]})
         tools_spec = tools_for_anthropic()
         total_usage: dict[str, int] = {}
@@ -95,33 +176,43 @@ class AgentRunner:
             for _ in range(self.max_loops):
                 if self._cancelled:
                     yield TurnDone("cancelled", total_usage); self._cancelled = False; return
-                assistant_blocks: list[dict[str, Any]] = []
-                current_text = ""
-                stop_reason = "end_turn"
-                try:
-                    for event in self.provider.stream(self.messages, tools_spec, self.system_prompt):
+                retried = False
+                while True:  # one retry, only for a pre-event context-limit overflow (compact + re-stream)
+                    assistant_blocks: list[dict[str, Any]] = []
+                    current_text = ""
+                    stop_reason = "end_turn"
+                    saw_event = False
+                    try:
+                        for event in self.provider.stream(self.messages, tools_spec, self.system_prompt):
+                            saw_event = True   # set for EVERY event incl. Stop -> no retry (nor usage dbl-count)
+                            if self._cancelled:
+                                break
+                            if isinstance(event, TextDelta):
+                                current_text += event.text; yield event
+                            elif isinstance(event, ToolUseStart):
+                                if current_text:
+                                    assistant_blocks.append({"type": "text", "text": current_text}); current_text = ""
+                                yield event
+                            elif isinstance(event, ToolUse):
+                                assistant_blocks.append({"type": "tool_use", "id": event.id,
+                                                         "name": event.name, "input": event.input})
+                                yield event
+                            elif isinstance(event, Stop):
+                                stop_reason = event.reason
+                                for k, v in (event.usage or {}).items():
+                                    total_usage[k] = total_usage.get(k, 0) + int(v)
+                        break  # stream consumed cleanly
+                    except Exception as exc:
                         if self._cancelled:
-                            break
-                        if isinstance(event, TextDelta):
-                            current_text += event.text; yield event
-                        elif isinstance(event, ToolUseStart):
-                            if current_text:
-                                assistant_blocks.append({"type": "text", "text": current_text}); current_text = ""
-                            yield event
-                        elif isinstance(event, ToolUse):
-                            assistant_blocks.append({"type": "tool_use", "id": event.id,
-                                                     "name": event.name, "input": event.input})
-                            yield event
-                        elif isinstance(event, Stop):
-                            stop_reason = event.reason
-                            for k, v in (event.usage or {}).items():
-                                total_usage[k] = total_usage.get(k, 0) + int(v)
-                except Exception as exc:
-                    # Keep history clean: drop the user turn we just appended.
-                    if self.messages and self.messages[-1]["role"] == "user":
-                        self.messages.pop()
-                    yield TextDelta(f"\n[error: {exc}]\n")
-                    yield TurnDone("error", total_usage); return
+                            self.messages = pre_turn
+                            yield TurnDone("cancelled", total_usage); self._cancelled = False; return
+                        if not saw_event and not retried and _is_context_limit_error(exc):
+                            retried = True
+                            self.messages = _compact_history(self.messages)  # recover from overflow
+                            continue                                         # re-stream once, compacted
+                        self.messages = pre_turn   # restore the exact pre-turn history (always valid)
+                        yield TextDelta(f"\n[error: {exc}]\n")
+                        yield TurnDone("error", total_usage); return
                 if self._cancelled:
                     yield TurnDone("cancelled", total_usage); self._cancelled = False; return
                 if current_text:
