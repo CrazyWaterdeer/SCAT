@@ -11,7 +11,8 @@ def analyze_folder(path: str, groups: Optional[dict] = None, model_type: Optiona
     """Run detection + classification over a folder; returns counts + output dir."""
     return asdict(analyze_folder_service(path, groups=groups, model_type=model_type,
                                          min_area=min_area, max_area=max_area,
-                                         circularity=circularity, annotate=annotate))
+                                         circularity=circularity, annotate=annotate,
+                                         ambient_progress=True))  # stream progress + honor Stop
 
 
 @tool(description="Run group statistics on a completed results dir. No-ops (with a reason) if <2 groups.")

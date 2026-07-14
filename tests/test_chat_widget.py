@@ -135,3 +135,56 @@ def test_slash_unknown_command(app):
     w.input.setPlainText("/bogus")
     w._send()  # no runner needed — commands short-circuit before _ensure_runner
     assert "Unknown command" in w.view.toPlainText()
+
+
+class _AnalyzeProvider:
+    """Round 1: call analyze_folder on the synth folder. Round 2: finish."""
+    name = "fake"; model = "fake"
+
+    def __init__(self, folder):
+        self._folder = folder
+        self._round = 0
+
+    def stream(self, messages, tools, system):
+        self._round += 1
+        if self._round == 1:
+            yield ToolUse(id="tu1", name="analyze_folder",
+                          input={"path": self._folder, "annotate": False})
+            yield Stop(reason="tool_use", usage={})
+        else:
+            yield TextDelta(text="done.")
+            yield Stop(reason="end_turn", usage={})
+
+
+def test_chatworker_emits_per_image_progress(app, synth_dir):
+    """The ChatWorker.progress signal fires per image while the analyze_folder tool runs under
+    the ambient run_progress sink — the fix for the 'frozen dock' defect (T1.1)."""
+    import scat.tools  # noqa: F401 — register analyze_folder
+    from scat.agent.runner import AgentRunner
+    from scat.agent.chat_widget import ChatWorker
+    runner = AgentRunner(_AnalyzeProvider(str(synth_dir)), "sys", max_loops=5)
+    prog, done = [], []
+    w = ChatWorker(runner, "analyze it")
+    w.progress.connect(lambda c, t, note: prog.append((c, t)))
+    w.finished_turn.connect(lambda: done.append(True))
+    w.start()
+    for _ in range(2000):
+        if done:
+            break
+        app.processEvents()
+        w.wait(20)
+    assert done, "turn never finished"
+    assert prog, "no per-image progress was emitted during analyze_folder"
+    assert prog[-1][1] == 6 and max(c for c, _ in prog) == 6   # 6 synth images, ends at total
+    w.wait(2000)
+
+
+def test_stop_requests_cancel(app, monkeypatch):
+    from scat.agent.chat_widget import ChatDockWidget
+    import scat.progress as prog
+    called = []
+    monkeypatch.setattr(prog, "request_cancel", lambda: called.append(True))
+    w = ChatDockWidget()
+    w._set_runner_for_test(_runner())
+    w._stop()
+    assert called, "_stop must request cancellation of the in-progress batch"

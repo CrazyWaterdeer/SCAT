@@ -100,3 +100,29 @@ def test_stream_error_cleans_history():
     assert isinstance(events[-1], TurnDone) and events[-1].stop_reason == "error"
     # user message was popped so history is clean for the next turn
     assert r.messages == []
+
+
+def test_analysis_cancelled_ends_turn_without_retry():
+    """A tool raising AnalysisCancelled ends the turn with a valid tool_result and no retry
+    (Codex F2) — the runner must not feed a generic error back and loop."""
+    from scat.progress import AnalysisCancelled
+
+    class OneToolProvider:
+        name = "fake"; model = "fake"
+        def __init__(self):
+            self.rounds = 0
+        def stream(self, messages, tools, system):
+            self.rounds += 1
+            yield ToolUse(id="tu1", name="analyze_folder", input={})
+            yield Stop(reason="tool_use", usage={})
+
+    p = OneToolProvider()
+    def caller(name, **kw):
+        raise AnalysisCancelled("stop")
+    r = AgentRunner(p, "sys", max_loops=5, tool_caller=caller)
+    events = list(r.turn("go"))
+    assert type(events[-1]).__name__ == "TurnDone" and events[-1].stop_reason == "cancelled"
+    assert p.rounds == 1, "must not re-query the model after a cancel"
+    # every tool_use has a recorded tool_result (valid message history)
+    blocks = [b for m in r.messages if isinstance(m.get("content"), list) for b in m["content"]]
+    assert any(b.get("type") == "tool_result" for b in blocks)
