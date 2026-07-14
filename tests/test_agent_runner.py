@@ -10,9 +10,17 @@ def test_compact_tool_result_short_passthrough():
 
 def test_compact_tool_result_truncates_large():
     # C1: a many-key payload survives per-item compaction to >6000 chars, triggering the fallback.
-    big = {f"k{i}": "y" * 300 for i in range(40)}
+    big = {f"k{i}": "y" * 300 for i in range(80)}
     out = runner._compact_tool_result("analyze_folder", big)
     assert len(out) <= 7000 and "compacted" in out
+
+
+def test_scan_filename_list_survives_compaction():
+    # The agent infers groups from filenames; a folder's file list (here 20 > old cap of 8)
+    # must NOT be truncated by compaction.
+    files = [{"filename": f"cond_{i}.tif", "subfolder": None} for i in range(20)]
+    out = runner._compact_tool_result("scan_folder", {"n_images": 20, "files": files})
+    assert out.count("cond_") >= 20
 
 
 class FakeProvider:

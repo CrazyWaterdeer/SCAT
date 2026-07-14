@@ -4,7 +4,7 @@ from scat.agent.registry import tool
 from scat.pipeline import analyze_folder_service, run_statistics_service, generate_report_service
 
 
-@tool(description="Detect + classify deposits across a folder and write CSVs/JSON/annotations to a timestamped results dir. Pass groups={basename: group} from infer_groups to enable group comparison.")
+@tool(description="Detect + classify deposits across a folder and write CSVs/JSON/annotations to a timestamped results dir. Pass groups={filename: group_label} — the mapping YOU inferred from the filenames — to enable group comparison. Errors on duplicate basenames (unsafe to group).")
 def analyze_folder(path: str, groups: Optional[dict] = None, model_type: Optional[str] = None,
                    min_area: int = 20, max_area: int = 10000, circularity: float = 0.6,
                    annotate: bool = True) -> dict:

@@ -51,23 +51,37 @@ class AnalyzeResult:
     warnings: list[str] = field(default_factory=list)
 
 
+_SCAN_NAME_CAP = 500
+
+
 def scan_folder_service(path: str) -> dict:
     imgs = list_images(path)
     exts = sorted({p.suffix.lower() for p in imgs})
     root = Path(path)
     subdirs = sorted({p.parent.name for p in imgs if p.parent != root})
+    # Return ALL basenames so the agent can read them and decide the grouping itself
+    # (subfolder is exposed per file so the agent can group by folder when present).
+    files = [{"filename": p.name, "subfolder": (p.parent.name if p.parent != root else None)} for p in imgs]
+    truncated = len(files) > _SCAN_NAME_CAP
     return {"path": str(path), "n_images": len(imgs), "extensions": exts,
-            "subfolders": subdirs, "sample_names": [p.name for p in imgs[:8]]}
+            "subfolders": subdirs, "files": files[:_SCAN_NAME_CAP],
+            "files_truncated": truncated}
 
 
 def analyze_folder_service(path: str, groups: Optional[dict] = None, model_type: Optional[str] = None,
                            model_path: Optional[str] = None, min_area: int = 20, max_area: int = 10000,
                            edge_margin: int = 20, circularity: float = 0.6, annotate: bool = True,
                            visualize: bool = False, output_dir: Optional[str] = None) -> AnalyzeResult:
-    from .grouping_util import build_group_metadata
+    from .grouping_util import build_group_metadata, duplicate_basenames
     images = list_images(path)
     if not images:
         raise ValueError(f"No images found in {path}")
+    if groups:
+        dups = duplicate_basenames(images)
+        if dups:
+            raise ValueError(
+                f"Cannot group: duplicate basenames {dups[:5]} — SCAT joins group metadata on the "
+                "image basename, so grouping would mis-join. Use unique filenames or a flat folder.")
     mtype, mpath = resolve_model_type(model_type, model_path)
     detector = DepositDetector(min_area=min_area, max_area=max_area, edge_margin=edge_margin)
     cfg = ClassifierConfig(model_type=mtype, circularity_threshold=circularity, model_path=mpath)

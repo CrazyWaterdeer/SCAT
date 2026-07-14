@@ -24,8 +24,11 @@ RunEvent = TextDelta | ToolUseStart | ToolUse | ToolResult | TurnDone
 
 _MAX_TOOL_RESULT_CHARS = 6000
 _MAX_STRING_CHARS = 1200
-_MAX_LIST_ITEMS = 8
-_MAX_DICT_ITEMS = 40
+# High enough that a folder's filename list (which the agent needs to infer groups)
+# survives the primary compaction pass; overall size is still bounded by
+# _MAX_TOOL_RESULT_CHARS + the fallback below.
+_MAX_LIST_ITEMS = 500
+_MAX_DICT_ITEMS = 60
 
 
 def _stringify_output(o: Any) -> str:
