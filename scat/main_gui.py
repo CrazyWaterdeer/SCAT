@@ -1123,8 +1123,14 @@ class AnalysisTab(QWidget):
         if chosen != rename_action:
             return
         new, ok = QInputDialog.getText(self, "Rename group", "New group name:", text=str(old))
-        new = (new or "").strip()
-        if not ok or not new or new == old or old not in self._group_data:
+        if ok:
+            self._rename_group(old, (new or "").strip())
+
+    def _rename_group(self, old, new):
+        """Rename group `old` -> `new`, merging into `new` when it already exists. No-op on an
+        empty/unchanged/unknown name. Extracted from the context menu so the review/correct
+        flow is unit-testable without driving the modal dialog."""
+        if not new or new == old or old not in self._group_data:
             return
         data = dict(self._group_data)
         moved = data.pop(old, [])

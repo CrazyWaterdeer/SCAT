@@ -127,3 +127,54 @@ def test_regenerate_after_edit(app, no_modal, grouped_images, tmp_path, monkeypa
     # regenerate: no inline cv2, services drive stats+report; must not raise
     rtab._generate_report()
     assert (out / "report.html").exists()
+
+
+def test_rename_group_merges(app, grouped_images):
+    """The review/correct rename flow: plain rename, and merge-into-existing (Codex-flagged edge)."""
+    from scat.main_gui import AnalysisTab
+    tab = AnalysisTab()
+    tab._update_groups_list({"ctrl": ["a.png", "b.png"], "treated": ["c.png"]})
+    tab._rename_group("treated", "drug")                 # plain rename
+    assert set(tab._group_data) == {"ctrl", "drug"}
+    tab._rename_group("drug", "ctrl")                    # merge into existing name
+    assert set(tab._group_data) == {"ctrl"}
+    assert sorted(tab._group_data["ctrl"]) == ["a.png", "b.png", "c.png"]
+    for bad in [("ctrl", "ctrl"), ("nope", "x"), ("ctrl", "")]:   # no-ops
+        tab._rename_group(*bad)
+    assert set(tab._group_data) == {"ctrl"}
+
+
+def test_autogroup_duplicate_basenames_warns(app, tmp_path):
+    """Colliding basenames across subfolders must clear grouping + warn (join-key safety)."""
+    from scat.main_gui import AnalysisTab
+    (tmp_path / "ctrl").mkdir(); (tmp_path / "treated").mkdir()
+    f1 = tmp_path / "ctrl" / "same.png"; f1.write_bytes(b"x")
+    f2 = tmp_path / "treated" / "same.png"; f2.write_bytes(b"x")
+    tab = AnalysisTab()
+    tab._selected_files = [str(f1), str(f2)]
+    tab._autogroup_by_subfolder(announce=False)
+    assert tab._group_data == {}
+    assert "Duplicate" in tab.groups_hint.text()
+
+
+def test_run_analysis_worker_bridge(app, no_modal, grouped_images, tmp_path):
+    """Drive the REAL _run_analysis -> WorkerThread -> _on_finished -> analysis_complete bridge
+    (the slimdown tests otherwise call _do_analysis synchronously, bypassing the QThread)."""
+    from scat.main_gui import AnalysisTab
+    root, files = grouped_images
+    tab = AnalysisTab()
+    tab._selected_files = files
+    tab.model_type.setCurrentIndex(0)          # threshold — no model file
+    tab.spatial.setChecked(False); tab.report.setChecked(False)
+    tab.output_dir.set_path(str(tmp_path / "out"))
+    done = []
+    tab.analysis_complete.connect(done.append)
+    tab._run_analysis()
+    for _ in range(1500):
+        if done:
+            break
+        app.processEvents()
+        tab.worker.wait(20)
+    assert done, "analysis_complete never fired through the WorkerThread bridge"
+    assert (Path(done[0]["output_dir"]) / "image_summary.csv").exists()
+    tab.worker.wait(2000)
