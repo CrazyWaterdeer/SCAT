@@ -11,6 +11,8 @@ from datetime import datetime
 from PIL import Image
 import cv2
 
+from .artifacts import IMAGE_SUMMARY, ALL_DEPOSITS, CONDITION_SUMMARY
+
 from .detector import DepositDetector, Deposit
 from .features import FeatureExtractor
 from .classifier import get_classifier, ClassifierConfig
@@ -460,12 +462,12 @@ class ReportGenerator:
         """
         # Image summary (formerly film_summary)
         image_summary = self.generate_film_summary(results, metadata)
-        image_summary.to_csv(self.output_dir / 'image_summary.csv', index=False)
+        image_summary.to_csv(self.output_dir / IMAGE_SUMMARY, index=False)
         
         # Condition summary
         if group_by and metadata is not None:
             condition_summary = self.generate_condition_summary(image_summary, group_by)
-            condition_summary.to_csv(self.output_dir / 'condition_summary.csv', index=False)
+            condition_summary.to_csv(self.output_dir / CONDITION_SUMMARY, index=False)
         
         # Individual deposit files per image
         if save_individual:
@@ -473,7 +475,7 @@ class ReportGenerator:
         
         # Combined deposit data
         deposit_data = self.generate_deposit_data(results, metadata)
-        deposit_data.to_csv(self.output_dir / 'all_deposits.csv', index=False)
+        deposit_data.to_csv(self.output_dir / ALL_DEPOSITS, index=False)
         
         # Group-specific deposit files
         if group_by and metadata is not None:

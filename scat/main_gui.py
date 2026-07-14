@@ -42,6 +42,7 @@ from PySide6.QtGui import (
 
 # Import SCAT modules
 from .config import config, get_timestamped_output_dir
+from .artifacts import IMAGE_SUMMARY, ALL_DEPOSITS
 from .ui_common import (
     Theme, NoScrollSpinBox, NoScrollDoubleSpinBox, NoScrollComboBox,
     load_custom_fonts, get_icon_path
@@ -698,11 +699,11 @@ def _results_dict_from_output(output_dir, group_by=None, image_paths=None, stats
     """
     import json as _json
     out = Path(output_dir)
-    summary_path = out / "image_summary.csv"
+    summary_path = out / IMAGE_SUMMARY
     if not summary_path.exists():
         summary_path = out / "film_summary.csv"  # backward compatibility
     film_summary = pd.read_csv(summary_path)
-    dep_path = out / "all_deposits.csv"
+    dep_path = out / ALL_DEPOSITS
     deposit_data = pd.read_csv(dep_path) if dep_path.exists() else None
 
     viz_results = {}
@@ -1842,12 +1843,12 @@ class ResultsTab(QWidget):
         output_dir = Path(self.results['output_dir'])
         
         # Reload film_summary
-        summary_path = output_dir / 'image_summary.csv'
+        summary_path = output_dir / IMAGE_SUMMARY
         if summary_path.exists():
             self.results['film_summary'] = pd.read_csv(summary_path)
         
         # Reload deposit_data
-        all_deposits_path = output_dir / 'all_deposits.csv'
+        all_deposits_path = output_dir / ALL_DEPOSITS
         if all_deposits_path.exists():
             self.results['deposit_data'] = pd.read_csv(all_deposits_path)
 
@@ -1909,10 +1910,10 @@ class ResultsTab(QWidget):
         
         try:
             # Reload data from CSV files (support both new and old naming)
-            summary_path = output_dir / 'image_summary.csv'
+            summary_path = output_dir / IMAGE_SUMMARY
             if not summary_path.exists():
                 summary_path = output_dir / 'film_summary.csv'  # Backward compatibility
-            all_deposits_path = output_dir / 'all_deposits.csv'
+            all_deposits_path = output_dir / ALL_DEPOSITS
             
             if not summary_path.exists() or not all_deposits_path.exists():
                 self.progress.setVisible(False)
@@ -2007,10 +2008,10 @@ class ResultsTab(QWidget):
         output_dir = Path(folder)
         
         # Check for required files (support both new and old naming)
-        summary_path = output_dir / 'image_summary.csv'
+        summary_path = output_dir / IMAGE_SUMMARY
         if not summary_path.exists():
             summary_path = output_dir / 'film_summary.csv'  # Backward compatibility
-        deposits_path = output_dir / 'all_deposits.csv'
+        deposits_path = output_dir / ALL_DEPOSITS
         
         if not summary_path.exists():
             QMessageBox.critical(self, "Error", "image_summary.csv not found in selected folder.")

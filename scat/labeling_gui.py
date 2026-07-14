@@ -26,6 +26,7 @@ from PySide6.QtGui import (
 from .detector import DepositDetector, Deposit
 from .features import FeatureExtractor
 from .config import config
+from .artifacts import IMAGE_SUMMARY, ALL_DEPOSITS
 from .ui_common import (
     Theme, NoScrollSpinBox, NoScrollDoubleSpinBox, NoScrollComboBox, NumericTableWidgetItem,
     load_custom_fonts
@@ -1844,7 +1845,7 @@ class LabelingWindow(QMainWindow):
                     }, f, indent=2)
             
             # 3. Update all_deposits.csv
-            all_deposits_path = output_dir / 'all_deposits.csv'
+            all_deposits_path = output_dir / ALL_DEPOSITS
             if all_deposits_path.exists():
                 all_df = pd.read_csv(all_deposits_path)
                 all_df = all_df[all_df['filename'] != filename]
@@ -1852,7 +1853,7 @@ class LabelingWindow(QMainWindow):
                 all_df.to_csv(all_deposits_path, index=False)
             
             # 4. Update film_summary.csv
-            summary_path = output_dir / 'image_summary.csv'
+            summary_path = output_dir / IMAGE_SUMMARY
             if summary_path.exists():
                 summary_df = pd.read_csv(summary_path)
                 

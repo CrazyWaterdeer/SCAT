@@ -21,6 +21,7 @@ import pandas as pd
 
 from . import manifest as _manifest
 from .config import get_timestamped_output_dir
+from .artifacts import IMAGE_SUMMARY, ALL_DEPOSITS, RUN_MANIFEST
 
 
 def _resolve(p) -> str:
@@ -34,19 +35,19 @@ def _load(d):
     """Return (resolved_dir, manifest|None, summary_df, deposits_df|None). Raises if no image_summary."""
     dd = Path(d)
     m = None
-    mp = dd / "run_manifest.json"
+    mp = dd / RUN_MANIFEST
     if mp.is_file():
         try:
             m = json.loads(mp.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             m = None
-    sp = dd / "image_summary.csv"
+    sp = dd / IMAGE_SUMMARY
     if not sp.is_file():
         raise ValueError(f"{d}: no image_summary.csv")
     summary = pd.read_csv(sp)
     if "filename" not in summary.columns:
         raise ValueError(f"{d}: image_summary.csv has no 'filename' column")
-    dp = dd / "all_deposits.csv"
+    dp = dd / ALL_DEPOSITS
     deposits = pd.read_csv(dp) if dp.is_file() else None
     return _resolve(d), m, summary, deposits
 
@@ -116,9 +117,9 @@ def combine_results_service(results_dirs, output_dir: Optional[str] = None) -> d
     out = Path(output_dir) if output_dir else get_timestamped_output_dir(
         Path(results_dirs[0]).parent, "results_combined")
     out.mkdir(parents=True, exist_ok=True)
-    combined_summary.to_csv(out / "image_summary.csv", index=False)
+    combined_summary.to_csv(out / IMAGE_SUMMARY, index=False)
     if combined_deposits is not None:
-        combined_deposits.to_csv(out / "all_deposits.csv", index=False)
+        combined_deposits.to_csv(out / ALL_DEPOSITS, index=False)
 
     names = combined_summary["filename"].astype(str)
     groups = (sorted(set(combined_summary[gcol].dropna().astype(str)))
@@ -148,7 +149,7 @@ def combine_results_service(results_dirs, output_dir: Optional[str] = None) -> d
         "warnings": [], "combined_from": [dir_ for dir_, _, _, _ in loaded],
     }
     try:
-        (out / "run_manifest.json").write_text(json.dumps(man, indent=2, default=str), encoding="utf-8")
+        (out / RUN_MANIFEST).write_text(json.dumps(man, indent=2, default=str), encoding="utf-8")
     except OSError:
         pass
     return {"output_dir": str(out), "n_images": int(names.nunique()),
