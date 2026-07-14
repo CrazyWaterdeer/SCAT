@@ -54,7 +54,10 @@ DEFAULT_CONFIG = {
     "agent": {
         "backend": "auto",   # auto | subscription | api
         "model": "claude-opus-4-8",
-        "max_loops": 40
+        "max_loops": 40,
+        # Extra dirs to scan for prior results (T3.1 resume). Empty = just the analyzed
+        # folder's parent (where results dirs are written as siblings).
+        "results_search_roots": []
     },
 
     # Training settings
