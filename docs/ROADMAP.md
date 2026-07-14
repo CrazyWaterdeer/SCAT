@@ -44,7 +44,9 @@ High-leverage: makes the just-merged agent + chat dock reach users reliably.
 
 ## 🟡 Tier 2 — Scientific reproducibility
 
-- [ ] **T2.1 — Provenance run-header enrichment** · M · high
+- [x] **T2.1 — Provenance run-header enrichment** · M · high — DONE (feat/tier2): `scat/manifest.py`
+  writes `run_manifest.json` (dataset fingerprint + version/commit + model+hash + grouping + params)
+  into every results dir; `provenance.start_session` writes a redacted session header.
   `provenance.py` logs per-tool calls only; `read_session()` is never read back. Add a run header:
   dataset fingerprint (folder + file count + hash of sorted basenames/sizes), SCAT version + git commit,
   config snapshot, model id + classifier-model path/hash, and the grouping mapping. Spec §7 calls this

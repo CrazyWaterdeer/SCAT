@@ -34,7 +34,50 @@ def start_session(driver: str = "direct") -> str:
     _CURRENT_SESSION_ID = uuid.uuid4().hex[:12]
     _CURRENT_DRIVER = driver
     _LOG_PATH = _sessions_dir() / f"{_CURRENT_SESSION_ID}.jsonl"
+    _append_line(_session_header())   # spec §7 run header (path is set above -> no recursion)
     return _CURRENT_SESSION_ID
+
+
+_SECRET_HINT = ("key", "token", "secret", "password", "credential", "auth")
+
+
+def _redact(obj: Any) -> Any:
+    """Defensively redact secret-looking keys — config holds no secrets by design (spec §9),
+    but a user could have hand-added one to config.json (Codex F3)."""
+    if isinstance(obj, dict):
+        return {k: ("***" if any(h in str(k).lower() for h in _SECRET_HINT) else _redact(v))
+                for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_redact(v) for v in obj]
+    return obj
+
+
+def _session_header() -> dict[str, Any]:
+    """Run context + (redacted) config snapshot, written once per session."""
+    from scat.manifest import run_context
+    try:
+        from scat.config import config
+        cfg = _redact(dict(config.data))
+    except Exception:
+        cfg = {}
+    return {"type": "session_header", "session_id": _CURRENT_SESSION_ID,
+            "started_at": datetime.now(UTC).isoformat(), "driver": _CURRENT_DRIVER,
+            **run_context(), "config": cfg}
+
+
+def _append_line(obj: dict[str, Any]) -> None:
+    """Append one JSON line to the session log (callers ensure _LOG_PATH is set)."""
+    global _LOG_PATH
+    line = json.dumps(obj, default=str) + "\n"
+    try:
+        with _LOG_PATH.open("a", encoding="utf-8") as f:
+            f.write(line)
+    except OSError:
+        fb = Path(tempfile.gettempdir()) / "scat" / "sessions"
+        fb.mkdir(parents=True, exist_ok=True)
+        _LOG_PATH = fb / _LOG_PATH.name
+        with _LOG_PATH.open("a", encoding="utf-8") as f:
+            f.write(line)
 
 
 def set_driver(driver: str) -> None:
@@ -60,25 +103,22 @@ def _summarize(value: Any) -> Any:
 
 
 def record_call(tool: str, inputs: dict[str, Any], output: Any, duration_s: float, ok: bool) -> None:
-    global _LOG_PATH
     if _LOG_PATH is None:
         start_session(driver=_CURRENT_DRIVER)
     rec = CallRecord(datetime.now(UTC).isoformat(), tool, _summarize(inputs),
                      _summarize(output), duration_s, ok, _CURRENT_DRIVER)
-    line = json.dumps(asdict(rec), default=str) + "\n"
-    try:
-        with _LOG_PATH.open("a", encoding="utf-8") as f:
-            f.write(line)
-    except OSError:
-        fb = Path(tempfile.gettempdir()) / "scat" / "sessions"
-        fb.mkdir(parents=True, exist_ok=True)
-        _LOG_PATH = fb / _LOG_PATH.name
-        with _LOG_PATH.open("a", encoding="utf-8") as f:
-            f.write(line)
+    _append_line({"type": "call", **asdict(rec)})
 
 
 def read_session(session_id: str | None = None) -> list[dict[str, Any]]:
-    path = _LOG_PATH if session_id is None else _sessions_dir() / f"{session_id}.jsonl"
+    if session_id is None:
+        path = _LOG_PATH
+    else:
+        path = _sessions_dir() / f"{session_id}.jsonl"
+        if not path.exists():   # a write may have fallen back to the temp dir (Codex F4)
+            alt = Path(tempfile.gettempdir()) / "scat" / "sessions" / f"{session_id}.jsonl"
+            if alt.exists():
+                path = alt
     if path is None or not path.exists():
         return []
     out: list[dict[str, Any]] = []
