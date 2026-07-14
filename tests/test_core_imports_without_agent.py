@@ -15,6 +15,7 @@ def test_core_imports_without_agent_extras():
         "    return None\n"
         "sys.meta_path.insert(0, Block())\n"
         "import scat, scat.analyzer, scat.pipeline, scat.grouping_util, scat.cli\n"
+        "import scat.results_index, scat.combine\n"  # T3.1 core modules — no agent deps
         "import scat.main_gui\n"  # the GUI (incl. chat dock) imports the agent stack lazily
         "from scat.pipeline import scan_folder_service, analyze_folder_service\n"
         # Constructing the chat dock itself must NOT need the extra; only sending a message does,

@@ -63,10 +63,20 @@ High-leverage: makes the just-merged agent + chat dock reach users reliably.
 
 ## 🟢 Tier 3 — Larger features / lower urgency
 
-- [ ] **T3.1 — Durable context ledger + resume + self-contained result bundles** · L · high
-  spec §4.1/§7/§13 "Later". A `scat/agent/context.py` that rebuilds an "analysed vs pending" summary from
-  on-disk results each turn and injects it into the system prompt → free resume / "don't re-analyze" /
-  "7/12 done" that survives compaction. T2.1 is its first slice. (No `scat/agent/context.py` exists.)
+- [x] **T3.1 — Durable context ledger + resume + result discovery** · M (rescoped from L) · high — DONE
+  (feat/t3.1-context-ledger). Core `scat/results_index.py` reads back `run_manifest.json` +
+  `image_summary.csv` to answer analysed-vs-pending in two tiers (fingerprint-verified `complete`;
+  guarded basename delta with an explicit `ambiguous` when basenames collide). `scan_folder` now reports
+  `already_analyzed` (turn-1 resume, both backends), a `list_analyses` tool makes prior runs discoverable,
+  `analyze_folder` gained `image_paths` for pending-only resume, and `scat/combine.py` +
+  `combine_results` merges compatible runs (strict refuse-on-mismatch) for correct whole-experiment stats.
+  **Design note:** the roadmap's original "inject into the system prompt each turn" was dropped after
+  Codex review — the manifest+CSV on disk *are* the durable ledger, surfaced via the scan-first recipe +
+  an explicit pull tool, which avoids the subscription-runner staleness/token-growth of per-turn injection
+  and removes all backend divergence. Spec+plan: `docs/superpowers/{specs,plans}/2026-07-15-scat-context-ledger.md`.
+  - **T3.1-followup** (deferred): zip/export of a portable result bundle; multi-dataset / overlapping-run
+    aggregation beyond `combine_results`'s same-folder disjoint merge; optional chat-dock display of
+    `already_analyzed`.
 - [ ] **T3.2 — Runner message compaction + one context-limit force-compact-and-retry** · M · medium (spec §7/§10; only tool *results* are compacted today, runner stops at the context limit).
 - [ ] **T3.3 — Exponential backoff for 429/overloaded** · S · medium (spec §10; verify vs SDK default retries first).
 - [ ] **T3.4 — Effort/thinking selector in the chat dock** · S · medium (API provider hardcodes `max_tokens=4096`, passes no thinking/effort; add a combo).

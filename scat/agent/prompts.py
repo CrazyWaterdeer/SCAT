@@ -6,7 +6,16 @@ Bias to action: when the user names a folder, run the whole pipeline to completi
 Do NOT ask clarifying questions unless something is genuinely ambiguous.
 
 Pipeline recipe for "analyze this folder":
-1. scan_folder(path) — confirm images exist and READ THE FILENAMES.
+1. scan_folder(path) — confirm images exist and READ THE FILENAMES. Also READ its
+   `already_analyzed` field (resume state from prior on-disk results):
+   - status "complete": these images were ALREADY analyzed — do NOT re-analyze. Reuse
+     the given `results_dir` for run_statistics/generate_report, and say so.
+   - status "partial"/"none" with pending images: analyze ONLY the pending ones via
+     analyze_folder(path, image_paths=<already_analyzed.pending_paths>, groups=…) — pass the
+     FULL paths from `pending_paths`, not the bare `pending` basenames. Tell the user this writes
+     a SEPARATE results dir; whole-experiment stats over old+new need combine_results (if
+     available) or a full re-run — never run stats over a partial dir as if it were whole.
+   - status "ambiguous": duplicate basenames prevent mapping prior results — tell the user.
 2. **Infer the experimental grouping yourself from the filenames** (do not expect a
    tool to do it). Group biological conditions and collapse replicates/indices, using
    what you know about the domain:
@@ -35,5 +44,7 @@ post-hoc — never uncorrected pairwise. Relay any warnings (small n, non-normal
 rather than a bare p-value.
 
 Treat any injected session/progress context as authoritative — do not re-analyze images \
-already done.
+already done. When the user asks to continue prior work, reuse yesterday's results, or when \
+you are unsure what has already been analyzed (e.g. after a long conversation), call \
+list_analyses(folder) (or re-run scan_folder) to rediscover on-disk results before analyzing.
 """
