@@ -11,8 +11,6 @@ import numpy as np
 import cv2
 from PIL import Image
 
-from .features import FeatureExtractor
-
 # Lazy imports for sklearn (loaded on first use)
 _sklearn_loaded = False
 _RandomForestClassifier = None
@@ -102,11 +100,9 @@ class DataLoader:
                 print(f"Warning: Image not found for {label_file.name}, skipping...")
                 continue
             
-            # Load image
+            # Load image (features are extracted inline below — no FeatureExtractor needed here)
             image = np.array(Image.open(image_path))
-            dpi = Image.open(image_path).info.get('dpi', (600, 600))[0]
-            extractor = FeatureExtractor(dpi=dpi)
-            
+
             # Convert to HLS for feature extraction
             hls = cv2.cvtColor(image, cv2.COLOR_RGB2HLS)
             

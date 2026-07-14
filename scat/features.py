@@ -22,35 +22,38 @@ class FeatureExtractor:
         """
         if not deposits:
             return deposits
-        
+
         hls = cv2.cvtColor(image, cv2.COLOR_RGB2HLS)
-        
-        # Pre-allocate mask once (memory optimization)
-        mask = np.zeros(image.shape[:2], dtype=np.uint8)
-        
+
         for deposit in deposits:
-            # Clear and reuse mask instead of reallocating
-            mask.fill(0)
-            cv2.drawContours(mask, [deposit.contour], -1, 255, -1)
-            
-            # Boolean mask for indexing
-            mask_bool = mask > 0
-            
-            pixels_rgb = image[mask_bool]
-            if len(pixels_rgb) > 0:
-                deposit.mean_r = pixels_rgb[:, 0].mean() / 255.0
-                deposit.mean_g = pixels_rgb[:, 1].mean() / 255.0
-                deposit.mean_b = pixels_rgb[:, 2].mean() / 255.0
-            
-            pixels_hls = hls[mask_bool]
-            if len(pixels_hls) > 0:
-                deposit.mean_hue = pixels_hls[:, 0].mean() * 2
-                deposit.mean_lightness = pixels_hls[:, 1].mean() / 255.0
-                deposit.mean_saturation = pixels_hls[:, 2].mean() / 255.0
-                deposit.pigment_density = 1.0 - deposit.mean_lightness  # Higher = darker
-            
+            # Work in the deposit's bounding box, not the whole image. The old code allocated an
+            # HxW mask per deposit and indexed the full image (O(H*W) each); every selected pixel
+            # lies inside the bbox, so a local mask + ROI slice selects the SAME pixels in the SAME
+            # C-order -> byte-identical means (parity gate enforces this) at a fraction of the work.
+            x, y, w, h = int(deposit.x), int(deposit.y), int(deposit.width), int(deposit.height)
+            mask_bool = None
+            if w > 0 and h > 0 and deposit.contour is not None:
+                local_mask = np.zeros((h, w), dtype=np.uint8)
+                local_contour = (deposit.contour - np.array([x, y])).astype(np.int32)
+                cv2.drawContours(local_mask, [local_contour], -1, 255, -1)
+                mask_bool = local_mask > 0
+
+            if mask_bool is not None:
+                pixels_rgb = image[y:y + h, x:x + w][mask_bool]
+                if len(pixels_rgb) > 0:
+                    deposit.mean_r = pixels_rgb[:, 0].mean() / 255.0
+                    deposit.mean_g = pixels_rgb[:, 1].mean() / 255.0
+                    deposit.mean_b = pixels_rgb[:, 2].mean() / 255.0
+
+                pixels_hls = hls[y:y + h, x:x + w][mask_bool]
+                if len(pixels_hls) > 0:
+                    deposit.mean_hue = pixels_hls[:, 0].mean() * 2
+                    deposit.mean_lightness = pixels_hls[:, 1].mean() / 255.0
+                    deposit.mean_saturation = pixels_hls[:, 2].mean() / 255.0
+                    deposit.pigment_density = 1.0 - deposit.mean_lightness  # Higher = darker
+
             deposit.iod = deposit.area * deposit.pigment_density
-        
+
         return deposits
     
     def area_to_um2(self, area_pixels: float) -> float:

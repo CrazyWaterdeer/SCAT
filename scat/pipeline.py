@@ -181,7 +181,8 @@ def analyze_folder_service(path: str, groups: Optional[dict] = None, model_type:
             spatial_analyzer = SpatialAnalyzer()
             spatial_results = []
             for img_path, res in zip(images, results):
-                shape = np.array(Image.open(img_path)).shape[:2]
+                _sz = Image.open(img_path).size  # (W, H) from the header — no full pixel decode
+                shape = (_sz[1], _sz[0])
                 spatial_results.append(spatial_analyzer.analyze(res.deposits, shape))
             agg = aggregate_spatial_stats(spatial_results)
             with open(out / "spatial_stats.json", "w") as f:
