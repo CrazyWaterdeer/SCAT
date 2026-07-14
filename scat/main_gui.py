@@ -835,6 +835,15 @@ class AnalysisTab(QWidget):
         self.autogroup_btn.clicked.connect(lambda: self._autogroup_by_subfolder(announce=True))
         groups_layout.addWidget(self.autogroup_btn)
 
+        # Explicit override: load a {filename -> group} mapping from a CSV (mirrors CLI --metadata),
+        # for users whose folder layout doesn't encode the experimental design.
+        self.load_groups_csv_btn = QPushButton("Load grouping CSV…")
+        self.load_groups_csv_btn.setToolTip(
+            "Load an explicit filename→group mapping from a CSV (columns: filename, group).\n"
+            "Overrides subfolder grouping; matches images by filename.")
+        self.load_groups_csv_btn.clicked.connect(self._load_grouping_csv)
+        groups_layout.addWidget(self.load_groups_csv_btn)
+
         self.groups_hint = QLabel("Select images, then group by subfolder. Double-click a group to rename.")
         self.groups_hint.setWordWrap(True)
         self.groups_hint.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; font-size: 11px;")
@@ -992,6 +1001,7 @@ class AnalysisTab(QWidget):
     def _on_use_groups_toggled(self, checked):
         """Enable/disable groups UI based on checkbox."""
         self.autogroup_btn.setEnabled(checked)
+        self.load_groups_csv_btn.setEnabled(checked)
         self.groups_tree.setEnabled(checked)
         self.groups_hint.setEnabled(checked)
     
@@ -1108,6 +1118,58 @@ class AnalysisTab(QWidget):
             self.groups_hint.setText(
                 "All selected files share one folder — no groups. "
                 "Organize images into per-condition subfolders to compare.")
+
+    @staticmethod
+    def _grouping_from_csv(df, selected):
+        """Build {group: [basename]} from a metadata DataFrame, restricted to the `selected` basenames.
+        Columns: 'filename' plus a group column (prefers 'group', else the first other column). Returns
+        (group_data, matched_count); raises ValueError with a user-facing message on a bad schema."""
+        cols = {str(c).lower(): c for c in df.columns}
+        if "filename" not in cols:
+            raise ValueError("The CSV needs a 'filename' column and a group column.")
+        fn_col = cols["filename"]
+        group_col = cols.get("group") or next((c for c in df.columns if c != fn_col), None)
+        if group_col is None:
+            raise ValueError("The CSV needs a group column beside 'filename'.")
+        group_data: dict = {}
+        for _, row in df.iterrows():
+            fn, g = str(row[fn_col]).strip(), str(row[group_col]).strip()
+            if not g or g.lower() == "nan" or fn not in selected:
+                continue
+            group_data.setdefault(g, []).append(fn)
+        return group_data, sum(len(v) for v in group_data.values())
+
+    def _load_grouping_csv(self):
+        """Load an explicit filename→group mapping from a CSV (mirrors CLI --metadata), overriding
+        subfolder grouping for users whose folder layout doesn't encode the design."""
+        files = self._get_image_files()
+        if not files:
+            QMessageBox.warning(self, "No Input", "Please select input image files first.")
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load grouping CSV", "", "CSV files (*.csv);;All files (*)")
+        if not path:
+            return
+        import pandas as pd
+        try:
+            df = pd.read_csv(path)
+            group_data, matched = self._grouping_from_csv(df, {f.name for f in files})
+        except ValueError as e:
+            QMessageBox.warning(self, "Invalid grouping CSV", str(e))
+            return
+        except Exception as e:
+            QMessageBox.warning(self, "Could not read CSV", str(e))
+            return
+        if matched == 0:
+            QMessageBox.warning(self, "No matches",
+                "None of the CSV filenames match the selected images (matched on filename).")
+            return
+        self._metadata = None
+        self._update_groups_list(group_data)
+        unmatched = len(files) - matched
+        self.groups_hint.setText(
+            f"{len(group_data)} group(s) from CSV; {matched} image(s) matched"
+            + (f", {unmatched} left ungrouped." if unmatched else "."))
 
     def _on_groups_context_menu(self, pos):
         """Right-click a top-level group node to rename it (review/correct)."""

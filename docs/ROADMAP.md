@@ -90,13 +90,18 @@ High-leverage: makes the just-merged agent + chat dock reach users reliably.
 - [ ] **T3.4 — Effort/thinking selector in the chat dock** · S · medium (API provider hardcodes `max_tokens=4096`, passes no thinking/effort; add a combo).
 - [ ] **T3.5 — Live model catalog** (`client.models.list()`) vs hardcoded `LATEST_MODELS` · S · medium.
 - [ ] **T3.6 — Ollama / OpenAI-compatible backends** behind `build_runner` · L · low (Provider Protocol is the clean seam).
-- [ ] **T3.7 — GUI "Load grouping CSV…" override** · S · low (CLI already has `--metadata`; subfolder+manual already cover the case).
+- [x] **T3.7 — GUI "Load grouping CSV…" override** · S · low — DONE (feat/tier3-cleanup): AnalysisTab
+  gains a "Load grouping CSV…" button + `_grouping_from_csv` (matches images by filename, prefers a
+  `group` column, ignores unselected/blank rows) mirroring the CLI `--metadata` option.
+- [ ] **T3.4 — Effort/thinking selector in the chat dock** · S · medium — deferred (Jin deselected).
+- [ ] **T3.5 — Live model catalog** vs hardcoded `LATEST_MODELS` · S · medium — deferred (Jin deselected).
+- [ ] **T3.6 — Ollama / OpenAI-compatible backends** · L · low — deferred (Jin deselected).
 
 ### Small cleanups (each S)
-- [ ] Dedup the 4 identical deposit-from-contour blocks in `labeling_gui.py` (1120/1174/1237/1302).
-- [ ] Resolve `visualization.effect_size_forest_plot` dead code (no caller passes `statistical_results`) — wire up or remove.
+- [x] Dedup the 4 deposit-from-contour blocks in `labeling_gui.py` → shared `_finalize_deposit_from_contour` (feat/tier3-cleanup).
+- [x] Resolve `visualization.effect_size_forest_plot` dead code — **removed** (unreachable: no caller passes `statistical_results`; effect sizes remain in the stats dict + HTML report).
 - [ ] Live subscription-bridge round-trip is CI-skipped (login-gated) — consider a recorded cassette test.
-- [ ] Dedicated unit tests for `spatial.py` (Clark-Evans/NND/quadrant + edge guards), `trainer.py` round-trip, `segmentation.py`.
+- [x] Dedicated unit tests: `spatial.py` (Clark-Evans/NND/quadrant + edge guards), `trainer.py` RF round-trip, `segmentation.py` (torch-optional), + `labeling_gui` finalize helper (feat/tier3-cleanup).
 
 ---
 

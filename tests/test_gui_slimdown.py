@@ -178,3 +178,31 @@ def test_run_analysis_worker_bridge(app, no_modal, grouped_images, tmp_path):
     assert done, "analysis_complete never fired through the WorkerThread bridge"
     assert (Path(done[0]["output_dir"]) / "image_summary.csv").exists()
     tab.worker.wait(2000)
+
+
+def test_grouping_from_csv_maps_selected_basenames():
+    """T3.7: the Load-grouping-CSV parser maps filename->group for selected images, prefers a 'group'
+    column, and ignores rows not in the selection / with blank groups."""
+    import pandas as pd
+    from scat.main_gui import AnalysisTab
+    df = pd.DataFrame({"filename": ["a.tif", "b.tif", "c.tif", "z.tif"],
+                       "group": ["Control", "Treated", "", "Treated"]})
+    selected = {"a.tif", "b.tif", "c.tif"}   # z.tif not selected; c has blank group
+    group_data, matched = AnalysisTab._grouping_from_csv(df, selected)
+    assert group_data == {"Control": ["a.tif"], "Treated": ["b.tif"]} and matched == 2
+
+
+def test_grouping_from_csv_uses_first_other_column_when_no_group_col():
+    import pandas as pd
+    from scat.main_gui import AnalysisTab
+    df = pd.DataFrame({"filename": ["a.tif"], "condition": ["Dose1"]})
+    group_data, matched = AnalysisTab._grouping_from_csv(df, {"a.tif"})
+    assert group_data == {"Dose1": ["a.tif"]} and matched == 1
+
+
+def test_grouping_from_csv_rejects_missing_filename_column():
+    import pandas as pd
+    import pytest
+    from scat.main_gui import AnalysisTab
+    with pytest.raises(ValueError):
+        AnalysisTab._grouping_from_csv(pd.DataFrame({"group": ["A"]}), set())

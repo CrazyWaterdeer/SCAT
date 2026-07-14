@@ -812,112 +812,6 @@ class Visualizer:
         
         return str(filepath)
     
-    def effect_size_forest_plot(
-        self,
-        statistical_results: Dict,
-        metric: str = None,
-        title: str = "Effect Size (Cohen's d) Forest Plot",
-        filename: str = "effect_size_forest.png"
-    ) -> Optional[str]:
-        """
-        Generate forest plot showing effect sizes (Cohen's d) for pairwise comparisons.
-        
-        Useful for visualizing the magnitude and direction of group differences.
-        
-        Args:
-            statistical_results: Results from StatisticalAnalyzer.compare_multiple_groups()
-            metric: Metric name for labeling (optional)
-            title: Plot title
-            filename: Output filename
-        """
-        if not HAS_MATPLOTLIB:
-            return None
-        
-        pairwise = statistical_results.get('pairwise_comparisons', [])
-        if not pairwise:
-            return None
-        
-        # Extract effect sizes
-        comparisons = []
-        effect_sizes = []
-        significances = []
-        
-        for pw in pairwise:
-            if 'error' in pw:
-                continue
-            
-            g1 = pw.get('group1_name', '?')
-            g2 = pw.get('group2_name', '?')
-            d = pw.get('cohens_d', 0)
-            
-            # Check significance (use corrected if available)
-            if 'significant_corrected' in pw:
-                is_sig = pw['significant_corrected']
-            else:
-                is_sig = pw.get('significant', False)
-            
-            comparisons.append(f'{g1} vs {g2}')
-            effect_sizes.append(d)
-            significances.append(is_sig)
-        
-        if not comparisons:
-            return None
-        
-        fig, ax = _plt.subplots(figsize=(10, max(4, len(comparisons) * 0.6)))
-        
-        y_pos = np.arange(len(comparisons))
-        
-        # Color based on significance and direction
-        # Use DEPOSIT_COLORS for consistency: green=normal(positive), red=rod(negative), gray=artifact(ns)
-        colors = []
-        for d, is_sig in zip(effect_sizes, significances):
-            if not is_sig:
-                colors.append(DEPOSIT_COLORS['artifact'])  # Gray for non-significant
-            elif d > 0:
-                colors.append(DEPOSIT_COLORS['normal'])  # Green for positive
-            else:
-                colors.append(DEPOSIT_COLORS['rod'])  # Red for negative
-        
-        # Horizontal bar chart
-        bars = ax.barh(y_pos, effect_sizes, color=colors, alpha=0.7, 
-                       edgecolor='black', linewidth=0.5)
-        
-        # Add value labels
-        for i, (d, is_sig) in enumerate(zip(effect_sizes, significances)):
-            label = f'{d:.2f}'
-            if is_sig:
-                label += ' *'
-            x_pos = d + 0.05 if d >= 0 else d - 0.05
-            ha = 'left' if d >= 0 else 'right'
-            ax.text(x_pos, i, label, ha=ha, va='center', fontsize=9)
-        
-        # Reference lines for effect size interpretation
-        ax.axvline(0, color='black', linewidth=1)
-        ax.axvline(-0.2, color='gray', linestyle=':', alpha=0.5)
-        ax.axvline(0.2, color='gray', linestyle=':', alpha=0.5)
-        ax.axvline(-0.5, color='gray', linestyle='--', alpha=0.5)
-        ax.axvline(0.5, color='gray', linestyle='--', alpha=0.5)
-        ax.axvline(-0.8, color='gray', linestyle='-', alpha=0.5)
-        ax.axvline(0.8, color='gray', linestyle='-', alpha=0.5)
-        
-        ax.set_yticks(y_pos)
-        ax.set_yticklabels(comparisons)
-        ax.set_xlabel("Cohen's d")
-        ax.set_title(title)
-        
-        # Add effect size interpretation legend
-        legend_text = 'Effect size: |d|<0.2=negligible, 0.2-0.5=small, 0.5-0.8=medium, >0.8=large'
-        ax.text(0.5, -0.12, legend_text, transform=ax.transAxes, 
-               ha='center', fontsize=8, color='#666666')
-        
-        apply_publication_style(ax)
-        _plt.tight_layout()
-        filepath = self.output_dir / filename
-        _plt.savefig(filepath, dpi=300, bbox_inches='tight')
-        _plt.close()
-        
-        return str(filepath)
-    
     def heatmap(
         self,
         film_summary: pd.DataFrame,
@@ -1242,8 +1136,7 @@ def generate_all_visualizations(
     output_dir: Path,
     group_by: str = None,
     control_group: str = None,
-    show_significance: bool = True,
-    statistical_results: Dict = None
+    show_significance: bool = True
 ) -> Dict[str, str]:
     """
     Generate all available visualizations.
@@ -1255,8 +1148,7 @@ def generate_all_visualizations(
         group_by: Column for grouping
         control_group: Name of control group (shown in gray)
         show_significance: Whether to show statistical significance on violin plots
-        statistical_results: Results from StatisticalAnalyzer (for effect size plots)
-    
+
     Returns:
         Dict mapping visualization name to filepath
     """
@@ -1324,20 +1216,7 @@ def generate_all_visualizations(
         path = viz.area_iod_scatter(deposits_df)
         if path:
             results['area_iod'] = path
-    
-    # Effect size forest plot (if statistical results provided)
-    if statistical_results:
-        # Generate forest plot for rod_fraction if available
-        rod_stats = statistical_results.get('metrics', {}).get('rod_fraction', {})
-        if rod_stats and 'pairwise_comparisons' in rod_stats:
-            path = viz.effect_size_forest_plot(
-                rod_stats,
-                metric='rod_fraction',
-                title="Effect Size (Cohen's d) - ROD Fraction"
-            )
-            if path:
-                results['effect_size_rod_fraction'] = path
-    
+
     return results
 
 

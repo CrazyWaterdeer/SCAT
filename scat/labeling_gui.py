@@ -1117,43 +1117,26 @@ class LabelingWindow(QMainWindow):
         self._update_stats()
         self.statusBar().showMessage(f"Detected {len(self.deposits)} deposits")
     
-    def _add_deposit_from_rect(self, rect: QRectF):
-        if self.image is None:
-            return
-        
-        self._save_state()  # Save state before adding
-        
-        x, y = int(rect.x()), int(rect.y())
-        w, h = int(rect.width()), int(rect.height())
-        
-        h_img, w_img = self.image.shape[:2]
-        x = max(0, min(x, w_img - 1))
-        y = max(0, min(y, h_img - 1))
-        w = min(w, w_img - x)
-        h = min(h, h_img - y)
-        
-        contour = np.array([[x, y], [x + w, y], [x + w, y + h], [x, y + h]])
-        
-        roi = self.image[y:y+h, x:x+w]
-        if len(roi) > 0:
-            gray = cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY)
-            _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-            contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            if contours:
-                largest = max(contours, key=cv2.contourArea)
-                contour = largest + np.array([x, y])
-        
+    def _finalize_deposit_from_contour(self, contour, *, fallback_centroid=None,
+                                       min_area=0, manual=False):
+        """Shared tail of every add-from-<shape> handler: derive metrics from `contour`, build and
+        register a Deposit, refresh the UI. Returns the Deposit, or None if it's below `min_area`.
+        `fallback_centroid` is used only when the contour has zero moment area (default: bbox center)."""
         area = cv2.contourArea(contour)
+        if area < min_area:
+            return None
         perimeter = cv2.arcLength(contour, True)
         circularity = 4 * np.pi * area / (perimeter ** 2) if perimeter > 0 else 0
-        
+
         bx, by, bw, bh = cv2.boundingRect(contour)
         aspect_ratio = max(bw, bh) / min(bw, bh) if min(bw, bh) > 0 else 1
-        
+
         M = cv2.moments(contour)
-        cx = int(M["m10"] / M["m00"]) if M["m00"] > 0 else x + w // 2
-        cy = int(M["m01"] / M["m00"]) if M["m00"] > 0 else y + h // 2
-        
+        if M["m00"] > 0:
+            cx, cy = int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"])
+        else:
+            cx, cy = fallback_centroid if fallback_centroid is not None else (bx + bw // 2, by + bh // 2)
+
         deposit = Deposit(
             id=self.next_id, contour=contour,
             x=bx, y=by, width=bw, height=bh,
@@ -1162,15 +1145,44 @@ class LabelingWindow(QMainWindow):
             centroid=(cx, cy)
         )
         self.next_id += 1
-        
+
         self.deposits.append(deposit)
         self.extractor.extract_features(self.image, [deposit])
         self.viewer.add_deposit(deposit)
-        
+
         self._update_table()
         self._update_stats()
-        self.statusBar().showMessage(f"Added deposit {deposit.id}")
-    
+        self.statusBar().showMessage(f"Added {'manual ' if manual else ''}deposit {deposit.id}")
+        return deposit
+
+    def _add_deposit_from_rect(self, rect: QRectF):
+        if self.image is None:
+            return
+
+        self._save_state()  # Save state before adding
+
+        x, y = int(rect.x()), int(rect.y())
+        w, h = int(rect.width()), int(rect.height())
+
+        h_img, w_img = self.image.shape[:2]
+        x = max(0, min(x, w_img - 1))
+        y = max(0, min(y, h_img - 1))
+        w = min(w, w_img - x)
+        h = min(h, h_img - y)
+
+        contour = np.array([[x, y], [x + w, y], [x + w, y + h], [x, y + h]])
+
+        roi = self.image[y:y+h, x:x+w]
+        if len(roi) > 0:
+            gray = cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY)
+            _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+            contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if contours:
+                largest = max(contours, key=cv2.contourArea)
+                contour = largest + np.array([x, y])
+
+        self._finalize_deposit_from_contour(contour, fallback_centroid=(x + w // 2, y + h // 2))
+
     def _add_deposit_from_circle(self, rect: QRectF):
         """Add deposit from circle (rect is bounding box of circle)."""
         if self.image is None:
@@ -1205,35 +1217,9 @@ class LabelingWindow(QMainWindow):
             if contours:
                 largest = max(contours, key=cv2.contourArea)
                 contour = largest + np.array([x1, y1])
-        
-        area = cv2.contourArea(contour)
-        perimeter = cv2.arcLength(contour, True)
-        circularity = 4 * np.pi * area / (perimeter ** 2) if perimeter > 0 else 0
-        
-        bx, by, bw, bh = cv2.boundingRect(contour)
-        aspect_ratio = max(bw, bh) / min(bw, bh) if min(bw, bh) > 0 else 1
-        
-        M = cv2.moments(contour)
-        cx_m = int(M["m10"] / M["m00"]) if M["m00"] > 0 else cx
-        cy_m = int(M["m01"] / M["m00"]) if M["m00"] > 0 else cy
-        
-        deposit = Deposit(
-            id=self.next_id, contour=contour,
-            x=bx, y=by, width=bw, height=bh,
-            area=area, perimeter=perimeter,
-            circularity=circularity, aspect_ratio=aspect_ratio,
-            centroid=(cx_m, cy_m)
-        )
-        self.next_id += 1
-        
-        self.deposits.append(deposit)
-        self.extractor.extract_features(self.image, [deposit])
-        self.viewer.add_deposit(deposit)
-        
-        self._update_table()
-        self._update_stats()
-        self.statusBar().showMessage(f"Added deposit {deposit.id}")
-    
+
+        self._finalize_deposit_from_contour(contour, fallback_centroid=(cx, cy))
+
     def _add_deposit_from_freeform(self, points: list):
         """Add deposit from freeform polygon."""
         if self.image is None or len(points) < 3:
@@ -1270,79 +1256,21 @@ class LabelingWindow(QMainWindow):
             if contours:
                 largest = max(contours, key=cv2.contourArea)
                 contour = largest + np.array([x1, y1])
-        
-        area = cv2.contourArea(contour)
-        perimeter = cv2.arcLength(contour, True)
-        circularity = 4 * np.pi * area / (perimeter ** 2) if perimeter > 0 else 0
-        
-        bx, by, bw, bh = cv2.boundingRect(contour)
-        aspect_ratio = max(bw, bh) / min(bw, bh) if min(bw, bh) > 0 else 1
-        
-        M = cv2.moments(contour)
-        cx = int(M["m10"] / M["m00"]) if M["m00"] > 0 else bx + bw // 2
-        cy = int(M["m01"] / M["m00"]) if M["m00"] > 0 else by + bh // 2
-        
-        deposit = Deposit(
-            id=self.next_id, contour=contour,
-            x=bx, y=by, width=bw, height=bh,
-            area=area, perimeter=perimeter,
-            circularity=circularity, aspect_ratio=aspect_ratio,
-            centroid=(cx, cy)
-        )
-        self.next_id += 1
-        
-        self.deposits.append(deposit)
-        self.extractor.extract_features(self.image, [deposit])
-        self.viewer.add_deposit(deposit)
-        
-        self._update_table()
-        self._update_stats()
-        self.statusBar().showMessage(f"Added deposit {deposit.id}")
-    
+
+        self._finalize_deposit_from_contour(contour)
+
     def _add_deposit_from_manual(self, points: list):
         """Add deposit directly from drawn polygon (no auto-detection)."""
         if self.image is None or len(points) < 3:
             return
-        
+
         self._save_state()
-        
-        # Convert QPointF to numpy array - use drawn shape directly
-        contour = np.array([[int(p.x()), int(p.y())] for p in points], dtype=np.int32)
-        
-        # Close the contour
-        contour = contour.reshape((-1, 1, 2))
-        
-        area = cv2.contourArea(contour)
-        if area < 5:  # Too small
-            return
-            
-        perimeter = cv2.arcLength(contour, True)
-        circularity = 4 * np.pi * area / (perimeter ** 2) if perimeter > 0 else 0
-        
-        bx, by, bw, bh = cv2.boundingRect(contour)
-        aspect_ratio = max(bw, bh) / min(bw, bh) if min(bw, bh) > 0 else 1
-        
-        M = cv2.moments(contour)
-        cx = int(M["m10"] / M["m00"]) if M["m00"] > 0 else bx + bw // 2
-        cy = int(M["m01"] / M["m00"]) if M["m00"] > 0 else by + bh // 2
-        
-        deposit = Deposit(
-            id=self.next_id, contour=contour,
-            x=bx, y=by, width=bw, height=bh,
-            area=area, perimeter=perimeter,
-            circularity=circularity, aspect_ratio=aspect_ratio,
-            centroid=(cx, cy)
-        )
-        self.next_id += 1
-        
-        self.deposits.append(deposit)
-        self.extractor.extract_features(self.image, [deposit])
-        self.viewer.add_deposit(deposit)
-        
-        self._update_table()
-        self._update_stats()
-        self.statusBar().showMessage(f"Added manual deposit {deposit.id}")
-    
+
+        # Convert QPointF to numpy array - use drawn shape directly, closed for cv2
+        contour = np.array([[int(p.x()), int(p.y())] for p in points], dtype=np.int32).reshape((-1, 1, 2))
+
+        self._finalize_deposit_from_contour(contour, min_area=5, manual=True)
+
     def _delete_selected(self):
         deleted = []
         has_selection = self.viewer.selected_items or self.viewer.selected_item
