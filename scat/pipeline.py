@@ -63,9 +63,17 @@ def scan_folder_service(path: str) -> dict:
     # (subfolder is exposed per file so the agent can group by folder when present).
     files = [{"filename": p.name, "subfolder": (p.parent.name if p.parent != root else None)} for p in imgs]
     truncated = len(files) > _SCAN_NAME_CAP
-    return {"path": str(path), "n_images": len(imgs), "extensions": exts,
-            "subfolders": subdirs, "files": files[:_SCAN_NAME_CAP],
-            "files_truncated": truncated}
+    result = {"path": str(path), "n_images": len(imgs), "extensions": exts,
+              "subfolders": subdirs, "files": files[:_SCAN_NAME_CAP],
+              "files_truncated": truncated}
+    # Resume support (T3.1): report which of these images were already analyzed, from on-disk
+    # results. Best-effort and additive — never break scan; scan output is not in the parity gate.
+    try:
+        from . import results_index
+        result["already_analyzed"] = results_index.analysis_status(path)
+    except Exception:
+        pass
+    return result
 
 
 def analyze_folder_service(path: str, groups: Optional[dict] = None, model_type: Optional[str] = None,
