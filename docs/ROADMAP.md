@@ -9,11 +9,11 @@ and the two phase-2 plans in `docs/superpowers/plans/`.
 
 ---
 
-## 🔴 Tier 1 — Harden the shipped agent/GUI feature (do first)
+## 🔴 Tier 1 — Harden the shipped agent/GUI feature ✅ DONE (branch feat/hardening)
 
 High-leverage: makes the just-merged agent + chat dock reach users reliably.
 
-- [ ] **T1.1 — Chat dock: per-image progress + cooperative cancel** · M · high
+- [x] **T1.1 — Chat dock: per-image progress + cooperative cancel** · M · high
   A real folder analysis shows one `analyze_folder(...)` line then looks frozen with no feedback until
   the whole batch finishes, and **Stop does not halt the batch** (cancel is only checked at tool/loop
   boundaries, never inside `analyze_batch`). Plumbing is half-built: `analyze_folder_service` and
@@ -23,7 +23,7 @@ High-leverage: makes the just-merged agent + chat dock reach users reliably.
   *Where:* `tools/pipeline_tools.py:8-14`, `pipeline.py:71-112`, `analyzer.py:194-233`, `runner.py:95,136`,
   `chat_widget.py`, `cli.py` chat loop. Spec §10.1.
 
-- [ ] **T1.2 — Test coverage for the new surfaces + smoke guards** · S–M · high
+- [x] **T1.2 — Test coverage for the new surfaces + smoke guards** · S–M · high
   `cli.py` (incl. the new `chat` subcommand) has **zero tests**; `main_gui`/`labeling_gui`(1990 lines)/
   `ui_common` are not even in `test_smoke.MODULES`. Add `tests/test_cli.py` (drive `main(["analyze", …])`
   + arg-parser dispatch), extend `test_smoke.MODULES` (`scat.cli`, `scat.main_gui`, `scat.ui_common`,
@@ -32,13 +32,13 @@ High-leverage: makes the just-merged agent + chat dock reach users reliably.
   and the `_run_analysis`→WorkerThread→`_on_finished` signal bridge (only `_do_analysis` is driven today).
   *Where:* `cli.py`, `test_smoke.py:11-24`, `test_gui_slimdown.py`.
 
-- [ ] **T1.3 — Packaging decision + README docs for the agent layer** · M · high
-  `SCAT.spec` `hiddenimports` omit `scat.agent.*` and the `[agent]` deps aren't collected → a frozen
-  `SCAT.exe` **silently ships the Assistant permanently disabled** (main_gui degrades to a placeholder
-  dock). Decide explicitly: bundle the agent stack (anthropic/pydantic/claude-agent-sdk) into the exe,
-  or ship without and document it. Also: README never mentions `pip install -e .[agent]`, `scat chat`,
-  or the Assistant dock — add an install line + a short usage note.
-  *Where:* `SCAT.spec:51-105`, `pyproject.toml:39-43`, `README.md:20-45`, `main_gui.py:_build_chat_dock`.
+- [x] **T1.3 — Packaging decision + README docs for the agent layer** · M · high
+  **Decision (user):** do NOT bundle the agent stack into a frozen exe — the subscription backend
+  needs the external `claude` CLI, which PyInstaller can't bundle. Instead ship the Assistant via
+  the source install and provide a **one-click Windows desktop shortcut** (`scripts/install_desktop_shortcut.sh`)
+  that launches the WSL GUI via WSLg (no console). `SCAT.spec` left as a core-only exe.
+  README now documents `pip install -e .[agent]`, `scat chat`, the Assistant dock + backends, and
+  the desktop shortcut.
 
 ---
 
