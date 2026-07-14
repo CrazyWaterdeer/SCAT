@@ -116,7 +116,27 @@ Everything after (cancel check, append assistant_blocks, tool loop, tool_result 
 - **Provider/config:** monkeypatch `anthropic.Anthropic` to capture kwargs → `AnthropicProvider(max_retries=7, max_tokens=99)` forwards both; `build_runner` API branch reads config defaults (monkeypatch build to API, capture provider).
 
 ## 5. Codex plan review — incorporated (pass 2, gpt-5.5 xhigh)
-(to be filled after the plan review)
+- **BLOCKER: rollback index invalidated by compaction.** Replace `turn_start_len` with a snapshot
+  `pre_turn = list(self.messages)` taken before appending the user message; on the fatal give-up path
+  `self.messages = pre_turn` (reverts the compaction too — always a valid pre-turn state). `_soft_rewrite`
+  must **copy**, never mutate input dicts, so the snapshot stays intact.
+- **BLOCKER: `yielded_any` ignored `Stop` → usage double-count.** Rename to `saw_event`, set it at the
+  TOP of the event loop for **every** event (incl. `Stop`), before dispatch. Retry only when `not
+  saw_event`.
+- Cancel during a pre-event context error → don't retry: guard the except with `if self._cancelled:
+  self.messages = pre_turn; yield TurnDone("cancelled", total_usage); self._cancelled=False; return`.
+- Tighten `_CTX_RE` (drop bare `context`): `prompt is too long|input length and .*exceed|exceed\w*\s+
+  context|context (?:window|length|limit)|too many tokens|maximum context`. Require `status_code==400`
+  only when the attr exists; allow status-less message match.
+- Duplicate ids → not droppable: build **lists**, require `len==len(set)` on both sides before comparing
+  sets (no fake-marker set behind a `set[str]`).
+- Tests: `_assert_paired` validates **adjacency** (each assistant tool_use answered by the *immediately
+  following* user tool_result, exact id-set equality), not a global {id:has_result} map. Add:
+  compact-then-retry-fails leaves the exact pre-turn prefix (no current user left behind);
+  compact/retry-succeeds one round then next loop fails → no orphan + no turn-local remnant; Stop-only
+  then exception → no retry, no usage double-count; `_is_context_limit_error` with `status_code=400`,
+  `status_code=None`, and an incidental-"context" non-limit 400 → correct; duplicate ids on both sides.
+- `build_runner`: read config **inside** the API branch; do **not** add unused params to its signature.
 
 ## Open confirmations
 - `Stop`/`TextDelta`/`ToolUse`/`ToolUseStart` are already imported in runner.py (yes, line 6). `re` is new.

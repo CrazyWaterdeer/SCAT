@@ -8,12 +8,16 @@ from scat.agent.providers.base import Event, Stop, TextDelta, ToolUse, ToolUseSt
 class AnthropicProvider:
     name = "anthropic"
 
-    def __init__(self, api_key: str | None = None, model: str = "claude-opus-4-8", max_tokens: int = 4096) -> None:
+    def __init__(self, api_key: str | None = None, model: str = "claude-opus-4-8",
+                 max_tokens: int = 4096, max_retries: int = 3) -> None:
         from anthropic import Anthropic
         self.model = model
         self.max_tokens = max_tokens
-        # Falsy api_key -> let the SDK resolve env/profile credentials.
-        self._client = Anthropic(api_key=api_key) if api_key else Anthropic()
+        # The SDK already does exponential backoff (+jitter) on 408/409/429/>=500 (529 overloaded
+        # included) at request establishment, honoring x-should-retry — so we do NOT hand-roll retries,
+        # only widen the count. Falsy api_key -> let the SDK resolve env/profile credentials.
+        self._client = (Anthropic(api_key=api_key, max_retries=max_retries) if api_key
+                        else Anthropic(max_retries=max_retries))
 
     def stream(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]], system: str) -> Iterator[Event]:
         cached_system = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
