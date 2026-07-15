@@ -161,30 +161,25 @@ class Theme:
                 color: {cls.TEXT_PRIMARY};
             }}
             
-            /* Group Box — raised surface (BG_SURFACE over BG_BASE) with a lit top edge for depth */
+            /* Group Box — a calm card with a small MUTED section label above it (not a loud
+               coral heading). Coral is reserved for actions/active state. */
             QGroupBox {{
-                background-color: {cls.BG_DARK};
+                background-color: {cls.BG_SURFACE};
                 border: 1px solid {cls.BORDER};
-                border-top: 1px solid #3A3A3A;
                 border-radius: {cls.RADIUS_CONTAINER}px;
-                margin-top: 20px;
-                padding: 20px 12px 12px 12px;
-                font-weight: {cls.WEIGHT_TITLE};
+                margin-top: 18px;
+                padding: 18px 16px 16px 16px;
             }}
             QGroupBox::title {{
                 subcontrol-origin: margin;
                 subcontrol-position: top left;
-                left: 14px;
-                top: 6px;
-                padding: 2px 10px;
-                color: {cls.PRIMARY};
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(10, 10, 10, 255),
-                    stop:0.55 rgba(10, 10, 10, 255),
-                    stop:0.65 rgba(23, 23, 23, 255),
-                    stop:1 rgba(23, 23, 23, 255));
-                font-size: {cls.FS_BODY}px;
+                left: 4px;
+                top: 0px;
+                padding: 0px 2px;
+                color: {cls.TEXT_SECONDARY};
+                font-size: {cls.FS_XS}px;
                 font-weight: {cls.WEIGHT_TITLE};
+                letter-spacing: 1px;
             }}
 
             /* Scroll Area */
@@ -294,6 +289,7 @@ class Theme:
                 background-color: {cls.BG_DARK};
                 alternate-background-color: {cls.BG_INSET};
                 gridline-color: {cls.BORDER};
+                color: {cls.TEXT_PRIMARY};
                 border: 1px solid {cls.BORDER};
                 border-radius: {cls.RADIUS_CONTAINER}px;
             }}
@@ -521,28 +517,22 @@ class Theme:
                 color: {cls.TEXT_PRIMARY};
             }}
             QGroupBox {{
-                font-weight: {cls.WEIGHT_TITLE};
                 border: 1px solid {cls.BORDER};
-                border-top: 1px solid #3A3A3A;
                 border-radius: {cls.RADIUS_CONTAINER}px;
-                margin-top: 20px;
-                padding: 20px 12px 12px 12px;
-                background-color: {cls.BG_DARK};
+                margin-top: 18px;
+                padding: 18px 16px 16px 16px;
+                background-color: {cls.BG_SURFACE};
             }}
             QGroupBox::title {{
                 subcontrol-origin: margin;
                 subcontrol-position: top left;
-                left: 14px;
-                top: 6px;
-                padding: 2px 10px;
-                color: {cls.PRIMARY};
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(10, 10, 10, 255),
-                    stop:0.55 rgba(10, 10, 10, 255),
-                    stop:0.65 rgba(23, 23, 23, 255),
-                    stop:1 rgba(23, 23, 23, 255));
-                font-size: {cls.FS_BODY}px;
+                left: 4px;
+                top: 0px;
+                padding: 0px 2px;
+                color: {cls.TEXT_SECONDARY};
+                font-size: {cls.FS_XS}px;
                 font-weight: {cls.WEIGHT_TITLE};
+                letter-spacing: 1px;
             }}
             QPushButton {{
                 background-color: {cls.BG_LIGHT};
@@ -931,6 +921,38 @@ def get_resource_path(relative_path: str) -> Path:
         relative_path: Path relative to scat/resources/ (e.g., 'fonts/NotoSans-Regular.ttf')
     """
     return Path(__file__).parent / 'resources' / relative_path
+
+
+_icon_cache = {}
+
+
+def icon(name: str, color: str = None, size: int = 20):
+    """Load a bundled Material Symbol (``scat/resources/icons/ms_<name>.svg``) as a recolored
+    ``QIcon`` — replaces emoji glyphs that render as tofu in the bundled font. Cached. These are
+    Google Material Symbols (Apache-2.0). Returns an empty QIcon if the name is missing."""
+    from PySide6.QtGui import QIcon, QPixmap, QPainter
+    color = color or Theme.TEXT_PRIMARY
+    key = (name, color, size)
+    if key in _icon_cache:
+        return _icon_cache[key]
+    ic = QIcon()
+    path = Path(__file__).parent / "resources" / "icons" / f"ms_{name}.svg"
+    if path.exists():
+        try:
+            from PySide6.QtSvg import QSvgRenderer
+            from PySide6.QtCore import Qt, QByteArray
+            svg = path.read_text().replace("<svg ", f'<svg fill="{color}" ', 1)
+            r = QSvgRenderer(QByteArray(svg.encode()))
+            pm = QPixmap(size, size)
+            pm.fill(Qt.transparent)
+            p = QPainter(pm)
+            r.render(p)
+            p.end()
+            ic = QIcon(pm)
+        except Exception:
+            ic = QIcon()
+    _icon_cache[key] = ic
+    return ic
 
 
 def qss_icon(name: str) -> str:

@@ -46,7 +46,7 @@ from .config import config, get_timestamped_output_dir
 from .artifacts import IMAGE_SUMMARY, ALL_DEPOSITS
 from .ui_common import (
     Theme, NoScrollSpinBox, NoScrollDoubleSpinBox, NoScrollComboBox,
-    CollapsibleSection, CenteredCap, load_custom_fonts, get_icon_path
+    CollapsibleSection, CenteredCap, icon, load_custom_fonts, get_icon_path
 )
 from . import ui_motion
 
@@ -996,7 +996,8 @@ class AnalysisTab(QWidget):
         self.eta_label.setStyleSheet(f"color: {Theme.TEXT_SECONDARY};")
         self.progress.setVisible(False)          # shown once a run starts
         self.progress_label.setVisible(False)
-        self.run_btn = QPushButton("▶  Run Analysis")
+        self.run_btn = QPushButton("Run Analysis")
+        self.run_btn.setIcon(icon("play_arrow", "#FFFFFF"))
         self.run_btn.setMinimumHeight(48)
         self.run_btn.setMinimumWidth(240)
         self.run_btn.setStyleSheet(
@@ -1165,12 +1166,14 @@ class AnalysisTab(QWidget):
         bh = QHBoxLayout(bar)
         bh.setContentsMargins(14, 10, 14, 10)
         bh.setSpacing(12)
-        back_btn = QPushButton("◂  New analysis")
+        back_btn = QPushButton("New analysis")
+        back_btn.setIcon(icon("arrow_back"))
         back_btn.setToolTip("Back to configuration")
         back_btn.clicked.connect(lambda: self.stack.setCurrentWidget(self._configure_page))
         self.results_bar_label = QLabel("")
         self.results_bar_label.setStyleSheet(f"color: {Theme.TEXT_SECONDARY};")
-        rerun_btn = QPushButton("⟳  Re-run")
+        rerun_btn = QPushButton("Re-run")
+        rerun_btn.setIcon(icon("refresh"))
         rerun_btn.setToolTip("Run again with the current settings")
         rerun_btn.clicked.connect(self._rerun)
         bh.addWidget(back_btn)
@@ -1597,7 +1600,8 @@ class ResultsTab(QWidget):
         summary_layout.addWidget(self.summary_label)
         
         # Open folder button under summary
-        self.open_folder_btn = QPushButton("📁 Open Output Folder")
+        self.open_folder_btn = QPushButton("Open Output Folder")
+        self.open_folder_btn.setIcon(icon("folder_open"))
         self.open_folder_btn.clicked.connect(self._open_folder)
         self.open_folder_btn.setVisible(False)
         summary_layout.addWidget(self.open_folder_btn)
@@ -1609,14 +1613,16 @@ class ResultsTab(QWidget):
         buttons_group = QGroupBox("Actions")
         buttons_layout = QVBoxLayout()
         
-        self.load_results_btn = QPushButton("📂 Load Previous Results")
+        self.load_results_btn = QPushButton("Load Previous Results")
+        self.load_results_btn.setIcon(icon("folder_open"))
         self.load_results_btn.setToolTip("Load results from a previous analysis session")
         self.load_results_btn.clicked.connect(self._load_previous_results)
         buttons_layout.addWidget(self.load_results_btn)
         
         buttons_layout.addSpacing(10)
         
-        self.generate_report_btn = QPushButton("📊 Generate Report")
+        self.generate_report_btn = QPushButton("Generate Report")
+        self.generate_report_btn.setIcon(icon("description", "#FFFFFF"))
         self.generate_report_btn.setToolTip(
             "Regenerate annotated images, statistics, visualizations, and the HTML report.\n"
             "Use after editing/correcting results in the labeling window."
@@ -1629,7 +1635,8 @@ class ResultsTab(QWidget):
         self.generate_report_btn.clicked.connect(self._generate_report)
         buttons_layout.addWidget(self.generate_report_btn)
         
-        self.open_report_btn = QPushButton("📄 Open HTML Report")
+        self.open_report_btn = QPushButton("Open HTML Report")
+        self.open_report_btn.setIcon(icon("open_in_new"))
         self.open_report_btn.clicked.connect(self._open_report)
         self.open_report_btn.setVisible(False)  # Hidden until report is generated
         buttons_layout.addWidget(self.open_report_btn)
@@ -1738,7 +1745,7 @@ class ResultsTab(QWidget):
         
         # ===== Visualizations Section =====
         if viz_results:
-            viz_group = QGroupBox("📊 Visualizations")
+            viz_group = QGroupBox("Visualizations")
             viz_inner = QVBoxLayout()
             
             # Grid layout for images (2 columns)
@@ -1775,7 +1782,7 @@ class ResultsTab(QWidget):
             self.stats_layout.addWidget(viz_group)
         
         # ===== Descriptive Statistics Section =====
-        desc_group = QGroupBox("📈 Descriptive Statistics")
+        desc_group = QGroupBox("Descriptive Statistics")
         desc_layout = QVBoxLayout()
         
         desc_text = self._generate_descriptive_stats(film_summary)
@@ -1789,7 +1796,7 @@ class ResultsTab(QWidget):
         
         # ===== Group Comparison Section =====
         if stats_results:
-            comp_group = QGroupBox("📉 Group Comparisons")
+            comp_group = QGroupBox("Group Comparisons")
             comp_layout = QVBoxLayout()
             
             comp_text = self._generate_comparison_stats(stats_results)
@@ -2300,111 +2307,74 @@ class MainWindow(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
-        
-        # Header with settings button
-        header_layout = QHBoxLayout()
-        
-        header = QLabel(f'<span style="color: {Theme.PRIMARY};">S</span><span style="color: {Theme.TEXT_SECONDARY};">CAT</span>')
-        header.setFont(QFont("Noto Sans", 24, QFont.Bold))
-        header.setStyleSheet("padding: 10px;")
-        header_layout.addWidget(header)
-        
-        header_layout.addStretch()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-        self.assistant_btn = QPushButton("💬 Assistant")
+        # --- Slim top bar: wordmark + icon actions. A single stateful workspace needs no tab
+        #     chrome; rare setup lives behind a "More" menu (Apple: reduce navigation). ---
+        topbar = QWidget()
+        topbar.setObjectName("topBar")
+        topbar.setStyleSheet(
+            f"QWidget#topBar {{ background-color: {Theme.BG_BASE}; border-bottom: 1px solid {Theme.BORDER}; }}")
+        tb = QHBoxLayout(topbar)
+        tb.setContentsMargins(18, 8, 12, 8)
+        tb.setSpacing(10)
+
+        wordmark = QLabel(
+            f'<span style="color:{Theme.PRIMARY};">S</span>'
+            f'<span style="color:{Theme.TEXT_PRIMARY};">CAT</span>')
+        wordmark.setFont(QFont("Noto Sans", 16, QFont.Bold))
+        tb.addWidget(wordmark)
+        tagline = QLabel("Drosophila excreta analysis")
+        tagline.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-size: 11px; padding-top: 5px;")
+        tb.addWidget(tagline)
+        tb.addStretch(1)
+
+        self.assistant_btn = QPushButton("  Assistant")
+        self.assistant_btn.setIcon(icon("forum"))
         self.assistant_btn.setCheckable(True)
         self.assistant_btn.setToolTip("Show/hide the conversational assistant panel")
         self.assistant_btn.clicked.connect(self._toggle_chat_dock)
-        header_layout.addWidget(self.assistant_btn)
+        tb.addWidget(self.assistant_btn)
 
-        settings_btn = QPushButton("⚙ Settings")
-        settings_btn.clicked.connect(self._open_settings)
-        header_layout.addWidget(settings_btn)
+        more_btn = QPushButton("  More")
+        more_btn.setIcon(icon("tune"))
+        more_menu = QMenu(self)
+        more_menu.addAction(icon("photo_library", Theme.TEXT_PRIMARY, 18), "Labeling…", self._launch_labeling)
+        more_menu.addAction(icon("insights", Theme.TEXT_PRIMARY, 18), "Train model…", self._open_training)
+        more_menu.addSeparator()
+        more_menu.addAction(icon("settings", Theme.TEXT_PRIMARY, 18), "Settings…", self._open_settings)
+        more_btn.setMenu(more_menu)
+        tb.addWidget(more_btn)
 
-        layout.addLayout(header_layout)
-        
-        subtitle = QLabel("Spot Classification and Analysis Tool for Drosophila Excreta")
-        subtitle.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; padding-left: 10px;")
-        layout.addWidget(subtitle)
-        
-        self.tabs = QTabWidget()
-        layout.addWidget(self.tabs)
-        
-        # Analyze workspace (primary) — a stateful surface that flows configure → results.
-        # The former "Results" tab is now a STATE of this workspace, not a separate tab.
+        layout.addWidget(topbar)
+
+        # --- Body: the Analyze workspace, directly (no tab bar) ---
         self.analysis_tab = AnalysisTab()
-        self.tabs.addTab(self.analysis_tab, "Analyze")
-
-        # Setup tab (contains Labeling and Training as sub-tabs)
-        self.setup_tab = QWidget()
-        setup_layout = QVBoxLayout(self.setup_tab)
-        
-        setup_intro = QLabel(
-            "Initial setup for your analysis environment. "
-            "Use Labeling to create training data, then Training to build a custom model."
-        )
-        setup_intro.setWordWrap(True)
-        setup_intro.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; padding: 10px;")
-        setup_layout.addWidget(setup_intro)
-        
-        self.setup_sub_tabs = QTabWidget()
-        
-        # Labeling sub-tab — a centered CTA card instead of a lone full-width banner button
-        self.labeling_widget = QWidget()
-        _lbl_outer = QVBoxLayout(self.labeling_widget)
-        _lbl_outer.setContentsMargins(12, 16, 12, 12)
-        _lbl_outer.setSpacing(0)
-        _lbl_cap = CenteredCap(680)
-        _lbl_outer.addWidget(_lbl_cap)
-        _lbl_outer.addStretch(1)
-
-        labeling_card = QGroupBox("Labeling")
-        _card_l = QVBoxLayout(labeling_card)
-        _card_l.setContentsMargins(16, 16, 16, 16)
-        _card_l.setSpacing(14)
-        labeling_desc = QLabel(
-            "Create labeled training data by manually marking deposits in images. "
-            "This is typically done once per microscope/camera setup."
-        )
-        labeling_desc.setWordWrap(True)
-        labeling_desc.setStyleSheet(f"color: {Theme.TEXT_SECONDARY};")
-        _card_l.addWidget(labeling_desc)
-
-        launch_labeling = QPushButton("Launch Labeling Window")
-        launch_labeling.setMinimumHeight(48)
-        launch_labeling.setMinimumWidth(260)
-        launch_labeling.setStyleSheet(
-            Theme.button_style(Theme.PRIMARY, "#FFFFFF", Theme.PRIMARY_LIGHT, Theme.PRIMARY_DARK))
-        ui_motion.attach_button_motion(launch_labeling, primary=True)
-        launch_labeling.clicked.connect(self._launch_labeling)
-        _launch_row = QHBoxLayout()
-        _launch_row.addStretch(1)
-        _launch_row.addWidget(launch_labeling)
-        _launch_row.addStretch(1)
-        _card_l.addLayout(_launch_row)
-        _lbl_cap.add_widget(labeling_card)
-
-        self.setup_sub_tabs.addTab(self.labeling_widget, "Labeling")
-        
-        # Training sub-tab
-        self.training_tab = TrainingTab()
-        self.setup_sub_tabs.addTab(self.training_tab, "Training")
-        
-        setup_layout.addWidget(self.setup_sub_tabs)
-        self.tabs.addTab(self.setup_tab, "Setup")
-
-        # Crossfade panes on tab switch — connected AFTER population so the initial tab
-        # doesn't fire it. Covers programmatic setCurrentWidget (e.g. jump to Results).
-        self.tabs.currentChanged.connect(self._fade_tab)
+        layout.addWidget(self.analysis_tab, 1)
 
         # Conversational assistant dock (lazy — the agent stack is optional)
         self._build_chat_dock()
 
         self.statusBar().showMessage("Ready")
 
-        # Post-build polish QSS can't express: pointer cursors on controls + soft elevation
-        # on top-level cards (see scat.ui_motion).
+        # Post-build polish QSS can't express: pointer cursors on controls (see scat.ui_motion).
         ui_motion.apply_ui_polish(self)
+
+    def _open_training(self):
+        """Open the model-training UI in its own window (rare / one-time action)."""
+        if getattr(self, "_training_win", None) is None:
+            self._training_win = QDialog(self)
+            self._training_win.setWindowTitle("SCAT — Train model")
+            self._training_win.resize(760, 760)
+            self._training_win.setStyleSheet(Theme.get_app_stylesheet())
+            tv = QVBoxLayout(self._training_win)
+            tv.setContentsMargins(0, 0, 0, 0)
+            self.training_tab = TrainingTab()
+            tv.addWidget(self.training_tab)
+            ui_motion.apply_ui_polish(self._training_win)
+        self._training_win.show()
+        self._training_win.raise_()
 
     def _build_chat_dock(self):
         """Add the Assistant dock. Imported lazily so `import scat.main_gui` and the core GUI
@@ -2442,19 +2412,12 @@ class MainWindow(QMainWindow):
         else:
             self.chat_dock.setVisible(False)
 
-    def _fade_tab(self, index):
-        """Crossfade the newly-selected tab pane in (covers programmatic switches too)."""
-        w = self.tabs.widget(index)
-        if w is not None:
-            ui_motion.fade_in(w, dur=ui_motion.DUR_TAB, curve=ui_motion.CURVE_OUT)
-
     def _setup_shortcuts(self):
         # Global shortcuts
         QShortcut(QKeySequence(config.get_shortcut("quit")), self, self.close)
         QShortcut(QKeySequence(config.get_shortcut("run_analysis")), self, self._run_analysis_shortcut)
-    
+
     def _run_analysis_shortcut(self):
-        self.tabs.setCurrentWidget(self.analysis_tab)
         self.analysis_tab._run_analysis()
     
     def _open_settings(self):
