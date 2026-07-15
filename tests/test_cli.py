@@ -25,6 +25,25 @@ def test_analyze_end_to_end(synth_dir, tmp_path, monkeypatch):
     assert (out / "report.html").exists()
 
 
+def test_cluster_and_propagate_roundtrip(synth_dir, tmp_path, monkeypatch, capsys):
+    """`scat cluster` → fill labels → `scat propagate` drives the labeling-assist flow."""
+    import pandas as pd
+    out = tmp_path / "clus"
+    _run(monkeypatch, ["cluster", str(synth_dir), "--output", str(out), "--min-cluster-size", "3"])
+    assert (out / "cluster_labels.csv").exists() and (out / "cluster_report.html").exists()
+    cl = pd.read_csv(out / "cluster_labels.csv")
+    if len(cl) < 2:
+        pytest.skip("synth data produced <2 clusters")
+    cl["label"] = cl["label"].astype(object)
+    cl.loc[0, "label"] = "normal"
+    cl.loc[1, "label"] = "rod"
+    cl.to_csv(out / "cluster_labels.csv", index=False)
+    capsys.readouterr()  # clear
+    _run(monkeypatch, ["propagate", str(out)])
+    txt = capsys.readouterr().out.lower()
+    assert "labeled" in txt and "readiness" in txt
+
+
 @pytest.mark.parametrize("argv,funcname", [
     (["analyze", "somewhere"], "analyze_command"),
     (["chat"], "chat_command"),

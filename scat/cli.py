@@ -113,6 +113,35 @@ def gui_command(args):
     run_gui()
 
 
+def cluster_command(args):
+    from .pipeline import cluster_folder_service
+    s = cluster_folder_service(args.folder, output_dir=args.output, method=args.method,
+                               min_cluster_size=args.min_cluster_size, k=args.k,
+                               reps_per_cluster=args.reps_per_cluster)
+    print(f"Clustered {s.n_deposits} deposits from {s.n_images} images -> "
+          f"{s.n_clusters} clusters, {s.n_noise} noise")
+    for h in s.health:
+        print(f"  ⚠ {h}")
+    print(f"Next: open {s.output_dir}/cluster_report.html, fill the 'label' column of "
+          f"{s.output_dir}/cluster_labels.csv (blank = skip), then: scat propagate {s.output_dir}")
+
+
+def propagate_command(args):
+    from .pipeline import propagate_service
+    s = propagate_service(args.results_dir, csv_path=args.labels)
+    print(f"Propagated: {s.n_labeled} deposits labeled, {s.n_skipped} left unknown. "
+          f"Classes: {s.class_counts}")
+    print(f"Training readiness: {s.readiness.upper()}")
+    for r in s.reasons:
+        print(f"  - {r}")
+    if s.readiness == "block":
+        print("Refusing to recommend training — fix the above (label more/other clusters).")
+    else:
+        img = s.source_images or "<original image folder>"
+        print(f"Next: scat train --image-dir \"{img}\" --label-dir \"{s.labels_dir}\" "
+              f"--output <model.pkl>")
+
+
 def main():
     parser = argparse.ArgumentParser(description="SCAT - Spot Classification and Analysis Tool")
     subparsers = parser.add_subparsers(dest='command')
@@ -162,6 +191,22 @@ def main():
     # label
     lp = subparsers.add_parser('label', help='Launch labeling GUI')
     lp.set_defaults(func=label_command)
+
+    # cluster (unsupervised labeling assistance)
+    clp = subparsers.add_parser('cluster', help='Unsupervised-cluster deposits to assist labeling')
+    clp.add_argument('folder', help='Folder of (unlabeled) images')
+    clp.add_argument('--output', default=None, help='Output dir (default: timestamped)')
+    clp.add_argument('--method', choices=['hdbscan', 'kmeans'], default='hdbscan')
+    clp.add_argument('--k', type=int, default=None, help='n_clusters for kmeans')
+    clp.add_argument('--min-cluster-size', type=int, default=None, dest='min_cluster_size')
+    clp.add_argument('--reps-per-cluster', type=int, default=6, dest='reps_per_cluster')
+    clp.set_defaults(func=cluster_command)
+
+    # propagate (cluster labels -> deposit labels + training guard)
+    pgp = subparsers.add_parser('propagate', help='Propagate cluster labels to deposits, guard training')
+    pgp.add_argument('results_dir', help='A directory produced by `scat cluster`')
+    pgp.add_argument('--labels', default=None, help='cluster_labels.csv (default: in results_dir)')
+    pgp.set_defaults(func=propagate_command)
 
     args = parser.parse_args()
     if args.command is None:

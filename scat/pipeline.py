@@ -265,3 +265,213 @@ def generate_report_service(results_dir: str, statistical_results: Optional[dict
     return generate_report(film, output_dir=rd, deposit_data=deposits,
                            statistical_results=metrics, spatial_stats=spatial_stats,
                            group_by=group_by, format="html")
+
+
+# --------------------------------------------------------------------------- clustering (labeling assist)
+@dataclass
+class ClusterSummary:
+    output_dir: str
+    n_images: int
+    n_deposits: int
+    n_clusters: int
+    n_noise: int
+    health: list
+
+
+@dataclass
+class PropagateSummary:
+    n_labeled: int
+    n_skipped: int
+    readiness: str
+    reasons: list
+    class_counts: dict
+    source_images: Optional[str] = None
+    labels_dir: Optional[str] = None
+
+
+def cluster_folder_service(path: str, output_dir: Optional[str] = None, method: str = "hdbscan",
+                           min_cluster_size: Optional[int] = None, k: Optional[int] = None,
+                           reps_per_cluster: int = 6) -> ClusterSummary:
+    """Detect deposits (unsupervised), cluster them by feature, and write everything the user
+    needs to label whole clusters: a labels.json per image (label='unknown' + informational
+    cluster_id), the authoritative cluster_assignments.csv, representative thumbnails, a
+    cluster_report.html, and a cluster_labels.csv template. Works from in-memory results so it
+    keeps ALL deposits (including RF-called 'artifact')."""
+    from . import clustering as C
+    from .features import FeatureExtractor
+    from .grouping_util import duplicate_basenames
+
+    images = list_images(str(path))
+    # labels.json / assignments key deposits by (basename, id); colliding basenames (e.g. from
+    # a recursive folder with same-named files) would cross-apply labels — fail fast instead.
+    dups = duplicate_basenames(images)
+    if dups:
+        raise ValueError(f"duplicate image basenames would collide: {dups[:5]}"
+                         f"{'...' if len(dups) > 5 else ''}. Run on a flat folder of unique names.")
+    mtype, mpath = resolve_model_type(None, None)
+    az = Analyzer(detector=DepositDetector(),
+                  classifier_config=ClassifierConfig(model_type=mtype, model_path=mpath))
+    results = az.analyze_batch(images)
+
+    rows = []
+    for res in results:
+        fx = FeatureExtractor(dpi=res.dpi)
+        for d in res.deposits:
+            fd = fx.to_feature_dict(d)
+            fd["filename"] = res.filename
+            fd["deposit_id"] = d.id
+            rows.append(fd)
+    df = pd.DataFrame(rows)
+
+    out = Path(output_dir) if output_dir else get_timestamped_output_dir(Path(path).parent, "clusters")
+    out.mkdir(parents=True, exist_ok=True)
+
+    if df.empty:
+        (out / "cluster_assignments.csv").write_text("filename,deposit_id,cluster_id\n")
+        return ClusterSummary(str(out), len(images), 0, 0, 0, ["no deposits detected"])
+
+    X, _ = C.build_feature_matrix(df)
+    cres = C.cluster_deposits(X, method=method, min_cluster_size=min_cluster_size, k=k)
+    df["cluster_id"] = cres.labels
+
+    df[["filename", "deposit_id", "cluster_id"]].to_csv(out / "cluster_assignments.csv", index=False)
+    import json as _json
+    (out / "cluster_meta.json").write_text(_json.dumps({"source_images": str(Path(path).resolve())}))
+    _write_cluster_labels_json(out / "deposits", results, df)
+    reps = C.representatives(X, cres.labels, per_kind=reps_per_cluster)
+    _export_cluster_thumbnails(out / "clusters", df, reps, images)
+    profile = C.cluster_profile(df, cres.labels)
+    _write_cluster_report_html(out / "cluster_report.html", profile, reps, cres)
+    _write_cluster_labels_csv(out / "cluster_labels.csv", profile, cres)
+
+    return ClusterSummary(str(out), len(images), len(df), cres.n_clusters, cres.n_noise, cres.health)
+
+
+def propagate_service(results_dir: str, csv_path: Optional[str] = None) -> PropagateSummary:
+    """Apply the user's cluster->label mapping (cluster_labels.csv) to every member deposit via
+    the authoritative cluster_assignments.csv (NOT the GUI-mutable labels.json), rewrite the
+    labels.json labels, and run the training-readiness guard."""
+    import json
+    from . import clustering as C
+
+    rd = Path(results_dir)
+    assignments = pd.read_csv(rd / "cluster_assignments.csv")
+    mapping = C.parse_cluster_labels_csv(Path(csv_path) if csv_path else rd / "cluster_labels.csv")
+    labels, summary = C.propagate_labels(assignments, mapping)
+
+    for p in (rd / "deposits").glob("*.labels.json"):
+        data = json.loads(p.read_text())
+        fn = data.get("image_file", p.name.replace(".labels.json", ""))
+        for d in data["deposits"]:
+            d["label"] = labels.get((fn, int(d["id"])), d.get("label", "unknown"))
+        p.write_text(json.dumps(data, indent=2))
+
+    share = None
+    if summary["n_labeled"]:
+        lab = [labels.get((str(f), int(i)), "unknown")
+               for f, i in zip(assignments["filename"], assignments["deposit_id"])]
+        by = assignments.assign(_lab=lab)
+        counts = by[by["_lab"] != "unknown"].groupby("cluster_id").size()
+        share = float(counts.max() / counts.sum()) if len(counts) else None
+    rep = C.training_readiness(list(labels.values()), largest_cluster_share=share)
+    source = None
+    meta = rd / "cluster_meta.json"
+    if meta.exists():
+        try:
+            source = json.loads(meta.read_text()).get("source_images")
+        except Exception:
+            source = None
+    return PropagateSummary(summary["n_labeled"], summary["n_skipped"], rep.verdict,
+                            rep.reasons, rep.class_counts, source_images=source,
+                            labels_dir=str(rd / "deposits"))
+
+
+def _write_cluster_labels_json(deposits_dir, results, df):
+    import json
+    deposits_dir.mkdir(parents=True, exist_ok=True)
+    cid_by_key = {(str(r.filename), int(r.deposit_id)): int(r.cluster_id) for r in df.itertuples()}
+    for res in results:
+        stem = Path(res.filename).stem
+        deps = []
+        for d in res.deposits:
+            deps.append({
+                "id": d.id,
+                "contour": d.contour.squeeze().tolist() if d.contour is not None else [],
+                "x": d.centroid[0], "y": d.centroid[1], "width": d.width, "height": d.height,
+                "area": float(d.area), "circularity": float(d.circularity),
+                "label": "unknown", "confidence": 0.0,
+                "cluster_id": cid_by_key.get((res.filename, d.id), -1),
+                "merged": getattr(d, "merged", False), "group_id": getattr(d, "group_id", None),
+            })
+        with open(deposits_dir / f"{stem}.labels.json", "w") as f:
+            json.dump({"image_file": res.filename, "next_group_id": 1, "deposits": deps}, f, indent=2)
+
+
+def _export_cluster_thumbnails(clusters_dir, df, reps, images):
+    import numpy as np
+    from PIL import Image
+    img_by_name = {Path(p).name: p for p in images}
+    rows = list(df.itertuples())
+    cache = {}
+    for cid, kinds in reps.items():
+        cdir = clusters_dir / f"cluster_{cid}"
+        cdir.mkdir(parents=True, exist_ok=True)
+        for kind, idxs in kinds.items():
+            for j, pos in enumerate(idxs):
+                try:
+                    r = rows[pos]
+                    fn = str(r.filename)
+                    if fn not in cache:
+                        cache[fn] = np.array(Image.open(img_by_name[fn]))
+                    arr = cache[fn]
+                    x, y = int(r.x), int(r.y)
+                    w, h = int(getattr(r, "width", 20) or 20), int(getattr(r, "height", 20) or 20)
+                    pad = 4
+                    y0, y1 = max(0, y - h // 2 - pad), min(arr.shape[0], y + h // 2 + pad)
+                    x0, x1 = max(0, x - w // 2 - pad), min(arr.shape[1], x + w // 2 + pad)
+                    crop = arr[y0:y1, x0:x1]
+                    if crop.size:
+                        Image.fromarray(crop).save(cdir / f"{kind}_{j}.png")
+                except Exception:
+                    continue  # thumbnails are best-effort; never fail the run on one crop
+
+
+def _write_cluster_labels_csv(path, profile, cres):
+    keep = ["cluster_id", "size", "area_px", "circularity", "mean_hue", "pigment_density"]
+    cols = [c for c in keep if c in profile.columns]
+    out = profile[profile["cluster_id"] != -1][cols].copy()
+    total_deposits = max(1, int(profile["size"].sum()))  # size sums over all rows incl. -1 noise
+    out["noise_frac"] = round(cres.n_noise / total_deposits, 3)
+    out["label"] = ""
+    out.to_csv(path, index=False)
+
+
+def _write_cluster_report_html(path, profile, reps, cres):
+    import base64
+    clus_root = Path(path).parent / "clusters"
+
+    def _b64(p):
+        return base64.b64encode(Path(p).read_bytes()).decode() if Path(p).exists() else ""
+
+    parts = ["<!DOCTYPE html><meta charset='utf-8'><title>SCAT clusters</title>",
+             "<style>body{font-family:sans-serif;max-width:1000px;margin:2rem auto}"
+             ".c{border:1px solid #ddd;border-radius:8px;padding:12px;margin:12px 0}"
+             "img{height:64px;margin:2px;border:1px solid #eee}.warn{color:#b26a00}</style>",
+             f"<h1>Cluster report — {cres.n_clusters} clusters, {cres.n_noise} noise</h1>"]
+    for h in cres.health:
+        parts.append(f"<p class='warn'>&#9888; {h}</p>")
+    for _, row in profile.iterrows():
+        cid = int(row["cluster_id"])
+        title = ("Outliers (noise -1) — review individually, NOT auto-artifact"
+                 if cid == -1 else f"Cluster {cid}")
+        parts.append(f"<div class='c'><h3>{title} — size {int(row['size'])}</h3>")
+        if cid in reps:
+            for kind in ("medoid", "random", "boundary"):
+                for j in range(len(reps[cid][kind])):
+                    b = _b64(clus_root / f"cluster_{cid}" / f"{kind}_{j}.png")
+                    if b:
+                        parts.append(f"<img title='{kind}' src='data:image/png;base64,{b}'>")
+        feats = ", ".join(f"{c}={row[c]:.2f}" for c in ("area_px", "circularity", "mean_hue",
+                          "pigment_density") if c in profile.columns and pd.notna(row[c]))
+        parts.append(f"<p>{feats}</p></div>")
+    Path(path).write_text("".join(parts), encoding="utf-8")
