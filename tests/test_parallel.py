@@ -66,6 +66,30 @@ def test_process_available_is_bool():
     assert isinstance(par.process_available(), bool)
 
 
+def test_process_safe_gates_torch():
+    """CNN classifier and U-Net detector (torch/CUDA) must NOT use the fork pool."""
+    import types
+
+    class CNNClassifier:  # name is what _process_safe checks
+        pass
+
+    rf = types.SimpleNamespace(classifier=object(), detector=types.SimpleNamespace(unet_model_path=None))
+    cnn = types.SimpleNamespace(classifier=CNNClassifier(), detector=types.SimpleNamespace(unet_model_path=None))
+    unet = types.SimpleNamespace(classifier=object(), detector=types.SimpleNamespace(unet_model_path="/m.pt"))
+    assert par._process_safe(rf) is True
+    assert par._process_safe(cnn) is False
+    assert par._process_safe(unet) is False
+
+
+def test_process_safe_routes_cnn_to_thread(synth_dir, monkeypatch):
+    """run_batch downgrades the process engine to threads for a torch analyzer."""
+    imgs = list_images(str(synth_dir))
+    az = _analyzer()
+    monkeypatch.setattr(par, "_process_safe", lambda a: False)
+    _results, engine = par.run_batch(az, imgs, max_workers=4)
+    assert engine.startswith("thread")
+
+
 # --------------------------------------------------------------- execution
 def _key(results):
     return [(r.filename, r.n_total, r.n_normal, r.n_rod) for r in results]
@@ -114,3 +138,16 @@ def test_failure_isolation(synth_dir, tmp_path):
     # the corrupt image becomes an empty placeholder at its input position
     assert results[2].filename == "corrupt.tif"
     assert results[2].n_total == 0
+
+
+def test_sequential_failure_isolation(synth_dir, tmp_path):
+    """The sequential engine must also placeholder a bad image and continue (1-worker batches
+    previously went through a thread pool that isolated failures)."""
+    imgs = list_images(str(synth_dir))
+    bad = tmp_path / "corrupt.tif"
+    bad.write_text("not an image")
+    mixed = [imgs[0], bad] + imgs[1:]
+    az = _analyzer()
+    results = par._run_sequential(az, mixed, None)
+    assert len(results) == len(mixed)
+    assert results[1].filename == "corrupt.tif" and results[1].n_total == 0
