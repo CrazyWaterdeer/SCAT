@@ -32,7 +32,8 @@ from PySide6.QtWidgets import (
     QHeaderView, QLineEdit, QMessageBox, QScrollArea,
     QDialog, QKeySequenceEdit, QDialogButtonBox,
     QGraphicsView, QGraphicsScene, QMenu, QInputDialog,
-    QTreeWidget, QTreeWidgetItem, QDockWidget
+    QTreeWidget, QTreeWidgetItem, QDockWidget,
+    QSizePolicy, QGridLayout, QFrame
 )
 from PySide6.QtCore import Qt, QThread, Signal, QSize, QRectF
 from PySide6.QtGui import (
@@ -779,31 +780,27 @@ class AnalysisTab(QWidget):
         outer.setContentsMargins(10, 10, 10, 10)
         outer.setSpacing(6)
 
-        # Center + cap the form width; two equal columns inside.
-        center_row = QHBoxLayout()
-        center_row.addStretch(1)
-        container = QWidget()
-        container.setMaximumWidth(1080)
-        cols = QHBoxLayout(container)
-        cols.setContentsMargins(0, 0, 0, 0)
-        cols.setSpacing(12)
-        left_col = QVBoxLayout(); left_col.setSpacing(10)
-        right_col = QVBoxLayout(); right_col.setSpacing(10)
-        cols.addLayout(left_col, 1)
-        cols.addLayout(right_col, 1)
-        center_row.addWidget(container, 0)
-        center_row.addStretch(1)
-        outer.addLayout(center_row)
-        outer.addStretch(1)
+        # Body: configuration form (left, readable width) + a live run-summary / preview panel
+        # (right) that FILLS the remaining width — empty gutters become useful context
+        # (Apple content-first, Claude helpful). Sticky Run footer stays below.
+        body = QHBoxLayout()
+        body.setSpacing(16)
+
+        form_col_w = QWidget()
+        form_col_w.setMaximumWidth(560)
+        form_col_w.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        left_col = QVBoxLayout(form_col_w)
+        left_col.setContentsMargins(0, 0, 0, 0)
+        left_col.setSpacing(12)
 
         default_input = str(Path.home() / "SCAT" / "data" / "images")
         default_output = str(Path.home() / "SCAT" / "data" / "results")
 
-        # ---- Input / Output (left column) ----
+        # ---- Input / Output ----
         io_group = QGroupBox("Input / Output")
         io_layout = QVBoxLayout()
         io_layout.setSpacing(8)
-        io_layout.setContentsMargins(10, 12, 10, 10)
+        io_layout.setContentsMargins(14, 16, 14, 14)
 
         input_row = QHBoxLayout()
         input_row.setSpacing(10)
@@ -834,37 +831,40 @@ class AnalysisTab(QWidget):
         io_group.setLayout(io_layout)
         left_col.addWidget(io_group)
 
-        # ---- Options: essentials only (left column) ----
+        # ---- Options: essentials only ----
         options_group = QGroupBox("Options")
         options_layout = QFormLayout()
         options_layout.setVerticalSpacing(8)
         options_layout.setHorizontalSpacing(12)
-        options_layout.setContentsMargins(10, 12, 10, 10)
+        options_layout.setContentsMargins(14, 16, 14, 14)
         self.model_type = NoScrollComboBox()
         self.model_type.addItems(["Threshold", "Random Forest", "CNN"])
         model_type_map = {"threshold": 0, "rf": 1, "cnn": 2}
         self.model_type.setCurrentIndex(model_type_map.get(config.get("analysis.model_type", "rf"), 1))
+        self.model_type.currentIndexChanged.connect(self._update_run_summary)
         method_label = QLabel("Method")
         method_label.setStyleSheet("background-color: transparent;")
         options_layout.addRow(method_label, self.model_type)
         self.annotate = QCheckBox("Generate annotated images")
         self.annotate.setChecked(config.get("analysis.annotate", True))
+        self.annotate.toggled.connect(self._update_run_summary)
         options_layout.addRow(self.annotate)
         self.visualize = QCheckBox("Generate visualizations")
         self.visualize.setChecked(config.get("analysis.visualize", True))
+        self.visualize.toggled.connect(self._update_run_summary)
         options_layout.addRow(self.visualize)
         self.report = QCheckBox("Generate HTML report")
         self.report.setChecked(config.get("analysis.report", True))
+        self.report.toggled.connect(self._update_run_summary)
         options_layout.addRow(self.report)
         options_group.setLayout(options_layout)
         left_col.addWidget(options_group)
-        left_col.addStretch(1)
 
-        # ---- Groups (right column) ----
+        # ---- Groups ----
         groups_group = QGroupBox("Groups")
         groups_layout = QVBoxLayout()
         groups_layout.setSpacing(8)
-        groups_layout.setContentsMargins(10, 12, 10, 10)
+        groups_layout.setContentsMargins(14, 16, 14, 14)
         self.use_groups = QCheckBox("Use groups for comparison")
         self.use_groups.setChecked(config.get("analysis.use_groups", True))
         self.use_groups.toggled.connect(self._on_use_groups_toggled)
@@ -895,7 +895,7 @@ class AnalysisTab(QWidget):
 
         self.groups_tree = QTreeWidget()
         self.groups_tree.setHeaderHidden(True)
-        self.groups_tree.setMinimumHeight(150)
+        self.groups_tree.setMinimumHeight(140)
         self.groups_tree.setIndentation(15)
         self.groups_tree.setAnimated(True)
         self.groups_tree.itemClicked.connect(self._on_group_tree_clicked)
@@ -903,9 +903,9 @@ class AnalysisTab(QWidget):
         self.groups_tree.customContextMenuRequested.connect(self._on_groups_context_menu)
         groups_layout.addWidget(self.groups_tree, 1)
         groups_group.setLayout(groups_layout)
-        right_col.addWidget(groups_group)
+        left_col.addWidget(groups_group)
 
-        # ---- Advanced settings (collapsible, right column) ----
+        # ---- Advanced settings (collapsible) ----
         advanced = CollapsibleSection("Advanced settings", expanded=False)
         advanced.add_widget(self.detection_model_path)
 
@@ -934,16 +934,28 @@ class AnalysisTab(QWidget):
 
         self.spatial = QCheckBox("Spatial analysis")
         self.spatial.setChecked(config.get("analysis.spatial", True))
+        self.spatial.toggled.connect(self._update_run_summary)
         advanced.add_widget(self.spatial)
         self.stats = QCheckBox("Statistical analysis")
         self.stats.setChecked(config.get("analysis.stats", True))
+        self.stats.toggled.connect(self._update_run_summary)
         advanced.add_widget(self.stats)
         self.save_json = QCheckBox("Save for retraining (JSON)")
         self.save_json.setChecked(config.get("analysis.save_json", True))
         self.save_json.setToolTip("Save contour data for model retraining. Disable to reduce file size.")
         advanced.add_widget(self.save_json)
-        right_col.addWidget(advanced)
-        right_col.addStretch(1)
+        left_col.addWidget(advanced)
+        left_col.addStretch(1)
+
+        body.addWidget(form_col_w, 0)
+
+        # ---- Right: live run summary + input preview (fills the width) ----
+        summary_panel = self._build_summary_panel()
+        body.addWidget(summary_panel, 1)
+        outer.addLayout(body, 1)
+
+        # Refresh the summary when the output path is edited too.
+        self.output_dir.pathChanged.connect(self._update_run_summary)
 
         # Update groups UI state
         self._on_use_groups_toggled(self.use_groups.isChecked())
@@ -992,7 +1004,136 @@ class AnalysisTab(QWidget):
         main_layout.addWidget(footer)
 
         self._start_time = None
-    
+        self._update_run_summary()
+        self._update_preview()
+
+    # ---- Live run-summary / preview panel -------------------------------------
+    def _build_summary_panel(self):
+        """Right-hand context panel: a live 'Run summary' + input thumbnail preview. Fills the
+        width the form doesn't use with self-updating context (Apple content-first / Claude helpful)."""
+        panel = QGroupBox("Run summary")
+        panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        v = QVBoxLayout(panel)
+        v.setContentsMargins(16, 18, 16, 16)
+        v.setSpacing(12)
+
+        self.summary_status = QLabel("Select images to begin")
+        self.summary_status.setWordWrap(True)
+        self.summary_status.setStyleSheet(
+            f"color: {Theme.TEXT_PRIMARY}; font-size: {Theme.FS_TITLE}px; font-weight: {Theme.WEIGHT_TITLE};")
+        v.addWidget(self.summary_status)
+
+        self.summary_detail = QLabel("")
+        self.summary_detail.setWordWrap(True)
+        self.summary_detail.setTextFormat(Qt.RichText)
+        self.summary_detail.setStyleSheet("background: transparent;")
+        v.addWidget(self.summary_detail)
+
+        self.preview_title = QLabel("Preview")
+        self.preview_title.setStyleSheet(
+            f"color: {Theme.TEXT_SECONDARY}; font-size: {Theme.FS_XS}px; letter-spacing: 1px;")
+        self.preview_title.setVisible(False)
+        v.addWidget(self.preview_title)
+
+        self.preview_holder = QWidget()
+        self.preview_grid = QGridLayout(self.preview_holder)
+        self.preview_grid.setContentsMargins(0, 0, 0, 0)
+        self.preview_grid.setSpacing(8)
+        self.preview_grid.setColumnStretch(4, 1)   # pack thumbnails left; extra width to the right
+        v.addWidget(self.preview_holder)
+
+        v.addStretch(1)
+        return panel
+
+    def _update_run_summary(self, *args):
+        """Refresh the live run-summary text from the current configuration."""
+        if not hasattr(self, "summary_status"):
+            return
+        sec = Theme.TEXT_SECONDARY
+        n = len(self._selected_files)
+        if n == 0:
+            self.summary_status.setText("Select images to begin")
+            step = (lambda num, title, hint:
+                    f"<div style='color:{Theme.TEXT_PRIMARY}; margin:5px 0'>"
+                    f"<span style='color:{Theme.PRIMARY}; font-weight:600'>{num}</span>&nbsp;&nbsp;{title}"
+                    f" &nbsp;<span style='color:{sec}'>{hint}</span></div>")
+            self.summary_detail.setText(
+                f"<div style='color:{sec}; margin-bottom:16px'>Choose one or more images, then "
+                f"configure the options on the left.</div>"
+                f"<div style='color:{sec}; letter-spacing:1px; font-size:11px; margin-bottom:6px'>HOW IT WORKS</div>"
+                + step("1", "Select images", "— click Browse…")
+                + step("2", "Group by condition", "— optional, from subfolders")
+                + step("3", "Choose outputs &amp; Run", "— report, plots, statistics"))
+            return
+
+        self.summary_status.setText(f"Ready to analyze {n} image{'s' if n != 1 else ''}")
+
+        if self.use_groups.isChecked() and self._group_data:
+            g = len(self._group_data)
+            grouping = f"{g} group{'s' if g != 1 else ''}"
+        elif self.use_groups.isChecked():
+            grouping = "on (not derived yet)"
+        else:
+            grouping = "single group"
+
+        method = self.model_type.currentText()
+        out = self.output_dir.path() or "default (next to input)"
+        out_disp = ("…" + out[-40:]) if len(out) > 42 else out
+
+        produces = []
+        if self.annotate.isChecked(): produces.append("Annotated images")
+        if self.visualize.isChecked(): produces.append("Visualizations")
+        if self.stats.isChecked(): produces.append("Statistics")
+        if self.report.isChecked(): produces.append("HTML report")
+        prod = "".join(
+            f"<div style='margin:2px 0; color:{Theme.TEXT_PRIMARY}'>&#10003;&nbsp; {p}</div>"
+            for p in produces) or f"<div style='color:{sec}'>—</div>"
+
+        est = max(1, round(n * 1.5))
+        est_txt = f"~{est} sec" if est < 90 else f"~{round(est / 60)} min"
+
+        rows = [("Images", str(n)), ("Grouping", grouping), ("Method", method),
+                ("Output", out_disp), ("Est. time", est_txt)]
+        table = "".join(
+            f"<tr><td style='color:{sec}; padding:2px 16px 2px 0'>{k}</td>"
+            f"<td style='color:{Theme.TEXT_PRIMARY}'>{val}</td></tr>" for k, val in rows)
+        self.summary_detail.setText(
+            f"<table cellspacing='0'>{table}</table>"
+            f"<div style='color:{sec}; margin-top:14px; margin-bottom:2px; "
+            f"letter-spacing:1px; font-size:11px'>WILL PRODUCE</div>{prod}")
+
+    def _update_preview(self):
+        """Refresh the input thumbnail grid (first few selected images)."""
+        if not hasattr(self, "preview_grid"):
+            return
+        while self.preview_grid.count():
+            it = self.preview_grid.takeAt(0)
+            if it.widget():
+                it.widget().deleteLater()
+        files = self._selected_files[:6]
+        self.preview_title.setVisible(bool(files))
+        base = f"background: {Theme.BG_INSET}; border: 1px solid {Theme.BORDER}; border-radius: 6px;"
+        for idx, f in enumerate(files):
+            cell = QLabel()
+            cell.setFixedSize(92, 92)
+            cell.setAlignment(Qt.AlignCenter)
+            pm = QPixmap(f)
+            if not pm.isNull():
+                cell.setStyleSheet(base)
+                cell.setPixmap(pm.scaled(88, 88, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            else:
+                cell.setStyleSheet(base + f" color: {Theme.TEXT_MUTED}; font-size: 10px;")
+                cell.setText(Path(f).suffix.lstrip('.').upper() or "IMG")
+            cell.setToolTip(Path(f).name)
+            self.preview_grid.addWidget(cell, idx // 3, idx % 3)
+        extra = len(self._selected_files) - len(files)
+        if extra > 0:
+            more = QLabel(f"+{extra}")
+            more.setFixedSize(92, 92)
+            more.setAlignment(Qt.AlignCenter)
+            more.setStyleSheet(base + f" color: {Theme.TEXT_SECONDARY};")
+            self.preview_grid.addWidget(more, len(files) // 3, len(files) % 3)
+
     def _save_settings(self):
         """Save current settings to config."""
         model_types = ['threshold', 'rf', 'cnn']
@@ -1014,6 +1155,7 @@ class AnalysisTab(QWidget):
         self.load_groups_csv_btn.setEnabled(checked)
         self.groups_tree.setEnabled(checked)
         self.groups_hint.setEnabled(checked)
+        self._update_run_summary()
     
     def _on_group_tree_clicked(self, item, column):
         """Toggle expand/collapse on single click for parent items."""
@@ -1038,7 +1180,8 @@ class AnalysisTab(QWidget):
                 parent.addChild(child)
 
             self.groups_tree.addTopLevelItem(parent)
-    
+        self._update_run_summary()
+
     def _browse_input(self):
         """Browse for image files (one or multiple)."""
         start_dir = ""
@@ -1071,16 +1214,16 @@ class AnalysisTab(QWidget):
                 self._autogroup_by_subfolder(announce=False)
     
     def _update_input_display(self):
-        """Update the input path display."""
+        """Update the input path display + the live run summary / preview."""
         if not self._selected_files:
             self.input_path_edit.clear()
-            return
-        
-        # Show folder path and count
-        folder = Path(self._selected_files[0]).parent
-        count = len(self._selected_files)
-        display_text = f"{str(folder).replace(chr(92), '/')} ({count} file{'s' if count > 1 else ''})"
-        self.input_path_edit.setText(display_text)
+        else:
+            folder = Path(self._selected_files[0]).parent
+            count = len(self._selected_files)
+            display_text = f"{str(folder).replace(chr(92), '/')} ({count} file{'s' if count > 1 else ''})"
+            self.input_path_edit.setText(display_text)
+        self._update_run_summary()
+        self._update_preview()
     
     def _get_image_files(self) -> List[Path]:
         """Get list of selected image files."""
