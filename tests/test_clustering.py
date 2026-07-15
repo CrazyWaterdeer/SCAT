@@ -152,3 +152,42 @@ def test_all_noise_clustering_profile_handled():
     res = C.cluster_deposits(X, min_cluster_size=25)
     prof = C.cluster_profile(_df(50), res.labels)
     assert prof["size"].sum() == 50
+
+
+# --------------------------------------------------------------- pipeline services
+def test_cluster_folder_service_writes_outputs(synth_dir, tmp_path):
+    import json
+    from scat.pipeline import cluster_folder_service
+    out = tmp_path / "clus"
+    summ = cluster_folder_service(str(synth_dir), output_dir=str(out), min_cluster_size=3)
+    assert (out / "cluster_assignments.csv").exists()
+    assert (out / "cluster_labels.csv").exists()
+    assert (out / "cluster_report.html").exists()
+    labels_jsons = list((out / "deposits").glob("*.labels.json"))
+    assert labels_jsons
+    data = json.loads(labels_jsons[0].read_text())
+    assert all(d["label"] == "unknown" for d in data["deposits"])
+    assert all("cluster_id" in d for d in data["deposits"])
+    assert summ.n_deposits > 0
+
+
+def test_propagate_service_populates_labels_and_guard(synth_dir, tmp_path):
+    import json
+    from scat.pipeline import cluster_folder_service, propagate_service
+    out = tmp_path / "clus"
+    cluster_folder_service(str(synth_dir), output_dir=str(out), min_cluster_size=3)
+    cl = pd.read_csv(out / "cluster_labels.csv")
+    if len(cl) < 2:
+        pytest.skip("synth data produced <2 clusters; propagation guard needs 2 classes")
+    cl["label"] = cl["label"].astype(object)  # all-empty col reads as float64
+    cl.loc[0, "label"] = "normal"
+    cl.loc[1, "label"] = "rod"
+    cl.to_csv(out / "cluster_labels.csv", index=False)
+    summ = propagate_service(str(out))
+    assert summ.n_labeled > 0
+    assert summ.readiness in ("ok", "warn", "block")
+    seen = set()
+    for p in (out / "deposits").glob("*.labels.json"):
+        for d in json.loads(p.read_text())["deposits"]:
+            seen.add(d["label"])
+    assert seen & {"normal", "rod"}

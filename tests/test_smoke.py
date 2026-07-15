@@ -19,6 +19,7 @@ MODULES = [
     "scat.segmentation",
     "scat.analyzer",
     "scat.parallel",
+    "scat.clustering",
     "scat.statistics",
     "scat.visualization",
     "scat.report",        # was broken: Union used but not imported
