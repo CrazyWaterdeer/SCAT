@@ -8,10 +8,10 @@ from pathlib import Path
 
 from PySide6.QtWidgets import (
     QSpinBox, QDoubleSpinBox, QComboBox, QTableWidgetItem,
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QCheckBox, QLabel,
 )
-from PySide6.QtGui import QWheelEvent, QFontDatabase
-from PySide6.QtCore import Qt
+from PySide6.QtGui import QWheelEvent, QFontDatabase, QPainter, QColor
+from PySide6.QtCore import Qt, QRectF, QSize, QPropertyAnimation, QEasingCurve, Property
 
 
 # =============================================================================
@@ -830,6 +830,96 @@ class NumericTableWidgetItem(QTableWidgetItem):
         if isinstance(other, NumericTableWidgetItem):
             return self._value < other._value
         return super().__lt__(other)
+
+
+class ToggleSwitch(QCheckBox):
+    """An iOS/Apple-style toggle switch. A QCheckBox subclass, so the existing isChecked/
+    setChecked/toggled API is unchanged — only the look. No text (pair it with a QLabel in the
+    row). The knob slides with a short eased animation, reduced-motion aware."""
+
+    _W, _H = 42, 24            # track size
+    _PAD = 3                   # knob inset
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setCursor(Qt.PointingHandCursor)
+        self._offset = 1.0 if self.isChecked() else 0.0
+        self._anim = QPropertyAnimation(self, b"offset", self)
+        self._anim.setDuration(150)
+        self._anim.setEasingCurve(QEasingCurve.OutCubic)
+        self.toggled.connect(self._on_toggled)
+
+    def _on_toggled(self, checked):
+        from scat import ui_motion
+        target = 1.0 if checked else 0.0
+        if ui_motion.motion_reduced():
+            self._offset = target
+            self.update()
+        else:
+            self._anim.stop()
+            self._anim.setStartValue(self._offset)
+            self._anim.setEndValue(target)
+            self._anim.start()
+
+    def _get_offset(self):
+        return self._offset
+
+    def _set_offset(self, v):
+        self._offset = v
+        self.update()
+
+    offset = Property(float, _get_offset, _set_offset)
+
+    def sizeHint(self):
+        return QSize(self._W + 4, self._H + 4)
+
+    def hitButton(self, pos):
+        return self.rect().contains(pos)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        x = (self.width() - self._W) / 2
+        y = (self.height() - self._H) / 2
+        off = QColor(Theme.BG_ACTIVE)
+        on = QColor(Theme.PRIMARY)
+        t = self._offset
+        track = QColor(int(off.red() + (on.red() - off.red()) * t),
+                       int(off.green() + (on.green() - off.green()) * t),
+                       int(off.blue() + (on.blue() - off.blue()) * t))
+        if not self.isEnabled():
+            track = QColor("#1E1E1E")
+        p.setPen(Qt.NoPen)
+        p.setBrush(track)
+        p.drawRoundedRect(QRectF(x, y, self._W, self._H), self._H / 2, self._H / 2)
+        d = self._H - 2 * self._PAD
+        kx = x + self._PAD + t * (self._W - d - 2 * self._PAD)
+        p.setBrush(QColor("#FFFFFF") if self.isEnabled() else QColor("#6E6E6E"))
+        p.drawEllipse(QRectF(kx, y + self._PAD, d, d))
+        p.end()
+
+
+def setting_row(title: str, control, description: str = None) -> QWidget:
+    """An Apple/VS-Code-style settings row: a bold title (+ optional muted description) on the
+    left, and the control (toggle, dropdown, …) aligned right. Returns the row widget."""
+    row = QWidget()
+    h = QHBoxLayout(row)
+    h.setContentsMargins(0, 6, 0, 6)
+    h.setSpacing(12)
+    text = QVBoxLayout()
+    text.setContentsMargins(0, 0, 0, 0)
+    text.setSpacing(2)
+    lbl = QLabel(title)
+    lbl.setStyleSheet(f"color: {Theme.TEXT_PRIMARY}; font-weight: {Theme.WEIGHT_LABEL}; background: transparent;")
+    text.addWidget(lbl)
+    if description:
+        desc = QLabel(description)
+        desc.setWordWrap(True)
+        desc.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FS_XS}px; background: transparent;")
+        text.addWidget(desc)
+    h.addLayout(text, 1)
+    h.addWidget(control, 0, Qt.AlignRight | Qt.AlignVCenter)
+    return row
 
 
 class CenteredCap(QWidget):

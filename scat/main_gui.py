@@ -46,7 +46,8 @@ from .config import config, get_timestamped_output_dir
 from .artifacts import IMAGE_SUMMARY, ALL_DEPOSITS
 from .ui_common import (
     Theme, NoScrollSpinBox, NoScrollDoubleSpinBox, NoScrollComboBox,
-    CollapsibleSection, CenteredCap, icon, load_custom_fonts, get_icon_path
+    CollapsibleSection, CenteredCap, ToggleSwitch, setting_row,
+    icon, load_custom_fonts, get_icon_path
 )
 from . import ui_motion
 
@@ -746,6 +747,129 @@ def _results_dict_from_output(output_dir, group_by=None, image_paths=None, stats
     }
 
 
+class DropZone(QWidget):
+    """A drag-and-drop hero for image input. Accepts dropped image files, folders (searched
+    recursively), and multiple items at once; also two Browse actions (images / folder).
+    Emits ``filesSelected(list[str])`` with the resolved image file paths."""
+
+    IMAGE_EXTS = {'.tif', '.tiff', '.png', '.jpg', '.jpeg', '.bmp'}
+    filesSelected = Signal(list)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("dropZone")
+        self.setAcceptDrops(True)
+        self._active = False
+        self._apply_style()
+
+        v = QVBoxLayout(self)
+        v.setContentsMargins(18, 20, 18, 20)
+        v.setSpacing(6)
+
+        self._icon = QLabel()
+        self._icon.setAlignment(Qt.AlignCenter)
+        self._icon.setPixmap(icon("add_photo_alternate", Theme.TEXT_SECONDARY, 36).pixmap(36, 36))
+        v.addWidget(self._icon, 0, Qt.AlignHCenter)
+
+        self._title = QLabel("Drop images or a folder here")
+        self._title.setAlignment(Qt.AlignCenter)
+        self._title.setStyleSheet(
+            f"color:{Theme.TEXT_PRIMARY}; font-weight:{Theme.WEIGHT_TITLE}; background:transparent;")
+        v.addWidget(self._title)
+
+        self._sub = QLabel("TIFF · PNG · JPG  —  folders are searched recursively")
+        self._sub.setAlignment(Qt.AlignCenter)
+        self._sub.setStyleSheet(f"color:{Theme.TEXT_MUTED}; font-size:{Theme.FS_XS}px; background:transparent;")
+        v.addWidget(self._sub)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+        btn_row.addStretch(1)
+        self._img_btn = QPushButton("Choose images…")
+        self._img_btn.setIcon(icon("image"))
+        self._img_btn.clicked.connect(self._choose_images)
+        self._dir_btn = QPushButton("Choose folder…")
+        self._dir_btn.setIcon(icon("folder_open"))
+        self._dir_btn.clicked.connect(self._choose_folder)
+        btn_row.addWidget(self._img_btn)
+        btn_row.addWidget(self._dir_btn)
+        btn_row.addStretch(1)
+        v.addSpacing(4)
+        v.addLayout(btn_row)
+
+    # -- appearance --
+    def _apply_style(self):
+        border = Theme.PRIMARY if self._active else Theme.BORDER
+        bg = "rgba(218,78,66,0.08)" if self._active else Theme.BG_INSET
+        self.setStyleSheet(
+            f"QWidget#dropZone {{ background-color: {bg}; border: 2px dashed {border}; "
+            f"border-radius: {Theme.RADIUS_CONTAINER}px; }}")
+
+    def _set_active(self, on):
+        if on != self._active:
+            self._active = on
+            self._apply_style()
+
+    def set_count(self, n: int):
+        if n > 0:
+            self._title.setText(f"{n} image{'s' if n != 1 else ''} selected")
+            self._sub.setText("Drop more, or choose again to replace")
+            self._icon.setPixmap(icon("photo_library", Theme.NORMAL, 36).pixmap(36, 36))
+        else:
+            self._title.setText("Drop images or a folder here")
+            self._sub.setText("TIFF · PNG · JPG  —  folders are searched recursively")
+            self._icon.setPixmap(icon("add_photo_alternate", Theme.TEXT_SECONDARY, 36).pixmap(36, 36))
+
+    # -- drag & drop --
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            self._set_active(True)
+
+    def dragLeaveEvent(self, event):
+        self._set_active(False)
+
+    def dropEvent(self, event):
+        self._set_active(False)
+        paths = [u.toLocalFile() for u in event.mimeData().urls() if u.isLocalFile()]
+        files = self._collect(paths)
+        if files:
+            event.acceptProposedAction()
+            self.filesSelected.emit(files)
+
+    # -- browse --
+    def _choose_images(self):
+        start = config.get("last_input_dir", "")
+        files, _ = QFileDialog.getOpenFileNames(
+            self, "Select image files", start,
+            "Images (*.tif *.tiff *.png *.jpg *.jpeg *.bmp);;All Files (*)")
+        if files:
+            self.filesSelected.emit(self._collect(files))
+
+    def _choose_folder(self):
+        start = config.get("last_input_dir", "")
+        folder = QFileDialog.getExistingDirectory(self, "Select a folder of images", start)
+        if folder:
+            files = self._collect([folder])
+            if files:
+                self.filesSelected.emit(files)
+            else:
+                QMessageBox.information(self, "No images", "No supported images found in that folder.")
+
+    def _collect(self, paths) -> list:
+        """Expand a mix of files and folders into a sorted, de-duplicated list of image paths."""
+        out = []
+        for pth in paths:
+            p = Path(pth)
+            if p.is_dir():
+                for f in p.rglob("*"):
+                    if f.is_file() and f.suffix.lower() in self.IMAGE_EXTS:
+                        out.append(str(f))
+            elif p.is_file() and p.suffix.lower() in self.IMAGE_EXTS:
+                out.append(str(p))
+        return sorted(dict.fromkeys(out))
+
+
 class AnalysisTab(QWidget):
     """Analysis tab for running analysis on images."""
 
@@ -808,31 +932,17 @@ class AnalysisTab(QWidget):
         default_input = str(Path.home() / "SCAT" / "data" / "images")
         default_output = str(Path.home() / "SCAT" / "data" / "results")
 
-        # ---- Input / Output ----
-        io_group = QGroupBox("Input / Output")
+        # ---- Input: a drag-and-drop hero (images, folders, multiple at once) ----
+        self.dropzone = DropZone()
+        self.dropzone.filesSelected.connect(self._on_files_selected)
+        left_col.addWidget(self.dropzone)
+
+        # ---- Output + model ----
+        io_group = QGroupBox("Output")
         io_layout = QVBoxLayout()
-        io_layout.setSpacing(8)
+        io_layout.setSpacing(6)
         io_layout.setContentsMargins(14, 16, 14, 14)
-
-        input_row = QHBoxLayout()
-        input_row.setSpacing(10)
-        input_label = QLabel("Input")
-        input_label.setMinimumWidth(90)
-        input_label.setStyleSheet(
-            f"font-weight: {Theme.WEIGHT_LABEL}; color: {Theme.TEXT_PRIMARY}; background-color: transparent;")
-        self.input_path_edit = QLineEdit()
-        self.input_path_edit.setPlaceholderText("Select image files…")
-        self.input_path_edit.setReadOnly(True)
-        self.browse_btn = QPushButton("Browse…")
-        self.browse_btn.setMinimumWidth(90)
-        self.browse_btn.setToolTip("Select one or more image files (Ctrl+A to select all in folder)")
-        self.browse_btn.clicked.connect(self._browse_input)
-        input_row.addWidget(input_label)
-        input_row.addWidget(self.input_path_edit, 1)
-        input_row.addWidget(self.browse_btn)
-        io_layout.addLayout(input_row)
-
-        self.output_dir = PathSelector("Output", is_folder=True, config_key="last_output_dir", default_path=default_output)
+        self.output_dir = PathSelector("Results folder", is_folder=True, config_key="last_output_dir", default_path=default_output)
         # "Classifier model" (the model file) — distinct from the "Method" picker in Options.
         self.model_path = PathSelector("Classifier model", filter="Model (*.pkl *.pt)", config_key="last_model_path")
         # U-Net detection model lives under Advanced (optional / rarely changed).
@@ -843,32 +953,33 @@ class AnalysisTab(QWidget):
         io_group.setLayout(io_layout)
         left_col.addWidget(io_group)
 
-        # ---- Options: essentials only ----
+        # ---- Options: Apple-style rows (label + description on the left, control on the right) ----
         options_group = QGroupBox("Options")
-        options_layout = QFormLayout()
-        options_layout.setVerticalSpacing(8)
-        options_layout.setHorizontalSpacing(12)
-        options_layout.setContentsMargins(14, 16, 14, 14)
+        options_layout = QVBoxLayout()
+        options_layout.setSpacing(2)
+        options_layout.setContentsMargins(14, 16, 14, 12)
+
         self.model_type = NoScrollComboBox()
         self.model_type.addItems(["Threshold", "Random Forest", "CNN"])
         model_type_map = {"threshold": 0, "rf": 1, "cnn": 2}
         self.model_type.setCurrentIndex(model_type_map.get(config.get("analysis.model_type", "rf"), 1))
+        self.model_type.setMinimumWidth(150)
         self.model_type.currentIndexChanged.connect(self._update_run_summary)
-        method_label = QLabel("Method")
-        method_label.setStyleSheet("background-color: transparent;")
-        options_layout.addRow(method_label, self.model_type)
-        self.annotate = QCheckBox("Generate annotated images")
+        options_layout.addWidget(setting_row("Method", self.model_type, "How deposits are classified"))
+        options_layout.addWidget(self._divider())
+
+        self.annotate = ToggleSwitch()
         self.annotate.setChecked(config.get("analysis.annotate", True))
         self.annotate.toggled.connect(self._update_run_summary)
-        options_layout.addRow(self.annotate)
-        self.visualize = QCheckBox("Generate visualizations")
+        options_layout.addWidget(setting_row("Annotated images", self.annotate, "Save each image with deposits outlined"))
+        self.visualize = ToggleSwitch()
         self.visualize.setChecked(config.get("analysis.visualize", True))
         self.visualize.toggled.connect(self._update_run_summary)
-        options_layout.addRow(self.visualize)
-        self.report = QCheckBox("Generate HTML report")
+        options_layout.addWidget(setting_row("Visualizations", self.visualize, "Distribution plots and comparisons"))
+        self.report = ToggleSwitch()
         self.report.setChecked(config.get("analysis.report", True))
         self.report.toggled.connect(self._update_run_summary)
-        options_layout.addRow(self.report)
+        options_layout.addWidget(setting_row("HTML report", self.report, "A shareable summary document"))
         options_group.setLayout(options_layout)
         left_col.addWidget(options_group)
 
@@ -877,10 +988,11 @@ class AnalysisTab(QWidget):
         groups_layout = QVBoxLayout()
         groups_layout.setSpacing(8)
         groups_layout.setContentsMargins(14, 16, 14, 14)
-        self.use_groups = QCheckBox("Use groups for comparison")
+        self.use_groups = ToggleSwitch()
         self.use_groups.setChecked(config.get("analysis.use_groups", True))
         self.use_groups.toggled.connect(self._on_use_groups_toggled)
-        groups_layout.addWidget(self.use_groups)
+        groups_layout.addWidget(setting_row("Compare groups", self.use_groups,
+                                            "Run statistics across experimental conditions"))
 
         # Grouping actions side by side (no longer full-width banner buttons).
         group_btn_row = QHBoxLayout()
@@ -944,18 +1056,18 @@ class AnalysisTab(QWidget):
         detect_layout.addRow("Circularity", self.threshold)
         advanced.add_widget(detect_form_w)
 
-        self.spatial = QCheckBox("Spatial analysis")
+        self.spatial = ToggleSwitch()
         self.spatial.setChecked(config.get("analysis.spatial", True))
         self.spatial.toggled.connect(self._update_run_summary)
-        advanced.add_widget(self.spatial)
-        self.stats = QCheckBox("Statistical analysis")
+        advanced.add_widget(setting_row("Spatial analysis", self.spatial, "Clustering / dispersion metrics"))
+        self.stats = ToggleSwitch()
         self.stats.setChecked(config.get("analysis.stats", True))
         self.stats.toggled.connect(self._update_run_summary)
-        advanced.add_widget(self.stats)
-        self.save_json = QCheckBox("Save for retraining (JSON)")
+        advanced.add_widget(setting_row("Statistical analysis", self.stats, "Group comparison tests"))
+        self.save_json = ToggleSwitch()
         self.save_json.setChecked(config.get("analysis.save_json", True))
         self.save_json.setToolTip("Save contour data for model retraining. Disable to reduce file size.")
-        advanced.add_widget(self.save_json)
+        advanced.add_widget(setting_row("Save for retraining", self.save_json, "Store contour data (JSON)"))
         left_col.addWidget(advanced)
         left_col.addStretch(1)
 
@@ -1078,7 +1190,7 @@ class AnalysisTab(QWidget):
                 f"<div style='color:{sec}; margin-bottom:16px'>Choose one or more images, then "
                 f"configure the options on the left.</div>"
                 f"<div style='color:{sec}; letter-spacing:1px; font-size:11px; margin-bottom:6px'>HOW IT WORKS</div>"
-                + step("1", "Select images", "— click Browse…")
+                + step("1", "Add images", "— drop files or a folder, or Browse")
                 + step("2", "Group by condition", "— optional, from subfolders")
                 + step("3", "Choose outputs &amp; Run", "— report, plots, statistics"))
             return
@@ -1264,46 +1376,36 @@ class AnalysisTab(QWidget):
             self.groups_tree.addTopLevelItem(parent)
         self._update_run_summary()
 
-    def _browse_input(self):
-        """Browse for image files (one or multiple)."""
-        start_dir = ""
-        if self._selected_files:
-            start_dir = str(Path(self._selected_files[0]).parent)
-        elif config.get("last_input_dir"):
-            start_dir = config.get("last_input_dir")
-        
-        files, _ = QFileDialog.getOpenFileNames(
-            self, "Select Image Files", start_dir,
-            "Images (*.tif *.tiff *.png *.jpg *.jpeg);;All Files (*)"
-        )
-        
-        if files:
-            self._selected_files = files
-            # Store the common ancestor (not just files[0].parent) so a later 'Load Previous
-            # Results' + edit can recursively find originals across sibling condition folders.
-            try:
-                root = os.path.commonpath([str(Path(f).parent) for f in files])
-            except ValueError:
-                root = str(Path(files[0]).parent)
-            config.set("last_input_dir", root)
-            self._update_input_display()
+    def _divider(self):
+        """A thin 1px horizontal rule for separating settings rows."""
+        d = QWidget()
+        d.setFixedHeight(1)
+        d.setStyleSheet(f"background-color: {Theme.BORDER};")
+        return d
 
-            # Re-derive groups from the new selection's subfolders (deterministic, no dialog)
-            self._group_data = {}
-            self._metadata = None
-            self.groups_tree.clear()
-            if self.use_groups.isChecked():
-                self._autogroup_by_subfolder(announce=False)
-    
+    def _on_files_selected(self, files):
+        """Handle images chosen via the drop zone (drag-drop or Browse — files or a folder)."""
+        if not files:
+            return
+        self._selected_files = list(files)
+        # Store the common ancestor (not just files[0].parent) so a later 'Load Previous
+        # Results' + edit can recursively find originals across sibling condition folders.
+        try:
+            root = os.path.commonpath([str(Path(f).parent) for f in files])
+        except ValueError:
+            root = str(Path(files[0]).parent)
+        config.set("last_input_dir", root)
+        self._metadata = None
+        self._group_data = {}
+        self.groups_tree.clear()
+        if self.use_groups.isChecked():
+            self._autogroup_by_subfolder(announce=False)
+        self._update_input_display()
+
     def _update_input_display(self):
-        """Update the input path display + the live run summary / preview."""
-        if not self._selected_files:
-            self.input_path_edit.clear()
-        else:
-            folder = Path(self._selected_files[0]).parent
-            count = len(self._selected_files)
-            display_text = f"{str(folder).replace(chr(92), '/')} ({count} file{'s' if count > 1 else ''})"
-            self.input_path_edit.setText(display_text)
+        """Reflect the current selection in the drop zone + live run summary / preview."""
+        if hasattr(self, "dropzone"):
+            self.dropzone.set_count(len(self._selected_files))
         self._update_run_summary()
         self._update_preview()
     
