@@ -297,6 +297,7 @@ def cluster_folder_service(path: str, output_dir: Optional[str] = None, method: 
     cluster_id), the authoritative cluster_assignments.csv, representative thumbnails, a
     cluster_report.html, and a cluster_labels.csv template. Works from in-memory results so it
     keeps ALL deposits (including RF-called 'artifact')."""
+    import cv2
     from . import clustering as C
     from .features import FeatureExtractor
     from .grouping_util import duplicate_basenames
@@ -318,6 +319,22 @@ def cluster_folder_service(path: str, output_dir: Optional[str] = None, method: 
         fx = FeatureExtractor(dpi=res.dpi)
         for d in res.deposits:
             fd = fx.to_feature_dict(d)
+            cnt = d.contour
+            area = cv2.contourArea(cnt) if cnt is not None else 0.0
+            # solidity = area / convex-hull area: consolidates irregular/unusual deposits into a
+            # real (labelable) cluster instead of scattering them into noise.
+            hull_area = cv2.contourArea(cv2.convexHull(cnt)) if cnt is not None else 0.0
+            fd["solidity"] = float(area / hull_area) if hull_area > 0 else 0.0
+            # Rotation-invariant thinness for line-artifact detection (aspect_ratio from an
+            # axis-aligned bbox misses DIAGONAL film boundaries). minAreaRect gives an
+            # orientation-free elongation + how much of the rotated box the shape fills.
+            if cnt is not None and len(cnt) >= 3:
+                (rw, rh) = cv2.minAreaRect(cnt)[1]
+                maj, mnr = max(rw, rh), min(rw, rh)
+                fd["elongation"] = float(maj / mnr) if mnr > 0 else 1.0
+                fd["rect_fill"] = float(area / (maj * mnr)) if maj * mnr > 0 else 0.0
+            else:
+                fd["elongation"], fd["rect_fill"] = 1.0, 0.0
             fd["filename"] = res.filename
             fd["deposit_id"] = d.id
             rows.append(fd)
@@ -341,7 +358,15 @@ def cluster_folder_service(path: str, output_dir: Optional[str] = None, method: 
     reps = C.representatives(X, cres.labels, per_kind=reps_per_cluster)
     _export_cluster_thumbnails(out / "clusters", df, reps, images)
     profile = C.cluster_profile(df, cres.labels)
-    _write_cluster_report_html(out / "cluster_report.html", profile, reps, cres)
+    # Surface the shape-unusual deposits (elongated/irregular, ROD-like) — ranked across ALL
+    # deposits (not only noise), line artifacts excluded (-inf), so the real atypical cohort
+    # (which solidity consolidates into a cluster) is shown WITH its cluster_id for labeling.
+    import numpy as _np
+    df["unusual"] = C.unusual_ranking(df)
+    unusual = df[_np.isfinite(df["unusual"])].sort_values("unusual", ascending=False).head(24)
+    _export_unusual_thumbnails(out / "unusual", unusual, images)
+    n_lines = int(C.line_flag(df).sum())
+    _write_cluster_report_html(out / "cluster_report.html", profile, reps, cres, unusual, n_lines)
     _write_cluster_labels_csv(out / "cluster_labels.csv", profile, cres)
 
     return ClusterSummary(str(out), len(images), len(df), cres.n_clusters, cres.n_noise, cres.health)
@@ -407,9 +432,21 @@ def _write_cluster_labels_json(deposits_dir, results, df):
             json.dump({"image_file": res.filename, "next_group_id": 1, "deposits": deps}, f, indent=2)
 
 
-def _export_cluster_thumbnails(clusters_dir, df, reps, images):
+def _crop_deposit(cache, img_by_name, fn, x, y, w, h, pad=6):
     import numpy as np
     from PIL import Image
+    if fn not in cache:
+        cache[fn] = np.array(Image.open(img_by_name[fn]))
+    arr = cache[fn]
+    x, y = int(x), int(y)
+    w, h = int(w or 20), int(h or 20)
+    y0, y1 = max(0, y - h // 2 - pad), min(arr.shape[0], y + h // 2 + pad)
+    x0, x1 = max(0, x - w // 2 - pad), min(arr.shape[1], x + w // 2 + pad)
+    crop = arr[y0:y1, x0:x1]
+    return Image.fromarray(crop) if crop.size else None
+
+
+def _export_cluster_thumbnails(clusters_dir, df, reps, images):
     img_by_name = {Path(p).name: p for p in images}
     rows = list(df.itertuples())
     cache = {}
@@ -420,35 +457,51 @@ def _export_cluster_thumbnails(clusters_dir, df, reps, images):
             for j, pos in enumerate(idxs):
                 try:
                     r = rows[pos]
-                    fn = str(r.filename)
-                    if fn not in cache:
-                        cache[fn] = np.array(Image.open(img_by_name[fn]))
-                    arr = cache[fn]
-                    x, y = int(r.x), int(r.y)
-                    w, h = int(getattr(r, "width", 20) or 20), int(getattr(r, "height", 20) or 20)
-                    pad = 4
-                    y0, y1 = max(0, y - h // 2 - pad), min(arr.shape[0], y + h // 2 + pad)
-                    x0, x1 = max(0, x - w // 2 - pad), min(arr.shape[1], x + w // 2 + pad)
-                    crop = arr[y0:y1, x0:x1]
-                    if crop.size:
-                        Image.fromarray(crop).save(cdir / f"{kind}_{j}.png")
+                    im = _crop_deposit(cache, img_by_name, str(r.filename), r.x, r.y,
+                                       getattr(r, "width", 20), getattr(r, "height", 20))
+                    if im is not None:
+                        im.save(cdir / f"{kind}_{j}.png")
                 except Exception:
                     continue  # thumbnails are best-effort; never fail the run on one crop
 
 
+def _export_unusual_thumbnails(unusual_dir, unusual_df, images):
+    import cv2
+    import numpy as np
+    from PIL import Image
+    img_by_name = {Path(p).name: p for p in images}
+    unusual_dir.mkdir(parents=True, exist_ok=True)
+    cache = {}
+    for j, (_, r) in enumerate(unusual_df.iterrows()):
+        try:
+            im = _crop_deposit(cache, img_by_name, str(r["filename"]), r["x"], r["y"],
+                               r.get("width", 20), r.get("height", 20), pad=10)
+            if im is None:
+                continue
+            # stamp the cluster_id so the user knows which cluster to label (noise = -1)
+            arr = np.array(im)
+            cid = int(r.get("cluster_id", -1))
+            tag = f"c{cid}" if cid >= 0 else "noise"
+            cv2.putText(arr, tag, (2, arr.shape[0] - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.45,
+                        (32, 96, 200), 1, cv2.LINE_AA)
+            Image.fromarray(arr).save(unusual_dir / f"rank_{j:02d}.png")
+        except Exception:
+            continue
+
+
 def _write_cluster_labels_csv(path, profile, cres):
-    keep = ["cluster_id", "size", "area_px", "circularity", "mean_hue", "pigment_density"]
+    keep = ["cluster_id", "size", "kind", "area_px", "circularity", "aspect_ratio", "solidity"]
     cols = [c for c in keep if c in profile.columns]
     out = profile[profile["cluster_id"] != -1][cols].copy()
     total_deposits = max(1, int(profile["size"].sum()))  # size sums over all rows incl. -1 noise
     out["noise_frac"] = round(cres.n_noise / total_deposits, 3)
-    out["label"] = ""
+    out["label"] = ""  # user fills: normal / rod / artifact (or blank to skip)
     out.to_csv(path, index=False)
 
 
-def _write_cluster_report_html(path, profile, reps, cres):
+def _write_cluster_report_html(path, profile, reps, cres, unusual=None, n_lines=0):
     import base64
-    clus_root = Path(path).parent / "clusters"
+    root = Path(path).parent
 
     def _b64(p):
         return base64.b64encode(Path(p).read_bytes()).decode() if Path(p).exists() else ""
@@ -456,22 +509,39 @@ def _write_cluster_report_html(path, profile, reps, cres):
     parts = ["<!DOCTYPE html><meta charset='utf-8'><title>SCAT clusters</title>",
              "<style>body{font-family:sans-serif;max-width:1000px;margin:2rem auto}"
              ".c{border:1px solid #ddd;border-radius:8px;padding:12px;margin:12px 0}"
-             "img{height:64px;margin:2px;border:1px solid #eee}.warn{color:#b26a00}</style>",
+             ".u{border:2px solid #2F6B9E;border-radius:8px;padding:12px;margin:12px 0;background:#f4f8fb}"
+             "img{height:72px;margin:2px;border:1px solid #eee}.warn{color:#b26a00}"
+             ".k{color:#2F6B9E;font-weight:600}</style>",
              f"<h1>Cluster report — {cres.n_clusters} clusters, {cres.n_noise} noise</h1>"]
     for h in cres.health:
         parts.append(f"<p class='warn'>&#9888; {h}</p>")
+    # Unusual deposits — the shape-atypical ones pulled out of the noise bucket
+    if unusual is not None and len(unusual):
+        parts.append("<div class='u'><h2>&#11088; Unusual deposits (review — likely ROD / atypical)</h2>"
+                     "<p>Shape-atypical deposits surfaced from the noise bucket (line artifacts "
+                     "down-ranked). Label the cluster they fall in, or fix individually in the "
+                     "labeling GUI.</p>")
+        for j in range(len(unusual)):
+            b = _b64(root / "unusual" / f"rank_{j:02d}.png")
+            if b:
+                parts.append(f"<img src='data:image/png;base64,{b}'>")
+        if n_lines:
+            parts.append(f"<p class='warn'>~{n_lines} deposit(s) look like line artifacts (film "
+                         f"boundaries: very elongated + near-zero circularity) — likely 'artifact'.</p>")
+        parts.append("</div>")
     for _, row in profile.iterrows():
         cid = int(row["cluster_id"])
-        title = ("Outliers (noise -1) — review individually, NOT auto-artifact"
-                 if cid == -1 else f"Cluster {cid}")
-        parts.append(f"<div class='c'><h3>{title} — size {int(row['size'])}</h3>")
+        kind = row.get("kind", "")
+        title = "Outliers (noise -1)" if cid == -1 else f"Cluster {cid}"
+        parts.append(f"<div class='c'><h3>{title} — size {int(row['size'])} "
+                     f"<span class='k'>[{kind}]</span></h3>")
         if cid in reps:
-            for kind in ("medoid", "random", "boundary"):
-                for j in range(len(reps[cid][kind])):
-                    b = _b64(clus_root / f"cluster_{cid}" / f"{kind}_{j}.png")
+            for k in ("medoid", "random", "boundary"):
+                for j in range(len(reps[cid][k])):
+                    b = _b64(root / "clusters" / f"cluster_{cid}" / f"{k}_{j}.png")
                     if b:
-                        parts.append(f"<img title='{kind}' src='data:image/png;base64,{b}'>")
-        feats = ", ".join(f"{c}={row[c]:.2f}" for c in ("area_px", "circularity", "mean_hue",
-                          "pigment_density") if c in profile.columns and pd.notna(row[c]))
+                        parts.append(f"<img title='{k}' src='data:image/png;base64,{b}'>")
+        feats = ", ".join(f"{c}={row[c]:.2f}" for c in ("area_px", "circularity", "aspect_ratio",
+                          "solidity") if c in profile.columns and pd.notna(row[c]))
         parts.append(f"<p>{feats}</p></div>")
     Path(path).write_text("".join(parts), encoding="utf-8")

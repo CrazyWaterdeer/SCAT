@@ -10,6 +10,9 @@ scat.zip
 # User data
 data/
 
+# Installed agent skills (personal tooling via `npx skills`, not part of the project)
+.agents/
+
 # Python
 __pycache__/
 .venv/

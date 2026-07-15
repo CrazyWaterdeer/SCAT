@@ -46,6 +46,66 @@ def test_build_feature_matrix_median_impute():
     assert np.isfinite(X).all()
 
 
+def test_build_feature_matrix_solidity_optional():
+    df = _df()
+    X0, names0 = C.build_feature_matrix(df)
+    assert "solidity" not in names0            # absent -> ignored gracefully
+    df["solidity"] = np.random.RandomState(0).uniform(0.3, 1.0, len(df))
+    X1, names1 = C.build_feature_matrix(df)
+    assert "solidity" in names1 and X1.shape[1] == X0.shape[1] + 1
+
+
+def test_cluster_kind():
+    assert C.cluster_kind(circularity=0.05, aspect_ratio=12) == "line-artifact?"  # straight line
+    assert C.cluster_kind(circularity=0.25, aspect_ratio=1.4) == "unusual?"       # irregular blob
+    assert C.cluster_kind(circularity=0.9, aspect_ratio=1.1) == "common"          # round
+
+
+def test_unusual_ranking_excludes_line_artifacts():
+    df = pd.DataFrame({
+        "aspect_ratio": [12.0, 3.0, 1.1],   # 0: line, 1: real elongated ROD, 2: round
+        "circularity": [0.05, 0.30, 0.9],
+        "area_px": [80.0, 80.0, 80.0],
+    })
+    r = C.unusual_ranking(df)
+    assert r[0] == float("-inf")   # line artifact excluded entirely (can't outrank a real deposit)
+    assert r[1] > r[2]             # the real ROD ranks above the round common one
+
+
+def test_line_flag_rotation_invariant():
+    # a DIAGONAL thin line: axis-aligned aspect_ratio ~1, but minAreaRect elongation high + poorly filled
+    line = pd.DataFrame({"aspect_ratio": [1.1], "circularity": [0.05],
+                         "elongation": [12.0], "rect_fill": [0.1]})
+    assert bool(C.line_flag(line).iloc[0]) is True
+    # a real filled elongated ROD: moderately elongated but well-filled + not near-zero circ -> NOT a line
+    rod = pd.DataFrame({"aspect_ratio": [1.2], "circularity": [0.3],
+                        "elongation": [6.0], "rect_fill": [0.78]})
+    assert bool(C.line_flag(rod).iloc[0]) is False
+    # a SOLID straight line fills its rotated box (rect_fill≈1) yet is extreme + near-zero circ
+    solid_line = pd.DataFrame({"aspect_ratio": [1.1], "circularity": [0.03],
+                               "elongation": [15.0], "rect_fill": [0.95]})
+    assert bool(C.line_flag(solid_line).iloc[0]) is True
+
+
+def test_unusual_ranking_singleton_is_finite():
+    df = pd.DataFrame({"aspect_ratio": [3.0], "circularity": [0.2], "area_px": [120.0]})
+    r = C.unusual_ranking(df)
+    assert np.isfinite(r.iloc[0])  # single deposit -> score 0 (not NaN), so it can still surface
+
+
+def test_cluster_profile_kind_uses_fractions():
+    # a cluster whose MEDIAN is round/common but whose tail is unusual -> must NOT read 'common'
+    df = pd.DataFrame({
+        "area_px": [60.0] * 20, "perimeter": [30.0] * 20,
+        "circularity": [0.9] * 15 + [0.2] * 5, "aspect_ratio": [1.1] * 15 + [4.0] * 5,
+        "mean_hue": [200.0] * 20, "mean_saturation": [0.5] * 20, "mean_lightness": [0.5] * 20,
+        "pigment_density": [0.5] * 20, "iod": [50.0] * 20,
+    })
+    prof = C.cluster_profile(df, np.zeros(20, dtype=int))
+    assert prof.loc[0, "pct_unusual"] > 0.1
+    assert prof.loc[0, "kind"] != "common"
+
+
 # --------------------------------------------------------------- clustering
 def test_cluster_deposits_hdbscan_finds_blobs():
     res = C.cluster_deposits(_blobs(), min_cluster_size=10)
