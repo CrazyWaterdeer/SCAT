@@ -35,3 +35,52 @@ def test_generate_html_report(tmp_path):
     assert out.exists() and out.name == "report.html"
     assert out.stat().st_size > 1000
     assert "SCAT" in out.read_text(encoding="utf-8")
+
+
+def test_generate_html_report_with_deposits_and_groups(tmp_path):
+    """Exercise the deposit-level histogram branches (area/IOD/pH/circularity) plus the
+    group-comparison and statistical-appendix sections — the paths reshaped by the
+    Stage-6 report refactor that the plain report test does not reach."""
+    import numpy as np
+    from scat.statistics import run_comprehensive_analysis
+
+    rng = np.arange(12)
+    film = pd.DataFrame({
+        "filename": [f"img_{i:02d}.tif" for i in rng],
+        "group": ["ctrl"] * 6 + ["treat"] * 6,
+        "n_total": (10 + rng % 5).astype(int),
+        "n_normal": (8 + rng % 3).astype(int),
+        "n_rod": (2 + rng % 4).astype(int),
+        "n_artifact": np.zeros(12, dtype=int),
+        "rod_fraction": np.array([0.2] * 6 + [0.6] * 6) + (rng % 3) * 0.01,
+        "total_iod": 100.0 + (rng % 7) * 5.0,
+        "mean_area": 50.0 + (rng % 4) * 2.0,
+        "mean_hue": 215.0 + (rng % 5),
+        "mean_circularity": 0.70 - (rng % 3) * 0.01,
+    })
+    # deposit-level data drives the area/IOD/pH/circularity histograms
+    dep_rows = []
+    for i in range(12):
+        for j in range(8):
+            label = "rod" if (i + j) % 3 == 0 else ("artifact" if (i + j) % 7 == 0 else "normal")
+            dep_rows.append({
+                "filename": f"img_{i:02d}.tif", "label": label,
+                "area_px": 40.0 + (i * 3 + j * 5) % 300,
+                "iod": 20.0 + (i * 2 + j * 4) % 150,
+                "mean_hue": (30.0 + i * 13 + j * 7) % 360,
+                "circularity": ((i * 5 + j * 3) % 100) / 100.0,
+            })
+    deposits = pd.DataFrame(dep_rows)
+    stats = run_comprehensive_analysis(film, deposits_df=deposits, group_column="group")
+    metrics = stats.get("basic", {}).get("metrics") or stats
+
+    out = Path(generate_report(film, output_dir=str(tmp_path), deposit_data=deposits,
+                               statistical_results=metrics, group_by="group", format="html"))
+    html = out.read_text(encoding="utf-8")
+    assert out.exists() and out.stat().st_size > 5000
+    # distribution histograms + group comparison + appendix all rendered
+    assert "Distributions" in html
+    assert "Group Comparison" in html
+    assert "Appendix" in html
+    # one <img> per distribution (6) + overview + group boxplots — sanity lower bound
+    assert html.count("data:image/png;base64,") >= 7
