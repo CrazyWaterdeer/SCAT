@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
     QDialog, QKeySequenceEdit, QDialogButtonBox,
     QGraphicsView, QGraphicsScene, QMenu, QInputDialog,
     QTreeWidget, QTreeWidgetItem, QDockWidget,
-    QSizePolicy, QGridLayout, QFrame
+    QSizePolicy, QGridLayout, QFrame, QStackedWidget
 )
 from PySide6.QtCore import Qt, QThread, Signal, QSize, QRectF
 from PySide6.QtGui import (
@@ -758,13 +758,25 @@ class AnalysisTab(QWidget):
         self._selected_files: List[str] = []  # Individual file selection
         self._input_mode = 'folder'  # 'folder' or 'files'
         self._image_files_for_analysis: List[str] = []  # Files to analyze
-        self._setup_ui()
-    
+
+        # A stateful workspace, not two tabs: CONFIGURE ↔ RESULTS. Before a run the config is
+        # the content; once results exist they take over and the config collapses to a one-line
+        # summary bar (Apple/Claude: state drives the view, not a persistent mode switch).
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        self.stack = QStackedWidget()
+        root.addWidget(self.stack)
+        self._configure_page = QWidget()
+        self._results_page = QWidget()
+        self.stack.addWidget(self._configure_page)
+        self.stack.addWidget(self._results_page)
+        self._setup_ui()               # builds the configure page
+        self._build_results_page()     # builds the results page (embeds ResultsTab)
+        self.stack.setCurrentWidget(self._configure_page)
+
     def _setup_ui(self):
-        # A scroll area for the form + a sticky footer (progress + Run) that stays visible
-        # regardless of scroll. The form is a width-capped, centered two-column layout so on a
-        # 16:9 / 16:10 display fields don't stretch full-width and Run stays above the fold.
-        main_layout = QVBoxLayout(self)
+        # Configure page: the form + live summary/preview panel + sticky Run footer.
+        main_layout = QVBoxLayout(self._configure_page)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
@@ -993,6 +1005,10 @@ class AnalysisTab(QWidget):
         # depresses on press (coral reads on the near-black theme where a neutral shadow can't).
         ui_motion.attach_button_motion(self.run_btn, primary=True)
         self.run_btn.clicked.connect(self._run_analysis)
+        self.load_prev_btn = QPushButton("Load previous results…")
+        self.load_prev_btn.setToolTip("Open results from a previous analysis session")
+        self.load_prev_btn.clicked.connect(self._open_previous_results)
+        footer_row.addWidget(self.load_prev_btn)
         footer_row.addStretch(1)
         footer_row.addWidget(self.progress)
         footer_row.addWidget(self.progress_label)
@@ -1133,6 +1149,69 @@ class AnalysisTab(QWidget):
             more.setAlignment(Qt.AlignCenter)
             more.setStyleSheet(base + f" color: {Theme.TEXT_SECONDARY};")
             self.preview_grid.addWidget(more, len(files) // 3, len(files) % 3)
+
+    # ---- Stateful workspace: RESULTS state ------------------------------------
+    def _build_results_page(self):
+        """Results state: a compact config-summary bar (New / Re-run) above the embedded
+        results view. Once results exist they are the content; the config collapses to one line."""
+        v = QVBoxLayout(self._results_page)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(0)
+
+        bar = QWidget()
+        bar.setObjectName("resultsBar")
+        bar.setStyleSheet(
+            f"QWidget#resultsBar {{ background-color: {Theme.BG_BASE}; border-bottom: 1px solid {Theme.BORDER}; }}")
+        bh = QHBoxLayout(bar)
+        bh.setContentsMargins(14, 10, 14, 10)
+        bh.setSpacing(12)
+        back_btn = QPushButton("◂  New analysis")
+        back_btn.setToolTip("Back to configuration")
+        back_btn.clicked.connect(lambda: self.stack.setCurrentWidget(self._configure_page))
+        self.results_bar_label = QLabel("")
+        self.results_bar_label.setStyleSheet(f"color: {Theme.TEXT_SECONDARY};")
+        rerun_btn = QPushButton("⟳  Re-run")
+        rerun_btn.setToolTip("Run again with the current settings")
+        rerun_btn.clicked.connect(self._rerun)
+        bh.addWidget(back_btn)
+        bh.addWidget(self.results_bar_label, 1)
+        bh.addWidget(rerun_btn)
+        v.addWidget(bar)
+
+        self.results_view = ResultsTab()
+        v.addWidget(self.results_view, 1)
+
+    def _show_results(self, results):
+        """Switch the workspace into the RESULTS state, loading the given results."""
+        self.results_view.load_results(results)
+        self._update_results_bar(results)
+        self.stack.setCurrentWidget(self._results_page)
+
+    def _update_results_bar(self, results):
+        fs = results.get('film_summary') if isinstance(results, dict) else None
+        try:
+            n = len(fs) if fs is not None else len(self._selected_files)
+        except Exception:
+            n = len(self._selected_files)
+        method = self.model_type.currentText()
+        if self.use_groups.isChecked() and self._group_data:
+            g = len(self._group_data)
+            grp = f"{g} group{'s' if g != 1 else ''}"
+        else:
+            grp = "single group"
+        self.results_bar_label.setText(
+            f"✓  Analyzed {n} image{'s' if n != 1 else ''}   ·   {method}   ·   {grp}")
+
+    def _rerun(self):
+        self.stack.setCurrentWidget(self._configure_page)
+        self._run_analysis()
+
+    def _open_previous_results(self):
+        """Load a previous session's results and jump straight to the RESULTS state."""
+        self.results_view._load_previous_results()
+        if getattr(self.results_view, "results", None):
+            self._update_results_bar(self.results_view.results)
+            self.stack.setCurrentWidget(self._results_page)
 
     def _save_settings(self):
         """Save current settings to config."""
@@ -1480,7 +1559,8 @@ class AnalysisTab(QWidget):
         self.progress_label.setText("Complete!")
         self.eta_label.setText("")
         self.analysis_complete.emit(results)
-        QMessageBox.information(self, "Analysis Complete", f"Results saved to:\n{results['output_dir']}")
+        # The state transition IS the completion feedback (no blocking modal) — results take over.
+        self._show_results(results)
     
     def _on_error(self, error_msg):
         self.run_btn.setEnabled(True)
@@ -2250,15 +2330,11 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
         
-        # Analysis tab (primary)
+        # Analyze workspace (primary) — a stateful surface that flows configure → results.
+        # The former "Results" tab is now a STATE of this workspace, not a separate tab.
         self.analysis_tab = AnalysisTab()
-        self.analysis_tab.analysis_complete.connect(self._on_analysis_complete)
-        self.tabs.addTab(self.analysis_tab, "Analysis")
-        
-        # Results tab
-        self.results_tab = ResultsTab()
-        self.tabs.addTab(self.results_tab, "Results")
-        
+        self.tabs.addTab(self.analysis_tab, "Analyze")
+
         # Setup tab (contains Labeling and Training as sub-tabs)
         self.setup_tab = QWidget()
         setup_layout = QVBoxLayout(self.setup_tab)
@@ -2397,10 +2473,6 @@ class MainWindow(QMainWindow):
         if icon_path:
             self.labeling_window.setWindowIcon(QIcon(icon_path))
         self.labeling_window.show()
-    
-    def _on_analysis_complete(self, results):
-        self.results_tab.load_results(results)
-        self.tabs.setCurrentWidget(self.results_tab)
     
     def _load_window_state(self):
         w = config.get("window.width", 1200)
