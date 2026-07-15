@@ -27,6 +27,184 @@ from .visualization import (
 )
 
 
+# CSS design tokens shared with the plots (Bromophenol-Blue pH axis, warm
+# neutrals, teal accent). Kept as a module constant so _build_html stays legible.
+_REPORT_CSS = """\
+        /* Design tokens — shared story with the plots: Bromophenol-Blue pH axis
+           (acidic amber -> basic teal) as the signature, warm neutrals, teal accent. */
+        :root {
+            --paper: #FAFAF9;
+            --surface: #FFFFFF;
+            --ink: #1A1A1A;
+            --muted: #5A5A5A;
+            --hair: #E4E3E0;
+            --accent: #2F6B9E;          /* Imajin steel blue */
+            --accent-soft: #EAF1F6;
+            --ph-acidic: #DDA43A;       /* Bromophenol-Blue axis (pH views only) */
+            --ph-mid: #1F9E77;
+            --ph-basic: #2F6B9E;
+            --normal: #1F9E77;
+            --rod: #DA4E42;
+            --artifact: #636867;
+            --warn-bg: #FBF1DC;
+            --warn-line: #DDA43A;
+            --serif: 'Noto Serif', Georgia, 'Times New Roman', serif;
+            --sans: 'Noto Sans', ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: var(--sans);
+            line-height: 1.65;
+            color: var(--ink);
+            background: var(--paper);
+            max-width: 940px;
+            margin: 0 auto;
+            padding: 48px 28px 72px;
+            -webkit-font-smoothing: antialiased;
+        }
+        .header { margin-bottom: 40px; }
+        .header::before {
+            content: "";
+            display: block;
+            height: 4px;
+            border-radius: 2px;
+            background: linear-gradient(90deg, var(--ph-acidic), var(--ph-mid), var(--ph-basic));
+            margin-bottom: 24px;
+        }
+        .header h1 {
+            font-family: var(--serif);
+            font-size: 2.1rem;
+            font-weight: 600;
+            letter-spacing: -0.01em;
+            text-wrap: balance;
+        }
+        .header .subtitle {
+            color: var(--muted);
+            font-size: 0.82rem;
+            margin-top: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+        .section {
+            background: var(--surface);
+            border: 1px solid var(--hair);
+            border-radius: 10px;
+            padding: 28px 30px;
+            margin-bottom: 22px;
+        }
+        .section h2 {
+            font-family: var(--serif);
+            font-size: 1.35rem;
+            font-weight: 600;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--hair);
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+            gap: 16px;
+            margin-bottom: 8px;
+        }
+        .stat-card {
+            background: var(--paper);
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid var(--hair);
+            text-align: left;
+        }
+        .stat-card .value {
+            font-size: 1.9rem;
+            font-weight: 700;
+            color: var(--accent);
+            font-variant-numeric: tabular-nums;
+            line-height: 1.1;
+        }
+        .stat-card .label {
+            color: var(--muted);
+            font-size: 0.78rem;
+            margin-top: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .stat-card.normal .value { color: var(--normal); }
+        .stat-card.rod .value { color: var(--rod); }
+        .stat-card.artifact .value { color: var(--artifact); }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 14px;
+            font-size: 0.9rem;
+            font-variant-numeric: tabular-nums;
+        }
+        th, td {
+            padding: 11px 12px;
+            text-align: left;
+            border-bottom: 1px solid var(--hair);
+        }
+        th {
+            font-weight: 600;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            font-size: 0.76rem;
+        }
+        tbody tr:hover { background: var(--accent-soft); }
+        .plot-container {
+            text-align: center;
+            margin: 22px 0;
+        }
+        .plot-container img {
+            max-width: 100%;
+            height: auto;
+            border: 1px solid var(--hair);
+            border-radius: 8px;
+        }
+        .plot-description {
+            font-size: 0.88rem;
+            color: var(--muted);
+            margin-top: 12px;
+            text-align: left;
+            padding: 10px 14px;
+            background: var(--paper);
+            border-radius: 6px;
+            border-left: 3px solid var(--accent);
+        }
+        .two-column {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 22px;
+        }
+        @media (max-width: 760px) {
+            .two-column { grid-template-columns: 1fr; }
+            body { padding: 32px 18px 56px; }
+        }
+        .highlight {
+            background: var(--warn-bg);
+            padding: 15px 18px;
+            border-radius: 8px;
+            border-left: 4px solid var(--warn-line);
+            margin: 16px 0;
+        }
+        .footer {
+            text-align: center;
+            padding: 28px 20px 0;
+            color: var(--muted);
+            font-size: 0.82rem;
+            border-top: 1px solid var(--hair);
+            margin-top: 32px;
+        }"""
+
+# Static document footer.
+_REPORT_FOOTER = """
+    <div class="footer">
+        <p>Generated by SCAT - Spot Classification and Analysis Tool</p>
+        <p>Anthropic Claude AI Assistant</p>
+    </div>
+</body>
+</html>"""
+
+
 class ReportGenerator:
     """Generate HTML/PDF reports from analysis results."""
     
@@ -750,8 +928,19 @@ class ReportGenerator:
         inline_plots: Dict,
         group_by: str
     ) -> str:
-        """Build complete HTML document."""
-        
+        """Build complete HTML document from per-section builders."""
+        return "".join([
+            self._html_document_head(title, summary),
+            self._html_distributions(inline_plots),
+            self._html_group_comparison(inline_plots, statistical_results, group_by),
+            self._html_stats_appendix(statistical_results),
+            self._html_spatial_section(spatial_stats),
+            self._html_film_table(film_summary),
+            _REPORT_FOOTER,
+        ])
+
+    def _html_document_head(self, title: str, summary: Dict) -> str:
+        """Document head, CSS, page header, and the Summary stat-card grid."""
         html = f'''<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -759,170 +948,7 @@ class ReportGenerator:
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{title}</title>
     <style>
-        /* Design tokens — shared story with the plots: Bromophenol-Blue pH axis
-           (acidic amber -> basic teal) as the signature, warm neutrals, teal accent. */
-        :root {{
-            --paper: #FAFAF9;
-            --surface: #FFFFFF;
-            --ink: #1A1A1A;
-            --muted: #5A5A5A;
-            --hair: #E4E3E0;
-            --accent: #2F6B9E;          /* Imajin steel blue */
-            --accent-soft: #EAF1F6;
-            --ph-acidic: #DDA43A;       /* Bromophenol-Blue axis (pH views only) */
-            --ph-mid: #1F9E77;
-            --ph-basic: #2F6B9E;
-            --normal: #1F9E77;
-            --rod: #DA4E42;
-            --artifact: #636867;
-            --warn-bg: #FBF1DC;
-            --warn-line: #DDA43A;
-            --serif: 'Noto Serif', Georgia, 'Times New Roman', serif;
-            --sans: 'Noto Sans', ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
-        }}
-        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{
-            font-family: var(--sans);
-            line-height: 1.65;
-            color: var(--ink);
-            background: var(--paper);
-            max-width: 940px;
-            margin: 0 auto;
-            padding: 48px 28px 72px;
-            -webkit-font-smoothing: antialiased;
-        }}
-        .header {{ margin-bottom: 40px; }}
-        .header::before {{
-            content: "";
-            display: block;
-            height: 4px;
-            border-radius: 2px;
-            background: linear-gradient(90deg, var(--ph-acidic), var(--ph-mid), var(--ph-basic));
-            margin-bottom: 24px;
-        }}
-        .header h1 {{
-            font-family: var(--serif);
-            font-size: 2.1rem;
-            font-weight: 600;
-            letter-spacing: -0.01em;
-            text-wrap: balance;
-        }}
-        .header .subtitle {{
-            color: var(--muted);
-            font-size: 0.82rem;
-            margin-top: 10px;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-        }}
-        .section {{
-            background: var(--surface);
-            border: 1px solid var(--hair);
-            border-radius: 10px;
-            padding: 28px 30px;
-            margin-bottom: 22px;
-        }}
-        .section h2 {{
-            font-family: var(--serif);
-            font-size: 1.35rem;
-            font-weight: 600;
-            margin-bottom: 20px;
-            padding-bottom: 12px;
-            border-bottom: 1px solid var(--hair);
-        }}
-        .stats-grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
-            gap: 16px;
-            margin-bottom: 8px;
-        }}
-        .stat-card {{
-            background: var(--paper);
-            padding: 20px;
-            border-radius: 8px;
-            border: 1px solid var(--hair);
-            text-align: left;
-        }}
-        .stat-card .value {{
-            font-size: 1.9rem;
-            font-weight: 700;
-            color: var(--accent);
-            font-variant-numeric: tabular-nums;
-            line-height: 1.1;
-        }}
-        .stat-card .label {{
-            color: var(--muted);
-            font-size: 0.78rem;
-            margin-top: 6px;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-        }}
-        .stat-card.normal .value {{ color: var(--normal); }}
-        .stat-card.rod .value {{ color: var(--rod); }}
-        .stat-card.artifact .value {{ color: var(--artifact); }}
-        table {{
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 14px;
-            font-size: 0.9rem;
-            font-variant-numeric: tabular-nums;
-        }}
-        th, td {{
-            padding: 11px 12px;
-            text-align: left;
-            border-bottom: 1px solid var(--hair);
-        }}
-        th {{
-            font-weight: 600;
-            color: var(--muted);
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
-            font-size: 0.76rem;
-        }}
-        tbody tr:hover {{ background: var(--accent-soft); }}
-        .plot-container {{
-            text-align: center;
-            margin: 22px 0;
-        }}
-        .plot-container img {{
-            max-width: 100%;
-            height: auto;
-            border: 1px solid var(--hair);
-            border-radius: 8px;
-        }}
-        .plot-description {{
-            font-size: 0.88rem;
-            color: var(--muted);
-            margin-top: 12px;
-            text-align: left;
-            padding: 10px 14px;
-            background: var(--paper);
-            border-radius: 6px;
-            border-left: 3px solid var(--accent);
-        }}
-        .two-column {{
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 22px;
-        }}
-        @media (max-width: 760px) {{
-            .two-column {{ grid-template-columns: 1fr; }}
-            body {{ padding: 32px 18px 56px; }}
-        }}
-        .highlight {{
-            background: var(--warn-bg);
-            padding: 15px 18px;
-            border-radius: 8px;
-            border-left: 4px solid var(--warn-line);
-            margin: 16px 0;
-        }}
-        .footer {{
-            text-align: center;
-            padding: 28px 20px 0;
-            color: var(--muted);
-            font-size: 0.82rem;
-            border-top: 1px solid var(--hair);
-            margin-top: 32px;
-        }}
+{_REPORT_CSS}
     </style>
 </head>
 <body>
@@ -969,7 +995,11 @@ class ReportGenerator:
             </div>
         </div>
 '''
-        
+        return html
+
+    def _html_distributions(self, inline_plots: Dict) -> str:
+        """Deposit distribution histograms (closes the Summary section)."""
+        html = ""
         # Add distribution plots (2 columns x 3 rows)
         if 'count_distribution' in inline_plots:
             html += '''
@@ -1031,7 +1061,11 @@ class ReportGenerator:
 '''
         
         html += '    </div>\n'
-        
+        return html
+
+    def _html_group_comparison(self, inline_plots: Dict, statistical_results: Dict, group_by: str) -> str:
+        """Per-metric group-comparison boxplots with omnibus test results."""
+        html = ""
         # Group comparison - show metrics vertically with omnibus results
         if group_by and 'group_comparison' in inline_plots:
             group_label = self.get_metric_label(group_by)
@@ -1129,7 +1163,11 @@ class ReportGenerator:
 '''
             
             html += '    </div>\n'
-        
+        return html
+
+    def _html_stats_appendix(self, statistical_results: Dict) -> str:
+        """Appendix: pairwise comparisons and group statistics tables."""
+        html = ""
         # Statistical results - shown as Appendix
         has_valid_stats = (
             statistical_results 
@@ -1336,7 +1374,11 @@ class ReportGenerator:
         </div>
 '''
             html += '    </div>\n'
-        
+        return html
+
+    def _html_spatial_section(self, spatial_stats: Dict) -> str:
+        """Spatial analysis summary (nearest-neighbour, Clark-Evans, clustering)."""
+        html = ""
         # Spatial statistics
         if spatial_stats:
             html += f'''
@@ -1365,7 +1407,11 @@ class ReportGenerator:
         </div>
     </div>
 '''
-        
+        return html
+
+    def _html_film_table(self, film_summary: pd.DataFrame) -> str:
+        """Per-image summary table."""
+        html = ""
         # Film summary table
         html += '''
     <div class="section">
@@ -1403,17 +1449,8 @@ class ReportGenerator:
         </div>
     </div>
 '''
-        
-        html += '''
-    <div class="footer">
-        <p>Generated by SCAT - Spot Classification and Analysis Tool</p>
-        <p>Anthropic Claude AI Assistant</p>
-    </div>
-</body>
-</html>'''
-        
         return html
-    
+
     def generate_pdf_report(
         self,
         film_summary: pd.DataFrame,
