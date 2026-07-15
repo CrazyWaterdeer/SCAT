@@ -5,6 +5,7 @@ Publication-ready figures with GraphPad Prism-like styling.
 """
 
 import warnings
+import re
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -14,31 +15,71 @@ from typing import List, Dict, Optional, Tuple
 # Color Palettes
 # =============================================================================
 
-# Default gray for ungrouped data (matches UI Theme.SECONDARY)
-DEFAULT_GRAY = '#636867'
+# -----------------------------------------------------------------------------
+# Design system — the categorical palette + chart styling follow SCAT's sibling
+# tool Imajin (colorblind-safe, min ΔE >= 17.7 across deuteranopia/protanopia;
+# control = de-emphasised slate grey, conditions get colour). The one exception
+# is pH: Bromophenol-Blue is a pH indicator (yellow acidic -> blue basic), so
+# pH-specific views keep that acidic->basic gradient — voiced in the same
+# palette's hues (gold -> teal-green -> steel-blue). Report CSS reuses these tokens.
+# -----------------------------------------------------------------------------
 
-# Pastel palette for experiments (lighter, publication-friendly)
+# Neutrals (Imajin chart scheme: clean white ground, cool grey grid/text)
+INK = '#1A1A1A'          # near-black — titles
+MUTED = '#333333'        # dark grey — axis labels
+FAINT = '#DDDDDD'        # grid / hairlines
+PAPER = '#FFFFFF'        # figure ground
+
+# Categorical palette for experimental groups — Imajin's colorblind-safe set,
+# assigned in order (control/first = slate grey, conditions get colour). Last two
+# extend it past 6 groups while staying distinct.
 PASTEL_PALETTE = [
-    '#a8d5ba',  # Light green
-    '#f7b8b8',  # Light coral/pink
-    '#b8d4e3',  # Light blue
-    '#f5e6ab',  # Light yellow
-    '#d4b8e3',  # Light purple
-    '#ffd4a8',  # Light orange
-    '#b8e3d4',  # Light teal
-    '#e3b8d4',  # Light magenta
+    '#636867',  # slate grey  (control / first)
+    '#DA4E42',  # coral red
+    '#2F6B9E',  # steel blue
+    '#1F9E77',  # teal green
+    '#DDA43A',  # gold
+    '#C77BA9',  # mauve
+    '#8C564B',  # brown       (extension)
+    '#5C6BC0',  # indigo      (extension)
 ]
 
-# Control group color (neutral gray)
-CONTROL_COLOR = '#9E9E9E'
+# Neutral slate grey for the control / ungrouped baseline and single-series fills
+CONTROL_COLOR = '#636867'
+DEFAULT_GRAY = '#636867'
 
-# Colors for deposit types
+# Deposit types — mapped onto the Imajin palette, kept semantically intuitive
+# (normal = teal green, ROD = coral red/alert, artifact = neutral slate, unknown = gold)
 DEPOSIT_COLORS = {
-    'normal': '#4CAF50',
-    'rod': '#F44336', 
-    'artifact': '#9E9E9E',
-    'unknown': '#FFC107'
+    'normal': '#1F9E77',
+    'rod': '#DA4E42',
+    'artifact': '#636867',
+    'unknown': '#DDA43A'
 }
+
+# Bromophenol-Blue pH axis (acidic -> basic), voiced in the Imajin palette's hues
+PH_ACIDIC = '#DDA43A'    # gold  (low pH / yellow end)
+PH_MID = '#1F9E77'       # teal green (transition)
+PH_BASIC = '#2F6B9E'     # steel blue (high pH / blue end)
+
+_fonts_registered = False
+
+
+def _register_fonts() -> None:
+    """Register the bundled Noto Sans/Serif with matplotlib (same faces Imajin uses).
+    Idempotent; silently degrades to DejaVu if the files are absent."""
+    global _fonts_registered
+    if _fonts_registered:
+        return
+    _fonts_registered = True
+    try:
+        from matplotlib import font_manager as fm
+        font_dir = Path(__file__).resolve().parent / "assets" / "fonts"
+        # Register every face — regular AND the Bold static instances — so bold titles render in Noto.
+        for fp in sorted(font_dir.glob("*.ttf")):
+            fm.fontManager.addfont(str(fp))
+    except Exception:
+        pass
 
 # =============================================================================
 # Feature Labels
@@ -154,6 +195,63 @@ def get_palette(groups: List[str], control_group: str = None) -> Dict[str, str]:
     return palette
 
 
+_CONTROL_TOKENS = ('control', 'ctrl', 'untreated', 'vehicle', 'baseline', 'mock', 'wildtype', 'wt')
+
+
+def guess_control_group(groups: List[str]) -> Optional[str]:
+    """Best-effort: identify a control/reference group by name (control, ctrl, vehicle, WT, ...).
+    Returns the matching group or None — the agent can always pass one explicitly instead."""
+    for g in groups:
+        gl = str(g).strip().lower()
+        if gl in _CONTROL_TOKENS or any(gl.startswith(t) for t in _CONTROL_TOKENS):
+            return g
+    return None
+
+
+# Ordinal level words -> rank, for logical (not alphabetical) group ordering. Longest match wins.
+_LEVEL_RANK = {
+    'control': 0, 'ctrl': 0, 'vehicle': 0, 'untreated': 0, 'baseline': 0, 'mock': 0, 'sham': 0,
+    'wildtype': 0, 'wt': 0,
+    'minimum': 1, 'lowest': 1, 'verylow': 1, 'min': 1,
+    'low': 2, 'mild': 2, 'lo': 2,
+    'medium': 3, 'moderate': 3, 'intermediate': 3, 'mid': 3, 'med': 3,
+    'high': 4, 'strong': 4, 'severe': 4, 'hi': 4,
+    'maximum': 5, 'highest': 5, 'veryhigh': 5, 'max': 5,
+}
+
+
+def _ordinal_rank(name: str):
+    """Rank of the longest ordinal level word contained in `name` (normalized), else None."""
+    norm = re.sub(r'[^a-z]', '', str(name).lower())
+    for word in sorted(_LEVEL_RANK, key=len, reverse=True):
+        if word in norm:
+            return _LEVEL_RANK[word]
+    return None
+
+
+def _numeric_key(name: str):
+    """First signed number embedded in `name` (e.g. '10uM'->10, '6h'->6, '0.5'->0.5), else None."""
+    m = re.search(r'-?\d+\.?\d*', str(name))
+    return float(m.group()) if m else None
+
+
+def order_groups(values, control_group: str = None) -> List[str]:
+    """Order groups by LOGICAL structure for display, never plain alphabetical (which scrambles
+    Low/Mid/High and 2/10/100): control/reference first, then by ordinal level word (low<mid<high)
+    if they all carry one, else by an embedded number (dose/time), else the order they first appear
+    in the data (i.e. the order the grouping was defined)."""
+    seen = list(dict.fromkeys(str(v) for v in values))          # appearance order, de-duped
+    ctrl = control_group if control_group in seen else guess_control_group(seen)
+    rest = [g for g in seen if g != ctrl]
+    if len(rest) > 1:
+        if all(_ordinal_rank(g) is not None for g in rest):
+            rest.sort(key=lambda g: (_ordinal_rank(g), g))
+        elif all(_numeric_key(g) is not None for g in rest):
+            rest.sort(key=_numeric_key)
+        # else: keep appearance order
+    return ([ctrl] if ctrl else []) + rest
+
+
 def apply_publication_style(ax, despine: bool = True):
     """
     Apply publication-ready styling to axes.
@@ -165,10 +263,14 @@ def apply_publication_style(ax, despine: bool = True):
     if despine:
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
-    
-    # Subtle grid
-    ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
-    ax.set_axisbelow(True)  # Grid behind data
+    # Thin spines + ticks, horizontal-only grey grid behind the data (after Imajin's _style_axes)
+    for side in ('left', 'bottom'):
+        ax.spines[side].set_linewidth(0.8)
+        ax.spines[side].set_color(MUTED)
+    ax.tick_params(width=0.8, length=3, colors=MUTED)
+    ax.grid(True, axis='y', color=FAINT, alpha=0.8, linewidth=0.5)
+    ax.grid(False, axis='x')
+    ax.set_axisbelow(True)
 
 # Lazy loading flags
 _viz_libs_loaded = False
@@ -238,19 +340,48 @@ class Visualizer:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
         if HAS_MATPLOTLIB and HAS_SEABORN:
-            _sns.set_style(style)
-            # Publication-ready defaults
+            _register_fonts()                  # bundled Noto Sans/Serif (fallback: DejaVu)
+            _sns.set_style('white')            # clean white ground; grid supplied via rcParams
+            _sns.set_palette(PASTEL_PALETTE)   # Imajin categorical set as the seaborn default
+            # Chart theme after Imajin: white ground, cool-grey y-grid, thin spines, Noto type.
             _plt.rcParams.update({
                 'figure.figsize': (10, 8),
                 'figure.dpi': 150,
-                'font.size': 10,
-                'axes.titlesize': 12,
-                'axes.labelsize': 10,
-                'xtick.labelsize': 9,
-                'ytick.labelsize': 9,
-                'legend.fontsize': 9,
+                'figure.facecolor': PAPER,
+                'axes.facecolor': PAPER,
+                'savefig.facecolor': PAPER,
+                'savefig.bbox': 'tight',
+                'font.family': 'sans-serif',
+                'font.sans-serif': ['Noto Sans', 'DejaVu Sans'],
+                'font.serif': ['Noto Serif', 'DejaVu Serif'],
+                'font.size': 11,
+                'text.color': MUTED,
+                'axes.titlesize': 13,
+                'axes.titleweight': 'bold',
+                'axes.titlecolor': INK,
+                'axes.titlepad': 12,
+                'axes.titlelocation': 'left',
+                'axes.labelsize': 11,
+                'axes.labelcolor': MUTED,
+                'axes.edgecolor': MUTED,
+                'axes.linewidth': 0.8,
+                'xtick.color': MUTED,
+                'ytick.color': MUTED,
+                'xtick.labelsize': 10,
+                'ytick.labelsize': 10,
+                'xtick.major.width': 0.8,
+                'ytick.major.width': 0.8,
+                'legend.fontsize': 10,
+                'legend.frameon': False,
+                'legend.title_fontsize': 10,
                 'axes.spines.top': False,
                 'axes.spines.right': False,
+                'axes.grid': True,
+                'axes.grid.axis': 'y',         # horizontal reference lines only (Imajin)
+                'grid.color': FAINT,
+                'grid.linewidth': 0.5,
+                'grid.alpha': 0.8,
+                'axes.axisbelow': True,
             })
     
     def pca_plot(
@@ -323,7 +454,7 @@ class Visualizer:
             # Get matching indices
             valid_idx = df.index
             groups = film_summary.loc[valid_idx, color_by]
-            unique_groups = sorted(groups.unique())
+            unique_groups = order_groups(groups.unique())
             
             # Get palette with control group support
             palette = get_palette(unique_groups, control_group)
@@ -431,6 +562,8 @@ class Visualizer:
         group_by: str,
         control_group: str = None,
         show_significance: bool = False,
+        significance_mode: str = 'auto',
+        show_ns: bool = False,
         title: str = None,
         filename: str = None,
         ylabel: str = None
@@ -455,7 +588,7 @@ class Visualizer:
             return None
         
         # Get unique groups and create palette
-        unique_groups = sorted(film_summary[group_by].dropna().unique())
+        unique_groups = order_groups(film_summary[group_by].dropna().unique())
         
         # For hue metrics, use actual hue values as colors
         if is_hue_metric(metric):
@@ -481,13 +614,14 @@ class Visualizer:
         # Individual points
         _sns.stripplot(
             data=film_summary, x=group_by, y=metric, order=unique_groups,
-            ax=ax, color='#333333', alpha=0.6, size=4, jitter=True
+            ax=ax, color='#333333', alpha=0.65, size=7, edgecolor='white', linewidth=0.6, jitter=True
         )
         
         # Statistical significance - compare adjacent groups
         if show_significance and len(unique_groups) >= 2:
             self._add_significance_annotations(
-                ax, film_summary, metric, group_by, unique_groups
+                ax, film_summary, metric, group_by, unique_groups,
+                mode=significance_mode, control_group=control_group, show_ns=show_ns
             )
         
         metric_label = get_feature_label(metric)
@@ -505,51 +639,54 @@ class Visualizer:
     
     def _add_significance_annotations(
         self, ax, data: pd.DataFrame, metric: str, group_by: str,
-        groups: List[str], max_pairs: int = 6, correction: str = 'holm'
+        groups: List[str], mode: str = 'auto', control_group: str = None,
+        show_ns: bool = False, max_pairs: int = 8, correction: str = 'holm'
     ):
         """
-        Add statistical significance annotations (*, **, ***, ns).
-        
-        For 2 groups: Direct comparison without correction.
-        For 3+ groups: All pairwise comparisons with multiple comparison correction.
-        
-        Args:
-            ax: Matplotlib axes
-            data: DataFrame with data
-            metric: Column to compare
-            group_by: Grouping column
-            groups: List of group names in order
-            max_pairs: Maximum number of comparisons to show
-            correction: Multiple comparison correction method ('holm', 'bonferroni', 'none')
+        Draw significance brackets for the comparisons that `mode` selects — NOT every pair by default.
+        Which comparisons to bracket is an experimental-design choice; see the agent guidance in
+        prompts.py. This method just executes the chosen policy.
+
+        mode:
+          'none'       — no brackets (rely on the omnibus test reported elsewhere).
+          'vs_control' — each non-control group vs the control (Dunnett-style, k-1 comparisons).
+          'adjacent'   — consecutive groups only (ordered designs: dose / time series).
+          'pairwise'   — every pair (only sensible for a few groups; capped at max_pairs).
+          'auto'       — 2 groups: the one pair; 3+ with a resolvable control: 'vs_control';
+                         3+ without a control: 'none' (the omnibus result carries the message).
+        show_ns: also draw non-significant ('ns') brackets (default False — show only significant).
         """
         from scipy import stats
         from itertools import combinations
-        
-        if len(groups) < 2:
+
+        if len(groups) < 2 or mode == 'none':
             return
-        
+
         y_max = data[metric].max()
         y_range = data[metric].max() - data[metric].min()
         if y_range == 0:
             y_range = y_max * 0.1 if y_max > 0 else 1
-        
-        # For 2 groups: direct comparison, no correction needed
-        # For 3+ groups: all pairwise comparisons with correction
-        if len(groups) == 2:
-            pairs = [(0, 1)]
-            apply_correction = False
-        else:
-            # All pairwise comparisons for 3+ groups
-            pairs = [(groups.index(g1), groups.index(g2)) 
-                     for g1, g2 in combinations(groups, 2)]
-            apply_correction = correction != 'none'
-        
-        # Limit number of comparisons for visual clarity
+
+        ctrl = control_group if control_group in groups else guess_control_group(groups)
+        resolved = mode
+        if mode == 'auto':
+            resolved = 'pairwise' if len(groups) == 2 else ('vs_control' if ctrl else 'none')
+        if resolved == 'none':
+            return
+        if resolved == 'vs_control' and not ctrl:
+            resolved = 'pairwise'  # asked for vs-control but none found -> fall back rather than nothing
+
+        idx = {g: i for i, g in enumerate(groups)}
+        if resolved == 'vs_control':
+            pairs = [(idx[ctrl], idx[g]) for g in groups if g != ctrl]
+        elif resolved == 'adjacent':
+            pairs = [(i, i + 1) for i in range(len(groups) - 1)]
+        else:  # pairwise
+            pairs = [(idx[g1], idx[g2]) for g1, g2 in combinations(groups, 2)]
+
         if len(pairs) > max_pairs:
-            # Prioritize adjacent comparisons
-            adjacent = [(i, i+1) for i in range(len(groups) - 1)]
-            pairs = adjacent[:max_pairs]
-            apply_correction = apply_correction and len(groups) > 2
+            pairs = pairs[:max_pairs]
+        apply_correction = correction != 'none' and len(pairs) > 1
         
         # Calculate p-values for all pairs
         p_values = []
@@ -580,7 +717,7 @@ class Visualizer:
             from .statistics import correct_pvalues
             p_values = correct_pvalues(p_values, correction)
         
-        # Convert p-values to stars
+        # Convert p-values to stars; drop non-significant brackets unless show_ns
         annotations = []
         for (idx1, idx2), p_value in zip(valid_pairs, p_values):
             if p_value > 0.05:
@@ -593,7 +730,9 @@ class Visualizer:
                 sig_text = '***'
             else:
                 sig_text = '****'
-            
+
+            if sig_text == 'ns' and not show_ns:
+                continue
             annotations.append((idx1, idx2, sig_text, p_value))
         
         # Draw brackets and annotations
@@ -702,7 +841,7 @@ class Visualizer:
         
         from scipy import stats
         
-        unique_groups = sorted(film_summary[group_by].dropna().unique())
+        unique_groups = order_groups(film_summary[group_by].dropna().unique())
         
         # Calculate mean and CI for each group
         means = []
@@ -767,7 +906,7 @@ class Visualizer:
             jitter = np.random.uniform(-0.15, 0.15, len(data))
             ax.scatter(
                 i + jitter, data, 
-                c='#333333', alpha=0.4, s=20, zorder=1
+                c='#333333', alpha=0.5, s=45, zorder=1, edgecolors='white', linewidth=0.5
             )
         
         ax.set_xticks(x_pos)
@@ -909,7 +1048,7 @@ class Visualizer:
         
         if color_by and color_by in film_summary.columns:
             plot_df[color_by] = film_summary[color_by]
-            unique_groups = sorted(plot_df[color_by].dropna().unique())
+            unique_groups = order_groups(plot_df[color_by].dropna().unique())
             palette = get_palette(unique_groups, control_group)
             g = _sns.pairplot(
                 plot_df, hue=color_by, palette=palette, 
@@ -959,13 +1098,13 @@ class Visualizer:
                         deposits_df.loc[mask, 'iod'],
                         c=DEPOSIT_COLORS.get(label, DEFAULT_GRAY),
                         label=label.capitalize(),
-                        alpha=0.6, s=25, edgecolors='white', linewidth=0.3
+                        alpha=0.6, s=34, edgecolors='white', linewidth=0.4
                     )
             ax.legend(framealpha=0.9)
         else:
             ax.scatter(
                 deposits_df['area_px'], deposits_df['iod'], 
-                c=DEFAULT_GRAY, alpha=0.6, s=25, edgecolors='white', linewidth=0.3
+                c=DEFAULT_GRAY, alpha=0.6, s=34, edgecolors='white', linewidth=0.4
             )
         
         ax.set_xlabel(get_feature_label('area_px'))
@@ -1001,7 +1140,7 @@ class Visualizer:
         
         # Get unique groups and calculate optimal width
         if group_by and group_by in film_summary.columns:
-            unique_groups = sorted(film_summary[group_by].dropna().unique())
+            unique_groups = order_groups(film_summary[group_by].dropna().unique())
             n_groups = len(unique_groups)
             palette = get_palette(unique_groups, control_group)
             
@@ -1028,7 +1167,7 @@ class Visualizer:
             )
             _sns.stripplot(
                 data=film_summary, x=group_by, y='rod_fraction',
-                order=unique_groups, ax=ax, color='#333333', alpha=0.6, size=4
+                order=unique_groups, ax=ax, color='#333333', alpha=0.65, size=7, edgecolor='white', linewidth=0.6
             )
         else:
             _sns.histplot(film_summary['rod_fraction'], ax=ax, kde=True, color=DEFAULT_GRAY)
@@ -1092,7 +1231,7 @@ class Visualizer:
                 )
                 _sns.stripplot(
                     data=film_summary, x=group_by, y='total_iod',
-                    order=unique_groups, ax=ax, color='#333333', alpha=0.6, size=4
+                    order=unique_groups, ax=ax, color='#333333', alpha=0.65, size=7, edgecolor='white', linewidth=0.6
                 )
             else:
                 _sns.histplot(film_summary['total_iod'], ax=ax, kde=True, color=DEFAULT_GRAY)
@@ -1115,18 +1254,23 @@ def generate_all_visualizations(
     output_dir: Path,
     group_by: str = None,
     control_group: str = None,
-    show_significance: bool = True
+    show_significance: bool = True,
+    significance_mode: str = 'auto',
+    show_ns: bool = False
 ) -> Dict[str, str]:
     """
     Generate all available visualizations.
-    
+
     Args:
         film_summary: DataFrame with film-level data
         deposits_df: DataFrame with individual deposit data
         output_dir: Output directory for figures
         group_by: Column for grouping
         control_group: Name of control group (shown in gray)
-        show_significance: Whether to show statistical significance on violin plots
+        show_significance: Whether to draw significance brackets on violin plots at all
+        significance_mode: Which comparisons to bracket — 'auto'|'vs_control'|'adjacent'|'pairwise'|'none'
+            (see the agent guidance in prompts.py; 'auto' avoids all-pairwise clutter)
+        show_ns: Also draw non-significant brackets (default False)
 
     Returns:
         Dict mapping visualization name to filepath
@@ -1162,9 +1306,11 @@ def generate_all_visualizations(
     for metric in primary_metrics + secondary_metrics:
         if metric in film_summary.columns and group_by:
             path = viz.violin_comparison(
-                film_summary, metric, group_by, 
+                film_summary, metric, group_by,
                 control_group=control_group,
-                show_significance=show_significance
+                show_significance=show_significance,
+                significance_mode=significance_mode,
+                show_ns=show_ns
             )
             if path:
                 results[f'violin_{metric}'] = path

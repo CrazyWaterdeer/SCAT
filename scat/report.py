@@ -23,7 +23,7 @@ except ImportError:
 # Import color constants from visualization for consistency
 from .visualization import (
     DEFAULT_GRAY, PASTEL_PALETTE, DEPOSIT_COLORS,
-    apply_publication_style, hue_to_rgb
+    apply_publication_style, hue_to_rgb, order_groups
 )
 
 
@@ -633,8 +633,8 @@ class ReportGenerator:
         """Generate boxplot comparing groups for a specific metric."""
         fig, ax = plt.subplots(figsize=(10, 5))
         
-        # Use natural sorting for groups
-        groups = sorted(film_summary[group_by].dropna().unique(), key=self._natural_sort_key)
+        # Logical group order (control first, then low<mid<high or numeric dose), not alphabetical
+        groups = order_groups(film_summary[group_by].dropna().unique())
         
         # Check if metric exists
         if metric not in film_summary.columns:
@@ -652,19 +652,28 @@ class ReportGenerator:
         
         # Color boxes
         if use_hue_colors or 'hue' in metric.lower():
-            # Use actual hue values as colors for pH-related metrics
-            for i, (patch, group) in enumerate(zip(bp['boxes'], groups)):
+            # pH-related metric: colour each box by its group's MEAN HUE (the Bromophenol-Blue
+            # indicator colour). Fill + a darker same-hue edge/median so the hue reads clearly even
+            # when the box is thin (low within-group hue variance).
+            for patch, median, group in zip(bp['boxes'], bp['medians'], groups):
                 mean_hue = film_summary[film_summary[group_by] == group][metric].mean()
                 if not np.isnan(mean_hue):
-                    patch.set_facecolor(hue_to_rgb(mean_hue))
+                    fill = hue_to_rgb(mean_hue)
+                    edge = hue_to_rgb(mean_hue, lightness=0.32)   # darker shade of the same hue
                 else:
-                    patch.set_facecolor(DEFAULT_GRAY)
-                patch.set_alpha(0.8)
+                    fill, edge = DEFAULT_GRAY, '#333333'
+                patch.set_facecolor(fill)
+                patch.set_edgecolor(edge)
+                patch.set_linewidth(1.3)
+                patch.set_alpha(0.9)
+                median.set_color(edge)
+                median.set_linewidth(1.6)
         else:
-            # Use standard palette
+            # Standard categorical palette per group
             for i, patch in enumerate(bp['boxes']):
                 patch.set_facecolor(PASTEL_PALETTE[i % len(PASTEL_PALETTE)])
-                patch.set_alpha(0.8)
+                patch.set_edgecolor('#333333')
+                patch.set_alpha(0.85)
         
         metric_label = self.get_metric_label(metric)
         ax.set_ylabel(ylabel or metric_label)
@@ -750,138 +759,169 @@ class ReportGenerator:
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{title}</title>
     <style>
-        * {{
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        /* Design tokens — shared story with the plots: Bromophenol-Blue pH axis
+           (acidic amber -> basic teal) as the signature, warm neutrals, teal accent. */
+        :root {{
+            --paper: #FAFAF9;
+            --surface: #FFFFFF;
+            --ink: #1A1A1A;
+            --muted: #5A5A5A;
+            --hair: #E4E3E0;
+            --accent: #2F6B9E;          /* Imajin steel blue */
+            --accent-soft: #EAF1F6;
+            --ph-acidic: #DDA43A;       /* Bromophenol-Blue axis (pH views only) */
+            --ph-mid: #1F9E77;
+            --ph-basic: #2F6B9E;
+            --normal: #1F9E77;
+            --rod: #DA4E42;
+            --artifact: #636867;
+            --warn-bg: #FBF1DC;
+            --warn-line: #DDA43A;
+            --serif: 'Noto Serif', Georgia, 'Times New Roman', serif;
+            --sans: 'Noto Sans', ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
         }}
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
         body {{
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            max-width: 1200px;
+            font-family: var(--sans);
+            line-height: 1.65;
+            color: var(--ink);
+            background: var(--paper);
+            max-width: 940px;
             margin: 0 auto;
-            padding: 20px;
-            background-color: #f5f5f5;
+            padding: 48px 28px 72px;
+            -webkit-font-smoothing: antialiased;
         }}
-        .header {{
-            background: linear-gradient(135deg, #1a237e 0%, #3949ab 100%);
-            color: white;
-            padding: 30px;
-            border-radius: 10px;
-            margin-bottom: 30px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        .header {{ margin-bottom: 40px; }}
+        .header::before {{
+            content: "";
+            display: block;
+            height: 4px;
+            border-radius: 2px;
+            background: linear-gradient(90deg, var(--ph-acidic), var(--ph-mid), var(--ph-basic));
+            margin-bottom: 24px;
         }}
         .header h1 {{
-            font-size: 2.5em;
-            margin-bottom: 10px;
+            font-family: var(--serif);
+            font-size: 2.1rem;
+            font-weight: 600;
+            letter-spacing: -0.01em;
+            text-wrap: balance;
         }}
         .header .subtitle {{
-            opacity: 0.9;
-            font-size: 1.1em;
+            color: var(--muted);
+            font-size: 0.82rem;
+            margin-top: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
         }}
         .section {{
-            background: white;
+            background: var(--surface);
+            border: 1px solid var(--hair);
             border-radius: 10px;
-            padding: 25px;
-            margin-bottom: 25px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            padding: 28px 30px;
+            margin-bottom: 22px;
         }}
         .section h2 {{
-            color: #1a237e;
-            border-bottom: 3px solid #3949ab;
-            padding-bottom: 10px;
+            font-family: var(--serif);
+            font-size: 1.35rem;
+            font-weight: 600;
             margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--hair);
         }}
         .stats-grid {{
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-            margin-bottom: 20px;
+            grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+            gap: 16px;
+            margin-bottom: 8px;
         }}
         .stat-card {{
-            background: #f8f9fa;
+            background: var(--paper);
             padding: 20px;
             border-radius: 8px;
-            text-align: center;
-            border-left: 4px solid #3949ab;
+            border: 1px solid var(--hair);
+            text-align: left;
         }}
         .stat-card .value {{
-            font-size: 2em;
-            font-weight: bold;
-            color: #1a237e;
+            font-size: 1.9rem;
+            font-weight: 700;
+            color: var(--accent);
+            font-variant-numeric: tabular-nums;
+            line-height: 1.1;
         }}
         .stat-card .label {{
-            color: #666;
-            font-size: 0.9em;
-            margin-top: 5px;
+            color: var(--muted);
+            font-size: 0.78rem;
+            margin-top: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
         }}
-        .stat-card.normal {{ border-left-color: #4CAF50; }}
-        .stat-card.normal .value {{ color: #4CAF50; }}
-        .stat-card.rod {{ border-left-color: #F44336; }}
-        .stat-card.rod .value {{ color: #F44336; }}
-        .stat-card.artifact {{ border-left-color: #9E9E9E; }}
-        .stat-card.artifact .value {{ color: #9E9E9E; }}
+        .stat-card.normal .value {{ color: var(--normal); }}
+        .stat-card.rod .value {{ color: var(--rod); }}
+        .stat-card.artifact .value {{ color: var(--artifact); }}
         table {{
             width: 100%;
             border-collapse: collapse;
-            margin-top: 15px;
-            font-size: 0.9em;
+            margin-top: 14px;
+            font-size: 0.9rem;
+            font-variant-numeric: tabular-nums;
         }}
         th, td {{
-            padding: 12px;
+            padding: 11px 12px;
             text-align: left;
-            border-bottom: 1px solid #eee;
+            border-bottom: 1px solid var(--hair);
         }}
         th {{
-            background: #f8f9fa;
             font-weight: 600;
-            color: #1a237e;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            font-size: 0.76rem;
         }}
-        tr:hover {{
-            background: #f8f9fa;
-        }}
+        tbody tr:hover {{ background: var(--accent-soft); }}
         .plot-container {{
             text-align: center;
-            margin: 20px 0;
+            margin: 22px 0;
         }}
         .plot-container img {{
             max-width: 100%;
+            height: auto;
+            border: 1px solid var(--hair);
             border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }}
         .plot-description {{
-            font-size: 0.9em;
-            color: #555;
-            margin-top: 10px;
+            font-size: 0.88rem;
+            color: var(--muted);
+            margin-top: 12px;
             text-align: left;
-            padding: 8px 12px;
-            background: #f8f9fa;
-            border-radius: 4px;
-            border-left: 3px solid #3949ab;
+            padding: 10px 14px;
+            background: var(--paper);
+            border-radius: 6px;
+            border-left: 3px solid var(--accent);
         }}
         .two-column {{
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 20px;
+            gap: 22px;
         }}
-        @media (max-width: 768px) {{
-            .two-column {{
-                grid-template-columns: 1fr;
-            }}
+        @media (max-width: 760px) {{
+            .two-column {{ grid-template-columns: 1fr; }}
+            body {{ padding: 32px 18px 56px; }}
         }}
         .highlight {{
-            background: #fff3cd;
-            padding: 15px;
+            background: var(--warn-bg);
+            padding: 15px 18px;
             border-radius: 8px;
-            border-left: 4px solid #ffc107;
-            margin: 15px 0;
+            border-left: 4px solid var(--warn-line);
+            margin: 16px 0;
         }}
         .footer {{
             text-align: center;
-            padding: 20px;
-            color: #666;
-            font-size: 0.9em;
+            padding: 28px 20px 0;
+            color: var(--muted);
+            font-size: 0.82rem;
+            border-top: 1px solid var(--hair);
+            margin-top: 32px;
         }}
     </style>
 </head>

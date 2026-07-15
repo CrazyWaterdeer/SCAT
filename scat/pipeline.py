@@ -82,6 +82,7 @@ def analyze_folder_service(path: str, groups: Optional[dict] = None, model_type:
                            edge_margin: int = 20, circularity: float = 0.6,
                            sensitive_mode: bool = False, unet_model_path: Optional[str] = None,
                            annotate: bool = True, visualize: bool = False, spatial: bool = False,
+                           significance_mode: str = 'auto', show_ns: bool = False,
                            parallel: bool = True, max_workers: int = 0, save_json: bool = True,
                            image_paths: Optional[list] = None, progress_callback=None,
                            ambient_progress: bool = False,
@@ -168,7 +169,8 @@ def analyze_folder_service(path: str, groups: Optional[dict] = None, model_type:
             from .visualization import generate_all_visualizations
             generate_all_visualizations(reports["film_summary"], reports["deposit_data"],
                                         out / "visualizations",
-                                        group_by=group_by[0] if group_by else None)
+                                        group_by=group_by[0] if group_by else None,
+                                        significance_mode=significance_mode, show_ns=show_ns)
         except ImportError as e:
             warnings.append(f"visualizations skipped (missing deps): {e}")
 
