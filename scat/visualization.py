@@ -5,6 +5,7 @@ Publication-ready figures with GraphPad Prism-like styling.
 """
 
 import warnings
+import re
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -74,10 +75,9 @@ def _register_fonts() -> None:
     try:
         from matplotlib import font_manager as fm
         font_dir = Path(__file__).resolve().parent / "assets" / "fonts"
-        for fname in ("NotoSans.ttf", "NotoSerif.ttf"):
-            fp = font_dir / fname
-            if fp.exists():
-                fm.fontManager.addfont(str(fp))
+        # Register every face — regular AND the Bold static instances — so bold titles render in Noto.
+        for fp in sorted(font_dir.glob("*.ttf")):
+            fm.fontManager.addfont(str(fp))
     except Exception:
         pass
 
@@ -206,6 +206,50 @@ def guess_control_group(groups: List[str]) -> Optional[str]:
         if gl in _CONTROL_TOKENS or any(gl.startswith(t) for t in _CONTROL_TOKENS):
             return g
     return None
+
+
+# Ordinal level words -> rank, for logical (not alphabetical) group ordering. Longest match wins.
+_LEVEL_RANK = {
+    'control': 0, 'ctrl': 0, 'vehicle': 0, 'untreated': 0, 'baseline': 0, 'mock': 0, 'sham': 0,
+    'wildtype': 0, 'wt': 0,
+    'minimum': 1, 'lowest': 1, 'verylow': 1, 'min': 1,
+    'low': 2, 'mild': 2, 'lo': 2,
+    'medium': 3, 'moderate': 3, 'intermediate': 3, 'mid': 3, 'med': 3,
+    'high': 4, 'strong': 4, 'severe': 4, 'hi': 4,
+    'maximum': 5, 'highest': 5, 'veryhigh': 5, 'max': 5,
+}
+
+
+def _ordinal_rank(name: str):
+    """Rank of the longest ordinal level word contained in `name` (normalized), else None."""
+    norm = re.sub(r'[^a-z]', '', str(name).lower())
+    for word in sorted(_LEVEL_RANK, key=len, reverse=True):
+        if word in norm:
+            return _LEVEL_RANK[word]
+    return None
+
+
+def _numeric_key(name: str):
+    """First signed number embedded in `name` (e.g. '10uM'->10, '6h'->6, '0.5'->0.5), else None."""
+    m = re.search(r'-?\d+\.?\d*', str(name))
+    return float(m.group()) if m else None
+
+
+def order_groups(values, control_group: str = None) -> List[str]:
+    """Order groups by LOGICAL structure for display, never plain alphabetical (which scrambles
+    Low/Mid/High and 2/10/100): control/reference first, then by ordinal level word (low<mid<high)
+    if they all carry one, else by an embedded number (dose/time), else the order they first appear
+    in the data (i.e. the order the grouping was defined)."""
+    seen = list(dict.fromkeys(str(v) for v in values))          # appearance order, de-duped
+    ctrl = control_group if control_group in seen else guess_control_group(seen)
+    rest = [g for g in seen if g != ctrl]
+    if len(rest) > 1:
+        if all(_ordinal_rank(g) is not None for g in rest):
+            rest.sort(key=lambda g: (_ordinal_rank(g), g))
+        elif all(_numeric_key(g) is not None for g in rest):
+            rest.sort(key=_numeric_key)
+        # else: keep appearance order
+    return ([ctrl] if ctrl else []) + rest
 
 
 def apply_publication_style(ax, despine: bool = True):
@@ -410,7 +454,7 @@ class Visualizer:
             # Get matching indices
             valid_idx = df.index
             groups = film_summary.loc[valid_idx, color_by]
-            unique_groups = sorted(groups.unique())
+            unique_groups = order_groups(groups.unique())
             
             # Get palette with control group support
             palette = get_palette(unique_groups, control_group)
@@ -544,7 +588,7 @@ class Visualizer:
             return None
         
         # Get unique groups and create palette
-        unique_groups = sorted(film_summary[group_by].dropna().unique())
+        unique_groups = order_groups(film_summary[group_by].dropna().unique())
         
         # For hue metrics, use actual hue values as colors
         if is_hue_metric(metric):
@@ -797,7 +841,7 @@ class Visualizer:
         
         from scipy import stats
         
-        unique_groups = sorted(film_summary[group_by].dropna().unique())
+        unique_groups = order_groups(film_summary[group_by].dropna().unique())
         
         # Calculate mean and CI for each group
         means = []
@@ -1004,7 +1048,7 @@ class Visualizer:
         
         if color_by and color_by in film_summary.columns:
             plot_df[color_by] = film_summary[color_by]
-            unique_groups = sorted(plot_df[color_by].dropna().unique())
+            unique_groups = order_groups(plot_df[color_by].dropna().unique())
             palette = get_palette(unique_groups, control_group)
             g = _sns.pairplot(
                 plot_df, hue=color_by, palette=palette, 
@@ -1096,7 +1140,7 @@ class Visualizer:
         
         # Get unique groups and calculate optimal width
         if group_by and group_by in film_summary.columns:
-            unique_groups = sorted(film_summary[group_by].dropna().unique())
+            unique_groups = order_groups(film_summary[group_by].dropna().unique())
             n_groups = len(unique_groups)
             palette = get_palette(unique_groups, control_group)
             

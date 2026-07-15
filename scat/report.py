@@ -23,7 +23,7 @@ except ImportError:
 # Import color constants from visualization for consistency
 from .visualization import (
     DEFAULT_GRAY, PASTEL_PALETTE, DEPOSIT_COLORS,
-    apply_publication_style, hue_to_rgb
+    apply_publication_style, hue_to_rgb, order_groups
 )
 
 
@@ -633,8 +633,8 @@ class ReportGenerator:
         """Generate boxplot comparing groups for a specific metric."""
         fig, ax = plt.subplots(figsize=(10, 5))
         
-        # Use natural sorting for groups
-        groups = sorted(film_summary[group_by].dropna().unique(), key=self._natural_sort_key)
+        # Logical group order (control first, then low<mid<high or numeric dose), not alphabetical
+        groups = order_groups(film_summary[group_by].dropna().unique())
         
         # Check if metric exists
         if metric not in film_summary.columns:

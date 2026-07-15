@@ -57,3 +57,16 @@ def test_significance_bracket_counts_by_mode(tmp_path):
     assert bracket_lines("vs_control") == 3          # each of A/B/C vs Control
     assert bracket_lines("pairwise") == 6            # C(4,2)
     assert bracket_lines("adjacent") == 3            # Control-A, A-B, B-C
+
+
+def test_order_groups_logical_not_alphabetical():
+    from scat.visualization import order_groups
+    # ordinal words: control first, then low<mid<high (NOT alphabetical Control/High/Low/Mid)
+    assert order_groups(["DoseHigh", "Control", "DoseLow", "DoseMid"]) == \
+        ["Control", "DoseLow", "DoseMid", "DoseHigh"]
+    # numeric doses sort by value, not lexically (0.5 before 2 before 10)
+    assert order_groups(["10uM", "0uM", "2uM", "0.5uM"]) == ["0uM", "0.5uM", "2uM", "10uM"]
+    # explicit control_group honored + put first
+    assert order_groups(["B", "A", "Ref"], control_group="Ref")[0] == "Ref"
+    # no ordinal / no number -> appearance order preserved (not force-alphabetized)
+    assert order_groups(["gamma", "alpha", "beta"]) == ["gamma", "alpha", "beta"]
