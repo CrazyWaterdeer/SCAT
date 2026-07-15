@@ -18,6 +18,7 @@ MODULES = [
     "scat.trainer",       # was broken: used PIL.Image without importing it
     "scat.segmentation",
     "scat.analyzer",
+    "scat.parallel",
     "scat.statistics",
     "scat.visualization",
     "scat.report",        # was broken: Union used but not imported

@@ -180,91 +180,32 @@ class Analyzer:
         
         Args:
             image_paths: List of image paths to analyze
-            metadata: Optional metadata DataFrame
-            progress_callback: Callback function(current, total) for progress updates
+            metadata: Optional metadata DataFrame (unused here; applied later at save time)
+            progress_callback: Callback function(current, total) for progress updates;
+                may raise to cancel the batch cooperatively (checked per completed image)
             parallel: Enable parallel processing (default True)
-            max_workers: Number of worker threads (0 = auto)
-        
+            max_workers: Number of workers (0 = hardware-aware auto)
+
         Returns:
             List of AnalysisResult objects in same order as input paths
         """
+        # Engine selection (fork process pool / capped thread pool / sequential) and
+        # hardware-aware worker sizing live in scat.parallel. The per-image pipeline is
+        # GIL-bound, so a fork pool whose workers inherit the parent-loaded model
+        # copy-on-write is what actually uses multi-core hardware (~12x measured);
+        # threads are a capped fallback. Progress, cooperative cancel, per-image failure
+        # isolation, and input ordering are all preserved there.
+        from . import parallel as _parallel
+
         n_images = len(image_paths)
-        
-        if not parallel or n_images <= 1:
-            # Sequential processing
-            results = []
-            for i, path in enumerate(image_paths):
-                if progress_callback:
-                    progress_callback(i + 1, n_images)
-                results.append(self.analyze_image(path))
-            return results
-        
-        # Parallel processing with ThreadPoolExecutor
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-
-        # Determine worker count
-        if max_workers <= 0:
-            max_workers = self._get_safe_worker_count(n_images)
-        
-        results = [None] * n_images
-        completed = 0
-        
-        executor = ThreadPoolExecutor(max_workers=max_workers)
-        try:
-            # Submit all tasks
-            future_to_idx = {
-                executor.submit(self.analyze_image, path): i
-                for i, path in enumerate(image_paths)
-            }
-
-            # Collect results as they complete
-            for future in as_completed(future_to_idx):
-                idx = future_to_idx[future]
-                try:
-                    results[idx] = future.result()
-                except Exception as e:
-                    # Create a placeholder result for failed images
-                    path = image_paths[idx]
-                    results[idx] = AnalysisResult(
-                        filename=Path(path).name, deposits=[], dpi=self.dpi
-                    )
-                    print(f"Warning: Failed to analyze {path}: {e}")
-
-                completed += 1
-                if progress_callback:
-                    progress_callback(completed, n_images)   # may raise to cancel the batch
-        except BaseException:
-            # A cancel (or any error) surfaced by progress_callback: drop QUEUED images instead
-            # of draining the whole batch (shutdown(wait=True) would). Already-running images
-            # finish in the background — cooperative cancel, bounded by worker count.
-            executor.shutdown(wait=False, cancel_futures=True)
-            raise
-        executor.shutdown(wait=True)
+        if not parallel:
+            max_workers = 1  # forces the sequential engine
+        results, engine = _parallel.run_batch(
+            self, image_paths, progress_callback=progress_callback, max_workers=max_workers)
+        if parallel and n_images > 1:
+            print(f"[scat] analyzed {n_images} images | engine={engine}")
         return results
-    
-    def _get_safe_worker_count(self, n_images: int) -> int:
-        """Determine safe number of workers based on system resources."""
-        import os
-        
-        cpu_count = os.cpu_count() or 1
-        
-        # Try to check available memory
-        try:
-            import psutil
-            available_gb = psutil.virtual_memory().available / (1024**3)
-            # ~200MB per image processing, be conservative
-            memory_workers = max(1, int(available_gb / 0.3))
-        except ImportError:
-            memory_workers = 4  # Conservative default
-        
-        # Use half of CPUs to keep system responsive
-        cpu_workers = max(1, cpu_count // 2)
-        
-        # Cap at 20 workers max for Auto mode and number of images
-        optimal = min(cpu_workers, memory_workers, 20, n_images)
-        
-        return max(1, optimal)
-    
+
     @staticmethod
     def generate_annotated_image(
         image: np.ndarray, deposits: List,
