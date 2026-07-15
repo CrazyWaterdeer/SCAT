@@ -246,20 +246,46 @@ class Theme:
             QComboBox::drop-down {{
                 subcontrol-origin: padding;
                 subcontrol-position: center right;
-                width: 22px;
+                width: 24px;
                 border: none;
-                border-left: 1px solid {cls.BORDER};
-                border-top-right-radius: {cls.RADIUS_CONTROL}px;
-                border-bottom-right-radius: {cls.RADIUS_CONTROL}px;
                 background-color: transparent;
             }}
             QComboBox::down-arrow {{
                 width: 12px;
                 height: 12px;
+                subcontrol-position: center;
                 image: url("{qss_icon('caret-down.svg')}");
             }}
-            QComboBox:hover::down-arrow, QComboBox:focus::down-arrow, QComboBox:on::down-arrow {{
-                image: url("{qss_icon('caret-down-hover.svg')}");
+            /* Ghost picker (Claude-style): reads as plain text, becomes a subtle button on
+               hover, opens the list on click. Used for the chat model/provider selectors. */
+            QComboBox#ghostPicker {{
+                background-color: transparent;
+                border: 1px solid transparent;
+                border-radius: {cls.RADIUS_CONTROL}px;
+                padding: 5px 22px 5px 10px;
+                color: {cls.TEXT_SECONDARY};
+                min-height: 18px;
+                font-weight: {cls.WEIGHT_TITLE};
+            }}
+            QComboBox#ghostPicker:hover {{
+                background-color: {cls.BG_HOVER};
+                color: {cls.TEXT_PRIMARY};
+            }}
+            QComboBox#ghostPicker:focus {{
+                border: 1px solid transparent;
+                background-color: {cls.BG_HOVER};
+            }}
+            QComboBox#ghostPicker::drop-down {{
+                subcontrol-origin: padding;
+                subcontrol-position: center right;
+                width: 20px;
+                border: none;
+            }}
+            QComboBox#ghostPicker::down-arrow {{
+                width: 11px;
+                height: 11px;
+                subcontrol-position: center;
+                image: url("{qss_icon('caret-down.svg')}");
             }}
             QComboBox QAbstractItemView {{
                 background-color: {cls.BG_DARK};
@@ -677,19 +703,16 @@ class Theme:
             }}
             QComboBox::drop-down {{
                 subcontrol-origin: padding;
-                subcontrol-position: center right;
-                width: 20px;
+                subcontrol-position: top right;
+                width: 24px;
                 border: none;
-                border-left: 1px solid {cls.BORDER};
                 background-color: transparent;
             }}
             QComboBox::down-arrow {{
                 width: 12px;
                 height: 12px;
+                subcontrol-position: center;
                 image: url("{qss_icon('caret-down.svg')}");
-            }}
-            QComboBox:hover::down-arrow, QComboBox:focus::down-arrow, QComboBox:on::down-arrow {{
-                image: url("{qss_icon('caret-down-hover.svg')}");
             }}
             QComboBox QAbstractItemView {{
                 background-color: {cls.BG_DARK};
