@@ -1,0 +1,218 @@
+"""Unsupervised clustering of deposits for labeling assistance.
+
+Pure core (no image/CLI I/O): build a scaled feature matrix from deposit features, cluster
+with HDBSCAN (kmeans optional), pick representative samples, summarise clusters, validate a
+user cluster->label mapping, propagate, and gate training.
+
+A cluster is NOT a class. The same visual features can reflect lighting / segmentation size /
+plate batch as much as biology, and a cluster's tails can be mixed even when its medoid looks
+clean. This module *assists* labeling (cut hundreds of deposit labels to a handful of cluster
+decisions) — it does not replace the human judgement, and `training_readiness` blocks the
+degenerate cases that would poison or crash training. See the spec.
+"""
+from collections import Counter
+from dataclasses import dataclass, field
+
+import numpy as np
+import pandas as pd
+
+# Intrinsic shape+colour+density features (identity/position deliberately excluded).
+_LOG_COLS = ["area_px", "perimeter", "iod"]          # skewed positive magnitudes -> log1p
+_LINEAR_COLS = ["circularity", "aspect_ratio", "mean_saturation", "mean_lightness", "pigment_density"]
+
+VALID_LABELS = {"normal", "rod", "artifact"}
+
+_PROFILE_COLS = ["area_px", "circularity", "aspect_ratio", "mean_hue",
+                 "mean_saturation", "mean_lightness", "pigment_density", "iod"]
+
+
+# --------------------------------------------------------------------------- feature matrix
+def build_feature_matrix(df: pd.DataFrame):
+    """Assemble a standardized feature matrix. Returns (X, feature_names).
+
+    - area_px/perimeter/iod: log1p (skewed and correlated; raw values let a few huge deposits
+      dominate the structure several times over).
+    - hue: (sin, cos) of mean_hue, each weighted by mean_saturation, so low-saturation
+      (near-gray) deposits don't get arbitrary circular coordinates. Clustering-only; the
+      model's mean_hue is untouched.
+    - NaN -> column median, then StandardScaler.
+    """
+    from sklearn.preprocessing import StandardScaler
+
+    cols, names = [], []
+    for c in _LOG_COLS:
+        cols.append(np.log1p(pd.to_numeric(df[c], errors="coerce").to_numpy(dtype=float)))
+        names.append(c)
+    for c in _LINEAR_COLS:
+        cols.append(pd.to_numeric(df[c], errors="coerce").to_numpy(dtype=float))
+        names.append(c)
+    hue = np.deg2rad(pd.to_numeric(df["mean_hue"], errors="coerce").to_numpy(dtype=float))
+    sat = pd.to_numeric(df["mean_saturation"], errors="coerce").to_numpy(dtype=float)
+    cols.append(np.sin(hue) * sat); names.append("hue_sin")
+    cols.append(np.cos(hue) * sat); names.append("hue_cos")
+
+    X = np.column_stack(cols).astype(float)
+    med = np.nanmedian(X, axis=0)
+    med = np.where(np.isfinite(med), med, 0.0)
+    bad = np.where(~np.isfinite(X))
+    X[bad] = np.take(med, bad[1])
+    X = StandardScaler().fit_transform(X)
+    return X, names
+
+
+# --------------------------------------------------------------------------- clustering
+@dataclass
+class ClusterResult:
+    labels: np.ndarray
+    method: str
+    n_clusters: int
+    n_noise: int
+    health: list = field(default_factory=list)
+
+
+def _default_min_cluster_size(n: int) -> int:
+    return int(min(200, max(15, round(n / 40))))
+
+
+def cluster_deposits(X, method="hdbscan", min_cluster_size=None, min_samples=None,
+                     k=None, random_state=0) -> ClusterResult:
+    """Cluster the (standardized) matrix. HDBSCAN default (auto #clusters, -1 = noise); kmeans
+    when a fixed count is wanted. Returns labels + health WARNINGS for degenerate results."""
+    n = X.shape[0]
+    mcs = int(min_cluster_size or _default_min_cluster_size(n))
+    if method == "kmeans":
+        from sklearn.cluster import KMeans
+        kk = int(k or max(2, min(8, round(n / 50))))
+        kk = max(1, min(kk, n))
+        labels = KMeans(n_clusters=kk, random_state=random_state, n_init=10).fit_predict(X)
+    else:
+        from sklearn.cluster import HDBSCAN
+        labels = HDBSCAN(min_cluster_size=max(2, mcs), min_samples=min_samples,
+                         metric="euclidean", cluster_selection_method="eom",
+                         copy=True).fit_predict(X)
+
+    uniq = [c for c in np.unique(labels) if c != -1]
+    n_clusters = len(uniq)
+    n_noise = int(np.sum(labels == -1))
+    health = []
+    if n < 4 * mcs:
+        health.append("too few deposits to cluster meaningfully — consider labeling manually")
+    if n_clusters < 2:
+        health.append(f"only {n_clusters} cluster(s) found — try --min-cluster-size or --method kmeans")
+    if n and n_noise / n > 0.5:
+        health.append(f"high noise fraction ({n_noise/n:.0%}) — many deposits left unclustered")
+    if n_clusters:
+        biggest = max(int(np.sum(labels == c)) for c in uniq)
+        if biggest / max(1, n - n_noise) > 0.8:
+            health.append("one cluster holds >80% of clustered deposits — likely under-segmented")
+    return ClusterResult(labels=np.asarray(labels), method=method, n_clusters=n_clusters,
+                         n_noise=n_noise, health=health)
+
+
+# --------------------------------------------------------------------------- representatives
+def representatives(X, labels, per_kind=6, random_state=0):
+    """Per non-noise cluster, row indices for three sample kinds: 'medoid' (nearest the
+    centroid), 'boundary' (farthest from it), and 'random'. Boundary + random expose mixed
+    clusters that a medoid alone would hide."""
+    rng = np.random.RandomState(random_state)
+    out = {}
+    for cid in sorted(int(c) for c in np.unique(labels) if c != -1):
+        members = np.where(labels == cid)[0]
+        centroid = X[members].mean(axis=0)
+        dist = np.linalg.norm(X[members] - centroid, axis=1)
+        order = members[np.argsort(dist)]
+        medoid = list(order[:per_kind])
+        boundary = list(order[::-1][:per_kind])
+        used = set(int(i) for i in medoid) | set(int(i) for i in boundary)
+        pool = [int(m) for m in members if int(m) not in used]
+        random = list(rng.choice(pool, size=min(per_kind, len(pool)), replace=False)) if pool else []
+        out[cid] = {"medoid": [int(i) for i in medoid],
+                    "boundary": [int(i) for i in boundary],
+                    "random": [int(i) for i in random]}
+    return out
+
+
+# --------------------------------------------------------------------------- profile
+def cluster_profile(df: pd.DataFrame, labels: np.ndarray) -> pd.DataFrame:
+    """One row per cluster id (incl. -1 noise): size + mean of each raw feature. High per-feature
+    spread is a mixed-cluster hint (surfaced in the report)."""
+    work = df.copy()
+    work["cluster_id"] = np.asarray(labels)
+    cols = [c for c in _PROFILE_COLS if c in work.columns]
+    agg = work.groupby("cluster_id").agg(
+        size=("cluster_id", "size"),
+        **{c: (c, "mean") for c in cols}).reset_index()
+    return agg.sort_values("cluster_id").reset_index(drop=True)
+
+
+# --------------------------------------------------------------------------- propagation
+def parse_cluster_labels_csv(path) -> dict:
+    """Read cluster_labels.csv -> {cluster_id: label}. Normalizes case/whitespace; keeps only
+    non-blank labels; rejects invalid labels and duplicate cluster_ids."""
+    df = pd.read_csv(path)
+    if "cluster_id" not in df.columns or "label" not in df.columns:
+        raise ValueError("cluster_labels.csv must have 'cluster_id' and 'label' columns")
+    mapping, seen = {}, set()
+    for _, row in df.iterrows():
+        cid = int(row["cluster_id"])
+        if cid in seen:
+            raise ValueError(f"duplicate cluster_id {cid} in labels CSV")
+        seen.add(cid)
+        raw = row["label"]
+        lab = "" if pd.isna(raw) else str(raw).strip().lower()
+        if not lab:
+            continue  # blank = skip this cluster
+        if lab not in VALID_LABELS:
+            raise ValueError(f"invalid label {raw!r} for cluster {cid} (use {sorted(VALID_LABELS)})")
+        mapping[cid] = lab
+    return mapping
+
+
+def propagate_labels(assignments: pd.DataFrame, mapping: dict):
+    """Map each deposit's cluster_id to a label via `mapping`; noise/unmapped -> 'unknown'.
+    Returns ({(filename, deposit_id): label}, summary)."""
+    labels, n_labeled = {}, 0
+    for _, r in assignments.iterrows():
+        key = (str(r["filename"]), int(r["deposit_id"]))
+        lab = mapping.get(int(r["cluster_id"]), "unknown")
+        labels[key] = lab
+        if lab != "unknown":
+            n_labeled += 1
+    return labels, {"n_labeled": n_labeled, "n_skipped": len(labels) - n_labeled}
+
+
+# --------------------------------------------------------------------------- training guard
+@dataclass
+class ReadinessReport:
+    verdict: str
+    reasons: list
+    class_counts: dict
+    n_labeled: int
+    n_skipped: int
+
+
+def training_readiness(member_labels, largest_cluster_share=None) -> ReadinessReport:
+    """Gate before `scat train`. BLOCKS configs that would crash or poison the RF: <2 labeled
+    classes, or any class with <2 samples (the trainer's stratified split needs >=2 per class).
+    WARNS on extreme imbalance or most labels coming from a single cluster."""
+    counts = Counter(l for l in member_labels if l in VALID_LABELS)
+    n_labeled = sum(counts.values())
+    n_skipped = sum(1 for l in member_labels if l not in VALID_LABELS)
+    reasons, verdict = [], "ok"
+    if len(counts) < 2:
+        verdict = "block"
+        reasons.append(f"only {len(counts)} labeled class(es); need >=2 to train")
+    singletons = [c for c, m in counts.items() if m < 2]
+    if singletons:
+        verdict = "block"
+        reasons.append(f"class(es) with <2 samples: {singletons} (stratified split fails)")
+    if verdict != "block" and counts:
+        lo, hi = min(counts.values()), max(counts.values())
+        if hi >= 10 * max(1, lo):
+            verdict = "warn"
+            reasons.append(f"extreme class imbalance ({dict(counts)})")
+        if largest_cluster_share and largest_cluster_share > 0.8:
+            verdict = "warn"
+            reasons.append(f"{largest_cluster_share:.0%} of labels come from one cluster")
+    return ReadinessReport(verdict=verdict, reasons=reasons, class_counts=dict(counts),
+                           n_labeled=n_labeled, n_skipped=n_skipped)
