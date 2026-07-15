@@ -8,7 +8,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import (
     QSpinBox, QDoubleSpinBox, QComboBox, QTableWidgetItem,
-    QWidget, QVBoxLayout, QPushButton,
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
 )
 from PySide6.QtGui import QWheelEvent, QFontDatabase
 from PySide6.QtCore import Qt
@@ -817,6 +817,32 @@ class NumericTableWidgetItem(QTableWidgetItem):
         if isinstance(other, NumericTableWidgetItem):
             return self._value < other._value
         return super().__lt__(other)
+
+
+class CenteredCap(QWidget):
+    """A widget that horizontally centers a width-capped content column. Add content to
+    ``.content_layout`` (a QVBoxLayout). Used so single-column forms don't stretch across a
+    16:9 / 16:10 display — the column caps at ``max_width`` and is centered with side gutters."""
+
+    def __init__(self, max_width: int = 1080, parent=None):
+        super().__init__(parent)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(0)
+        row.addStretch(1)
+        self._inner = QWidget()
+        self._inner.setMaximumWidth(max_width)
+        self.content_layout = QVBoxLayout(self._inner)
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        self.content_layout.setSpacing(12)
+        row.addWidget(self._inner, 0)
+        row.addStretch(1)
+
+    def add_widget(self, w):
+        self.content_layout.addWidget(w)
+
+    def add_layout(self, layout):
+        self.content_layout.addLayout(layout)
 
 
 class CollapsibleSection(QWidget):

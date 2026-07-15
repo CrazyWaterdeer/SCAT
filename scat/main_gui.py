@@ -45,7 +45,7 @@ from .config import config, get_timestamped_output_dir
 from .artifacts import IMAGE_SUMMARY, ALL_DEPOSITS
 from .ui_common import (
     Theme, NoScrollSpinBox, NoScrollDoubleSpinBox, NoScrollComboBox,
-    CollapsibleSection, load_custom_fonts, get_icon_path
+    CollapsibleSection, CenteredCap, load_custom_fonts, get_icon_path
 )
 from . import ui_motion
 
@@ -476,13 +476,18 @@ class TrainingTab(QWidget):
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll_area.setFrameShape(QScrollArea.NoFrame)
         
-        # Scroll content widget
+        # Scroll content — centered, width-capped column so the form doesn't stretch on widescreen.
         scroll_content = QWidget()
         scroll_content.setObjectName("scrollContent")
-        layout = QVBoxLayout(scroll_content)
-        layout.setSpacing(15)
-        layout.setContentsMargins(15, 15, 15, 15)
-        
+        outer = QVBoxLayout(scroll_content)
+        outer.setContentsMargins(12, 12, 12, 12)
+        outer.setSpacing(0)
+        _cap = CenteredCap(760)
+        _cap.content_layout.setSpacing(14)
+        outer.addWidget(_cap)
+        outer.addStretch(1)
+        layout = _cap.content_layout   # the group boxes below are added to this capped column
+
         # Data paths
         data_group = QGroupBox("Data")
         data_layout = QVBoxLayout()
@@ -538,12 +543,20 @@ class TrainingTab(QWidget):
         model_group.setLayout(model_layout)
         layout.addWidget(model_group)
         
-        # Train button
+        # Train button (primary action) — centered, not a full-width banner
         self.train_btn = QPushButton("Train Model")
-        self.train_btn.setMinimumHeight(40)
+        self.train_btn.setMinimumHeight(44)
+        self.train_btn.setMinimumWidth(200)
+        self.train_btn.setStyleSheet(
+            Theme.button_style(Theme.PRIMARY, "#FFFFFF", Theme.PRIMARY_LIGHT, Theme.PRIMARY_DARK))
+        ui_motion.attach_button_motion(self.train_btn, primary=True)
         self.train_btn.clicked.connect(self._train)
-        layout.addWidget(self.train_btn)
-        
+        _train_row = QHBoxLayout()
+        _train_row.addStretch(1)
+        _train_row.addWidget(self.train_btn)
+        _train_row.addStretch(1)
+        layout.addLayout(_train_row)
+
         # Progress
         self.progress = QProgressBar()
         self.progress.setVisible(False)
@@ -1385,6 +1398,11 @@ class ResultsTab(QWidget):
             "Regenerate annotated images, statistics, visualizations, and the HTML report.\n"
             "Use after editing/correcting results in the labeling window."
         )
+        # Primary action of the Results tab — coral, with responsive depth.
+        self.generate_report_btn.setMinimumHeight(40)
+        self.generate_report_btn.setStyleSheet(
+            Theme.button_style(Theme.PRIMARY, "#FFFFFF", Theme.PRIMARY_LIGHT, Theme.PRIMARY_DARK))
+        ui_motion.attach_button_motion(self.generate_report_btn, primary=True)
         self.generate_report_btn.clicked.connect(self._generate_report)
         buttons_layout.addWidget(self.generate_report_btn)
         
@@ -1420,12 +1438,21 @@ class ResultsTab(QWidget):
         
         self.sub_tabs.addTab(self.overview_widget, "Overview")
         
-        # Statistics tab (merged with Visualizations)
+        # Statistics tab (merged with Visualizations) — content capped + centered for
+        # readability (long stat text shouldn't run the full width of a widescreen).
         self.stats_widget = QScrollArea()
         self.stats_widget.setWidgetResizable(True)
         self.stats_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.stats_content = QWidget()
-        self.stats_layout = QVBoxLayout(self.stats_content)
+        self.stats_content.setObjectName("scrollContent")
+        _stats_outer = QVBoxLayout(self.stats_content)
+        _stats_outer.setContentsMargins(12, 12, 12, 12)
+        _stats_outer.setSpacing(0)
+        _stats_cap = CenteredCap(1120)
+        _stats_cap.content_layout.setSpacing(14)
+        _stats_outer.addWidget(_stats_cap)
+        _stats_outer.addStretch(1)
+        self.stats_layout = _stats_cap.content_layout   # sections are added into the capped column
         self.stats_widget.setWidget(self.stats_content)
         self.sub_tabs.addTab(self.stats_widget, "Statistics")
     
@@ -2103,24 +2130,41 @@ class MainWindow(QMainWindow):
         
         self.setup_sub_tabs = QTabWidget()
         
-        # Labeling sub-tab
+        # Labeling sub-tab — a centered CTA card instead of a lone full-width banner button
         self.labeling_widget = QWidget()
-        labeling_layout = QVBoxLayout(self.labeling_widget)
-        
+        _lbl_outer = QVBoxLayout(self.labeling_widget)
+        _lbl_outer.setContentsMargins(12, 16, 12, 12)
+        _lbl_outer.setSpacing(0)
+        _lbl_cap = CenteredCap(680)
+        _lbl_outer.addWidget(_lbl_cap)
+        _lbl_outer.addStretch(1)
+
+        labeling_card = QGroupBox("Labeling")
+        _card_l = QVBoxLayout(labeling_card)
+        _card_l.setContentsMargins(16, 16, 16, 16)
+        _card_l.setSpacing(14)
         labeling_desc = QLabel(
-            "Create labeled training data by manually marking deposits in images.\n"
+            "Create labeled training data by manually marking deposits in images. "
             "This is typically done once per microscope/camera setup."
         )
         labeling_desc.setWordWrap(True)
         labeling_desc.setStyleSheet(f"color: {Theme.TEXT_SECONDARY};")
-        labeling_layout.addWidget(labeling_desc)
-        
+        _card_l.addWidget(labeling_desc)
+
         launch_labeling = QPushButton("Launch Labeling Window")
-        launch_labeling.setMinimumHeight(60)
+        launch_labeling.setMinimumHeight(48)
+        launch_labeling.setMinimumWidth(260)
+        launch_labeling.setStyleSheet(
+            Theme.button_style(Theme.PRIMARY, "#FFFFFF", Theme.PRIMARY_LIGHT, Theme.PRIMARY_DARK))
+        ui_motion.attach_button_motion(launch_labeling, primary=True)
         launch_labeling.clicked.connect(self._launch_labeling)
-        labeling_layout.addWidget(launch_labeling)
-        labeling_layout.addStretch()
-        
+        _launch_row = QHBoxLayout()
+        _launch_row.addStretch(1)
+        _launch_row.addWidget(launch_labeling)
+        _launch_row.addStretch(1)
+        _card_l.addLayout(_launch_row)
+        _lbl_cap.add_widget(labeling_card)
+
         self.setup_sub_tabs.addTab(self.labeling_widget, "Labeling")
         
         # Training sub-tab
