@@ -3,9 +3,6 @@ build/
 dist/
 release/
 *.egg-info/
-*.spec
-# Keep the PyInstaller spec tracked (build.py needs it); gitignore has no inline comments
-!SCAT.spec
 
 # Packaged source snapshot (build artifact; do not commit)
 scat.zip

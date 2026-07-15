@@ -744,31 +744,17 @@ class NumericTableWidgetItem(QTableWidgetItem):
 # Utility Functions
 # =============================================================================
 def get_resource_path(relative_path: str) -> Path:
-    """Get absolute path to resource, works for dev and PyInstaller.
-    
+    """Get absolute path to a bundled resource under scat/resources/.
+
     Args:
         relative_path: Path relative to scat/resources/ (e.g., 'fonts/NotoSans-Regular.ttf')
-    
-    Returns:
-        Absolute path to the resource file
     """
-    if getattr(sys, 'frozen', False):
-        # Running as compiled EXE - resources are in _internal/scat/resources
-        base_path = Path(sys._MEIPASS) / 'scat' / 'resources'
-    else:
-        # Running as script
-        base_path = Path(__file__).parent / 'resources'
-    
-    return base_path / relative_path
+    return Path(__file__).parent / 'resources' / relative_path
 
 
 def load_custom_fonts():
-    """Load custom fonts bundled with the application."""
-    if getattr(sys, 'frozen', False):
-        fonts_dir = Path(sys._MEIPASS) / 'scat' / 'resources' / 'fonts'
-    else:
-        fonts_dir = Path(__file__).parent / "resources" / "fonts"
-    
+    """Load custom fonts bundled under scat/resources/fonts/."""
+    fonts_dir = Path(__file__).parent / "resources" / "fonts"
     if fonts_dir.exists():
         for font_file in fonts_dir.glob("*.ttf"):
             font_id = QFontDatabase.addApplicationFont(str(font_file))
@@ -777,22 +763,12 @@ def load_custom_fonts():
 
 
 def get_icon_path() -> str:
-    """Get the path to the application icon."""
-    if getattr(sys, 'frozen', False):
-        # Running as compiled EXE
-        icon_path = Path(sys._MEIPASS) / 'scat' / 'resources' / 'icon.ico'
-        if icon_path.exists():
-            return str(icon_path)
-    else:
-        # Running as script - try multiple locations
-        possible_paths = [
-            Path(__file__).parent / "resources" / "icon.ico",
-            Path(__file__).parent.parent / "scat" / "resources" / "icon.ico",
-            Path(__file__).parent.parent / "resources" / "icon.ico",
-        ]
-        
-        for path in possible_paths:
-            if path.exists():
-                return str(path)
-    
+    """Get the path to the application icon (scat/resources/icon.ico)."""
+    for path in (
+        Path(__file__).parent / "resources" / "icon.ico",
+        Path(__file__).parent.parent / "scat" / "resources" / "icon.ico",
+        Path(__file__).parent.parent / "resources" / "icon.ico",
+    ):
+        if path.exists():
+            return str(path)
     return ""
