@@ -338,22 +338,29 @@ class ReportGenerator:
         return condition_summary.reset_index()
     
     def generate_deposit_data(
-        self, results: List[AnalysisResult], 
+        self, results: List[AnalysisResult],
         metadata: Optional[pd.DataFrame] = None,
-        exclude_artifacts: bool = True
+        exclude_artifacts: bool = True,
+        frames: Optional[List[pd.DataFrame]] = None
     ) -> pd.DataFrame:
         """
         Generate combined deposit data from all results.
-        
+
         Args:
             results: List of analysis results
             metadata: Optional metadata DataFrame
             exclude_artifacts: If True, exclude artifact deposits from output
-        
+            frames: Pre-computed per-result ``to_dataframe()`` frames (save_all builds
+                these once and shares them with save_individual_deposits to avoid the
+                per-deposit feature-dict work running twice). Read-only here (concat
+                copies); falls back to computing them when not supplied.
+
         Returns:
             DataFrame with global IDs assigned
         """
-        df = pd.concat([r.to_dataframe() for r in results], ignore_index=True)
+        if frames is None:
+            frames = [r.to_dataframe() for r in results]
+        df = pd.concat(frames, ignore_index=True)
         
         # Exclude artifacts if requested
         if exclude_artifacts and 'label' in df.columns:
@@ -370,22 +377,26 @@ class ReportGenerator:
         return df
     
     def save_individual_deposits(
-        self, results: List[AnalysisResult], 
-        metadata: Optional[pd.DataFrame] = None, 
+        self, results: List[AnalysisResult],
+        metadata: Optional[pd.DataFrame] = None,
         save_json: bool = True,
-        exclude_artifacts: bool = True
+        exclude_artifacts: bool = True,
+        frames: Optional[List[pd.DataFrame]] = None
     ):
         """Save individual CSV file for each image.
-        
+
         Args:
             results: List of analysis results
             metadata: Optional metadata DataFrame
             save_json: Whether to save JSON files (always includes artifacts for training)
             exclude_artifacts: If True, exclude artifact deposits from CSV output
+            frames: Pre-computed per-result ``to_dataframe()`` frames (shared with
+                generate_deposit_data via save_all). Each is used read-only as the source
+                and copied before any mutation; falls back to computing per result.
         """
-        for result in results:
-            df = result.to_dataframe()
-            
+        for i, result in enumerate(results):
+            df = frames[i] if frames is not None else result.to_dataframe()
+
             # Exclude artifacts from CSV if requested
             if exclude_artifacts and 'label' in df.columns:
                 df = df[df['label'] != 'artifact'].copy()
@@ -469,12 +480,17 @@ class ReportGenerator:
             condition_summary = self.generate_condition_summary(image_summary, group_by)
             condition_summary.to_csv(self.output_dir / CONDITION_SUMMARY, index=False)
         
+        # Build each result's deposit frame once and share it between the per-image
+        # CSVs and the combined all_deposits.csv (to_dataframe rebuilds a FeatureExtractor
+        # and every deposit's feature dict, so computing it twice is pure waste).
+        frames = [r.to_dataframe() for r in results]
+
         # Individual deposit files per image
         if save_individual:
-            self.save_individual_deposits(results, metadata, save_json=save_json)
-        
+            self.save_individual_deposits(results, metadata, save_json=save_json, frames=frames)
+
         # Combined deposit data
-        deposit_data = self.generate_deposit_data(results, metadata)
+        deposit_data = self.generate_deposit_data(results, metadata, frames=frames)
         deposit_data.to_csv(self.output_dir / ALL_DEPOSITS, index=False)
         
         # Group-specific deposit files
