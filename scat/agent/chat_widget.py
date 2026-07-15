@@ -188,6 +188,7 @@ class ChatDockWidget(QWidget):
         picker_row.setSpacing(6)
 
         self.model_combo = QComboBox()
+        self.model_combo.setObjectName("ghostPicker")   # Claude-style: text until hover
         for _name, _mid in LATEST_MODELS:
             self.model_combo.addItem(_name, _mid)
         _cur_model = config.get("agent.model", "claude-opus-4-8")
@@ -198,6 +199,7 @@ class ChatDockWidget(QWidget):
         picker_row.addWidget(self.model_combo)
 
         self.provider_combo = QComboBox()
+        self.provider_combo.setObjectName("ghostPicker")   # Claude-style: text until hover
         for _name, _val in _PROVIDERS:
             self.provider_combo.addItem(_name, _val)
         _cur_backend = config.get("agent.backend", "auto")

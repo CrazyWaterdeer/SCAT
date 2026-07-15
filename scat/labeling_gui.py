@@ -577,7 +577,11 @@ class LabelingWindow(QMainWindow):
         
         self._setup_ui()
         self._setup_shortcuts()
-        
+
+        # Pointer cursors on interactive controls (QSS has no cursor property).
+        from . import ui_motion
+        ui_motion.apply_ui_polish(self)
+
         # If EDIT_MODE, load the data
         if mode == self.MODE_EDIT and edit_data:
             self._load_edit_data()
@@ -784,18 +788,23 @@ class LabelingWindow(QMainWindow):
         label_layout = QVBoxLayout()
         
         btn_layout = QHBoxLayout()
+        # Semantic buttons carry their own hover/pressed shades (via button_style) so the global
+        # gray hover never repaints them and press darkens the hue instead of flashing neutral.
         self.btn_normal = QPushButton("Normal (1)")
-        self.btn_normal.setStyleSheet(f"background-color: {Theme.NORMAL}; color: white;")
+        self.btn_normal.setStyleSheet(
+            Theme.button_style(Theme.NORMAL, "#FFFFFF", Theme.NORMAL_DARK, Theme.NORMAL_DARK))
         self.btn_normal.clicked.connect(lambda: self._set_selected_label("normal"))
         btn_layout.addWidget(self.btn_normal)
-        
+
         self.btn_rod = QPushButton("ROD (2)")
-        self.btn_rod.setStyleSheet(f"background-color: {Theme.ROD}; color: white;")
+        self.btn_rod.setStyleSheet(
+            Theme.button_style(Theme.ROD, "#FFFFFF", Theme.ROD_DARK, Theme.ROD_DARK))
         self.btn_rod.clicked.connect(lambda: self._set_selected_label("rod"))
         btn_layout.addWidget(self.btn_rod)
-        
+
         self.btn_artifact = QPushButton("Artifact (3)")
-        self.btn_artifact.setStyleSheet(f"background-color: {Theme.ARTIFACT}; color: white;")
+        self.btn_artifact.setStyleSheet(
+            Theme.button_style(Theme.ARTIFACT, "#FFFFFF", Theme.ARTIFACT_DARK, Theme.ARTIFACT_DARK))
         self.btn_artifact.clicked.connect(lambda: self._set_selected_label("artifact"))
         btn_layout.addWidget(self.btn_artifact)
         label_layout.addLayout(btn_layout)

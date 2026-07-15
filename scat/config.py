@@ -98,6 +98,14 @@ DEFAULT_CONFIG = {
         "width": 1200,
         "height": 800,
         "maximized": False
+    },
+
+    # UI / motion preferences
+    "ui": {
+        # Motion gate honored by scat.ui_motion. "auto" = animate normally;
+        # "on" = reduce motion (animations land on their end value, no movement);
+        # "off" = force full motion. The SCAT_REDUCED_MOTION env var forces "on".
+        "reduced_motion": "auto"
     }
 }
 
