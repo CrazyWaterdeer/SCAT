@@ -70,3 +70,44 @@ def test_order_groups_logical_not_alphabetical():
     assert order_groups(["B", "A", "Ref"], control_group="Ref")[0] == "Ref"
     # no ordinal / no number -> appearance order preserved (not force-alphabetized)
     assert order_groups(["gamma", "alpha", "beta"]) == ["gamma", "alpha", "beta"]
+
+
+def test_get_palette_no_control_collision():
+    from scat.visualization import get_palette, CONTROL_COLOR
+    pal = get_palette(["Vehicle", "Drug", "Light"], control_group="Vehicle")
+    assert pal["Vehicle"] == CONTROL_COLOR
+    assert pal["Drug"] != CONTROL_COLOR and pal["Light"] != CONTROL_COLOR   # no second slate
+    assert len({pal["Vehicle"], pal["Drug"], pal["Light"]}) == 3            # all distinct
+
+
+@pytest.mark.skipif(not _HAS_VIZ, reason="viz libs missing")
+def test_draw_condition_matrix_open_closed_circles():
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import to_rgba
+    from scat.visualization import draw_condition_matrix
+    groups = ["Veh", "Drug", "Light", "Both"]
+    matrix = {"Drug":  {"Veh": False, "Drug": True,  "Light": False, "Both": True},
+              "Light": {"Veh": False, "Drug": False, "Light": True,  "Both": True}}
+    fig, ax = plt.subplots()
+    n = draw_condition_matrix(ax, range(len(groups)), matrix, groups)
+    circles = [ln for ln in ax.lines if ln.get_marker() == 'o']
+    filled = [ln for ln in circles if to_rgba(ln.get_markerfacecolor()) != to_rgba('white')]
+    assert n == 2 and len(circles) == 8          # 2 factors x 4 groups
+    assert len(filled) == 4                       # 4 truthy cells filled, 4 open
+    plt.close(fig)
+
+
+@pytest.mark.skipif(not _HAS_VIZ, reason="viz libs missing")
+def test_condition_comparison_renders(tmp_path):
+    import pandas as pd
+    from scat.visualization import Visualizer
+    df = pd.DataFrame([{"group": g, "n_total": base}
+                       for g, base in [("Vehicle", 8), ("Drug", 12), ("Light", 9), ("Drug+Light", 18)]
+                       for _ in range(5)])
+    matrix = {"Drug":  {"Vehicle": False, "Drug": True,  "Light": False, "Drug+Light": True},
+              "Light": {"Vehicle": False, "Drug": False, "Light": True,  "Drug+Light": True}}
+    out = Visualizer(tmp_path).condition_comparison(df, "n_total", "group", matrix,
+                                                    control_group="Vehicle", filename="c.png")
+    assert out and (tmp_path / "c.png").exists()

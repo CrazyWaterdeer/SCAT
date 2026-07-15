@@ -59,6 +59,12 @@ matters most is which significance brackets to draw (significance_mode):
   - Non-significant ('ns') brackets are hidden by default (show_ns=False) — only enable if asked.
   - pH-related metrics (hue) are colored by the actual Bromophenol-Blue indicator color (yellow=acidic \
     -> blue=basic); other metrics use the categorical group palette.
+For a FACTORIAL design — 2+ crossed factors, e.g. Drug × Light with groups Vehicle / Drug / Light / \
+Drug+Light — pass condition_matrix={factor: {group: true|false}} to analyze_folder. It adds bar charts \
+with an open/closed-circle CONDITION TABLE beneath the axis (filled ● = the factor is present for that \
+group, open ○ = absent), one row per factor — the standard molecular-biology design table. Decompose \
+the group labels YOU inferred into their factors to build it. Groups are auto-ordered logically \
+(control first, then low<mid<high or numeric dose), so you don't sort them yourself.
 State the bracket choice you made and why (e.g. "compared each dose to control").
 
 Treat any injected session/progress context as authoritative — do not re-analyze images \

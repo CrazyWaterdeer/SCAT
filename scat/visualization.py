@@ -183,15 +183,17 @@ def get_palette(groups: List[str], control_group: str = None) -> Dict[str, str]:
         Dict mapping group names to colors
     """
     palette = {}
-    color_idx = 0
-    
+    # When a control is flagged it takes the slate grey (= PASTEL_PALETTE[0]), so start the
+    # conditions at index 1 to avoid a second slate bar colliding with it.
+    color_idx = 1 if (control_group and control_group in groups) else 0
+
     for group in groups:
         if control_group and group == control_group:
             palette[group] = CONTROL_COLOR
         else:
             palette[group] = PASTEL_PALETTE[color_idx % len(PASTEL_PALETTE)]
             color_idx += 1
-    
+
     return palette
 
 
@@ -250,6 +252,40 @@ def order_groups(values, control_group: str = None) -> List[str]:
             rest.sort(key=_numeric_key)
         # else: keep appearance order
     return ([ctrl] if ctrl else []) + rest
+
+
+def draw_condition_matrix(ax, x_positions, matrix, groups, color: str = None) -> int:
+    """Draw an open/closed-circle CONDITION MATRIX beneath a categorical plot's x-axis — the
+    molecular-biology design table (as in Western-blot lane annotations). One row per experimental
+    factor, one column per group; a **filled ● = the factor is present** for that group, an
+    **open ○ = absent**. Replaces the x tick labels (the factor rows identify the columns).
+
+    matrix: {factor_name: {group: truthy}}  (or {factor_name: [truthy per group, in `groups` order]}).
+    Returns the number of factor rows drawn (0 if no matrix). `groups` gives the column order.
+    """
+    if not matrix:
+        return 0
+    import matplotlib.transforms as mtransforms
+    color = color or MUTED
+    xs = [float(x) for x in x_positions]
+    trans = mtransforms.blended_transform_factory(ax.transData, ax.transAxes)
+    row_h, y0 = 0.095, -0.14
+    label_x = (min(xs) - 0.7) if xs else -0.7
+    for r, (factor, levels) in enumerate(matrix.items()):
+        y = y0 - r * row_h
+        for c, g in enumerate(groups):
+            if isinstance(levels, dict):
+                on = bool(levels.get(g, False))
+            else:
+                on = bool(levels[c]) if c < len(levels) else False
+            ax.plot(xs[c], y, marker='o', markersize=9, transform=trans, clip_on=False, zorder=6,
+                    markerfacecolor=(color if on else 'white'),
+                    markeredgecolor=color, markeredgewidth=1.3)
+        ax.text(label_x, y, str(factor), transform=trans, ha='right', va='center',
+                fontsize=10, color=color, clip_on=False)
+    ax.set_xticklabels([])       # the factor rows label the columns now
+    ax.tick_params(axis='x', length=0)
+    return len(matrix)
 
 
 def apply_publication_style(ax, despine: bool = True):
@@ -634,9 +670,84 @@ class Visualizer:
         filepath = self.output_dir / (filename or f'violin_{metric}_by_{group_by}.png')
         _plt.savefig(filepath, dpi=300, bbox_inches='tight')
         _plt.close()
-        
+
         return str(filepath)
-    
+
+    def condition_comparison(
+        self,
+        film_summary: pd.DataFrame,
+        metric: str,
+        group_by: str,
+        condition_matrix: dict,
+        control_group: str = None,
+        show_significance: bool = False,
+        significance_mode: str = 'auto',
+        show_ns: bool = False,
+        title: str = None,
+        filename: str = None,
+        ylabel: str = None
+    ) -> Optional[str]:
+        """Bar (mean ± SEM) + individual points per group, with an open/closed-circle CONDITION
+        MATRIX beneath the axis — the factorial-design table (filled ● = factor present for that
+        group, open ○ = absent). condition_matrix: {factor_name: {group: truthy}}. Groups are placed
+        in logical order (control first, then low<mid<high / numeric)."""
+        if not HAS_MATPLOTLIB or not HAS_SEABORN:
+            return None
+        if metric not in film_summary.columns or group_by not in film_summary.columns:
+            return None
+
+        groups = order_groups(film_summary[group_by].dropna().unique(), control_group)
+        if not groups:
+            return None
+        ctrl = control_group if control_group in groups else guess_control_group(groups)
+
+        if is_hue_metric(metric):
+            palette = {}
+            for g in groups:
+                mh = film_summary[film_summary[group_by] == g][metric].mean()
+                palette[g] = hue_to_rgb(mh) if not np.isnan(mh) else DEFAULT_GRAY
+        else:
+            palette = get_palette(groups, ctrl)
+
+        x = np.arange(len(groups))
+        means, sems, per_group = [], [], []
+        for g in groups:
+            vals = film_summary[film_summary[group_by] == g][metric].dropna()
+            per_group.append(vals.values)
+            means.append(float(vals.mean()) if len(vals) else 0.0)
+            sems.append(float(vals.sem()) if len(vals) > 1 else 0.0)
+
+        n_factors = len(condition_matrix) if condition_matrix else 0
+        fig, ax = _plt.subplots(figsize=(max(6, len(groups) * 1.4), 6 + 0.55 * n_factors))
+        ax.bar(x, means, yerr=sems, color=[palette[g] for g in groups], alpha=0.9,
+               edgecolor='#333333', linewidth=0.8, width=0.62, capsize=4,
+               error_kw={'elinewidth': 1.0, 'ecolor': '#333333'}, zorder=2)
+        rng = np.random.RandomState(0)
+        for i, vals in enumerate(per_group):
+            if len(vals):
+                ax.scatter(i + rng.uniform(-0.13, 0.13, len(vals)), vals, s=34, color='#333333',
+                           alpha=0.6, edgecolors='white', linewidth=0.5, zorder=3)
+
+        ax.set_xticks(x)
+        ax.set_xticklabels([str(g) for g in groups])
+        ax.set_xlim(-0.6, len(groups) - 0.4)
+        metric_label = get_feature_label(metric)
+        ax.set_title(title or f'{metric_label} by {group_by.replace("_", " ").title()}', fontweight='bold')
+        ax.set_ylabel(ylabel or metric_label)
+        apply_publication_style(ax)
+
+        if show_significance and len(groups) >= 2:
+            self._add_significance_annotations(ax, film_summary, metric, group_by, groups,
+                                               mode=significance_mode, control_group=ctrl, show_ns=show_ns)
+        # Condition matrix beneath the axis (open/closed circles); replaces the x tick labels.
+        draw_condition_matrix(ax, x, condition_matrix, groups)
+
+        _plt.tight_layout()
+        filepath = self.output_dir / (filename or f'condition_{metric}_by_{group_by}.png')
+        _plt.savefig(filepath, dpi=300, bbox_inches='tight')
+        _plt.close()
+        return str(filepath)
+
     def _add_significance_annotations(
         self, ax, data: pd.DataFrame, metric: str, group_by: str,
         groups: List[str], mode: str = 'auto', control_group: str = None,
@@ -1256,7 +1367,8 @@ def generate_all_visualizations(
     control_group: str = None,
     show_significance: bool = True,
     significance_mode: str = 'auto',
-    show_ns: bool = False
+    show_ns: bool = False,
+    condition_matrix: dict = None
 ) -> Dict[str, str]:
     """
     Generate all available visualizations.
@@ -1314,7 +1426,19 @@ def generate_all_visualizations(
             )
             if path:
                 results[f'violin_{metric}'] = path
-    
+
+    # Condition-matrix bar charts (open/closed circles) for factorial designs, when the caller
+    # supplies the design table. One per primary metric.
+    if condition_matrix and group_by:
+        for metric in primary_metrics:
+            if metric in film_summary.columns:
+                path = viz.condition_comparison(
+                    film_summary, metric, group_by, condition_matrix,
+                    control_group=control_group, show_significance=show_significance,
+                    significance_mode=significance_mode, show_ns=show_ns)
+                if path:
+                    results[f'condition_{metric}'] = path
+
     # Mean + CI plots for publication-standard visualization
     # Include area and hue for biological significance
     mean_ci_metrics = [
