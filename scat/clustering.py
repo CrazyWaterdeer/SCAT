@@ -22,8 +22,58 @@ _LINEAR_COLS = ["circularity", "aspect_ratio", "mean_saturation", "mean_lightnes
 
 VALID_LABELS = {"normal", "rod", "artifact"}
 
-_PROFILE_COLS = ["area_px", "circularity", "aspect_ratio", "mean_hue",
+_PROFILE_COLS = ["area_px", "circularity", "aspect_ratio", "solidity", "mean_hue",
                  "mean_saturation", "mean_lightness", "pigment_density", "iod"]
+
+
+def _num(df, col, default=1.0):
+    if col in df.columns:
+        return pd.to_numeric(df[col], errors="coerce").fillna(default)
+    return pd.Series(default, index=df.index)
+
+
+def line_flag(df: pd.DataFrame) -> pd.Series:
+    """Rotation-invariant 'thin line' (film-boundary) flag: very elongated AND poorly filling its
+    rotated bounding box. `aspect_ratio` alone comes from an axis-aligned bbox and misses DIAGONAL
+    boundaries, so prefer the minAreaRect-based `elongation`/`rect_fill`; fall back to aspect+circ."""
+    if "elongation" in df.columns and "rect_fill" in df.columns:
+        return (_num(df, "elongation") > 4) & (_num(df, "rect_fill") < 0.4)
+    return (_num(df, "aspect_ratio") > 8) & (_num(df, "circularity") < 0.15)
+
+
+def unusual_flag(df: pd.DataFrame) -> pd.Series:
+    """Shape-atypical (irregular / elongated) deposits that are NOT line artifacts."""
+    elong = _num(df, "elongation") if "elongation" in df.columns else _num(df, "aspect_ratio")
+    return ((_num(df, "circularity") < 0.5) | (elong > 2.5)) & ~line_flag(df)
+
+
+def cluster_kind(circularity, aspect_ratio, solidity=None, pct_line=0.0, pct_unusual=0.0) -> str:
+    """A short label to guide labeling. Prefers per-cluster FRACTIONS (a median alone marks a mixed
+    or giant-noise cluster 'common' while its tail holds exactly the interesting deposits); falls
+    back to the scalar medians for single-deposit callers."""
+    if pct_line > 0.5:
+        return "line-artifact?"
+    if pct_unusual > 0.4:
+        return "unusual?"
+    if pct_unusual > 0.1:
+        return "mixed (has unusual)"
+    if aspect_ratio is not None and circularity is not None and aspect_ratio > 8 and circularity < 0.15:
+        return "line-artifact?"
+    if (circularity is not None and circularity < 0.5) or (aspect_ratio is not None and aspect_ratio > 2.5):
+        return "unusual?"
+    return "common"
+
+
+def unusual_ranking(df: pd.DataFrame) -> pd.Series:
+    """Per-deposit 'shape-unusualness' score (elongated + irregular + big). Line artifacts are
+    EXCLUDED (−inf) rather than softly penalised, so an extreme line can never outrank a real
+    atypical deposit even after z-scoring."""
+    def z(s):
+        s = pd.to_numeric(s, errors="coerce").fillna(0.0)
+        return (s - s.mean()) / (s.std() + 1e-9)
+    elong = df["elongation"] if "elongation" in df.columns else df["aspect_ratio"]
+    score = z(elong) + z(-df["circularity"]) + 0.6 * z(df["area_px"])
+    return score.mask(line_flag(df), float("-inf"))
 
 
 # --------------------------------------------------------------------------- feature matrix
@@ -46,6 +96,9 @@ def build_feature_matrix(df: pd.DataFrame):
     for c in _LINEAR_COLS:
         cols.append(pd.to_numeric(df[c], errors="coerce").to_numpy(dtype=float))
         names.append(c)
+    if "solidity" in df.columns:  # optional: separates solid deposits from branchy/concave ones,
+        cols.append(pd.to_numeric(df["solidity"], errors="coerce").to_numpy(dtype=float))
+        names.append("solidity")  # consolidating the irregular/unusual deposits into a real cluster
     hue = np.deg2rad(pd.to_numeric(df["mean_hue"], errors="coerce").to_numpy(dtype=float))
     sat = pd.to_numeric(df["mean_saturation"], errors="coerce").to_numpy(dtype=float)
     cols.append(np.sin(hue) * sat); names.append("hue_sin")
@@ -144,10 +197,19 @@ def cluster_profile(df: pd.DataFrame, labels: np.ndarray) -> pd.DataFrame:
     spread is a mixed-cluster hint (surfaced in the report)."""
     work = df.copy()
     work["cluster_id"] = np.asarray(labels)
+    work["_line"] = line_flag(work).astype(float)
+    work["_unusual"] = unusual_flag(work).astype(float)
     cols = [c for c in _PROFILE_COLS if c in work.columns]
+    # median (robust to the outliers that define these clusters) + line/unusual member FRACTIONS,
+    # so a mixed / giant-noise cluster is not mislabeled 'common' when its tail is the interesting part.
     agg = work.groupby("cluster_id").agg(
         size=("cluster_id", "size"),
-        **{c: (c, "mean") for c in cols}).reset_index()
+        pct_line=("_line", "mean"),
+        pct_unusual=("_unusual", "mean"),
+        **{c: (c, "median") for c in cols}).reset_index()
+    agg["kind"] = agg.apply(
+        lambda r: cluster_kind(r.get("circularity"), r.get("aspect_ratio"), r.get("solidity"),
+                               pct_line=r["pct_line"], pct_unusual=r["pct_unusual"]), axis=1)
     return agg.sort_values("cluster_id").reset_index(drop=True)
 
 

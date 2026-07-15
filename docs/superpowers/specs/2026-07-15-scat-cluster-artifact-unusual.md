@@ -95,3 +95,27 @@ Reviewing the real cluster report, the user (domain expert) noted the report sho
 | adding solidity shifts clustering for existing users | clustering is a new feature (PR #18); this is an intended improvement, not a parity-locked output; graceful when solidity absent |
 | line-artifact heuristic mislabels a real elongated ROD as a line | it only *down-ranks / hints*, never deletes; the user sees the thumbnail and decides |
 | very few unusual deposits in some datasets | the section simply shows fewer; health/kind hints still inform |
+
+---
+
+## Codex review → incorporated
+
+- **solidity is not a general "ROD" feature** (Codex #2): it captures *concavity/irregularity*; a
+  smooth convex elongated ROD can have solidity ≈ 1. So `solidity` is added to help *irregular*
+  deposits form a cluster, while `aspect_ratio`/`circularity` (already present) + a rotation-invariant
+  `elongation` carry elongated-but-solid ROD. Framing corrected.
+- **Line flag is rotation-invariant** (Codex #4/#6): `aspect_ratio` from an axis-aligned bbox misses
+  DIAGONAL film boundaries, so lines are flagged from minAreaRect `elongation` + `rect_fill`
+  (very elongated AND poorly filling its rotated box), which does not flag a filled ROD. Measured:
+  ~14 lines flagged on real data vs 1 with the axis-aligned rule.
+- **Unusual ranking excludes line artifacts** (−inf), not a fixed penalty (Codex #5); ranks across
+  ALL deposits and stamps each thumbnail with its `cluster_id` so the unusual cohort that `solidity`
+  consolidates into a cluster is shown and is labelable via `cluster_labels.csv` (Codex #1).
+- **`kind` uses member fractions, not just the median** (Codex #3): `pct_line`/`pct_unusual` per
+  cluster, so the giant noise bucket reads `mixed (has unusual)` instead of `common` when its tail is
+  the interesting part. Measured: on real data the noise card now reads `mixed (has unusual)`.
+- **Tests strengthened** (Codex #8): rotation-invariant line flag, ranking excludes lines,
+  fraction-based kind on a round-median/unusual-tail cluster.
+- **Measured before/after** (Codex #9; `2026_01_29`, 1069 deposits): unusual/irregular cohort moved
+  from scattered-in-noise to a labelable 54-deposit cluster (`unusual?`); ~14 diagonal/line artifacts
+  flagged; gallery top-24 now cluster-tagged and line-free.
