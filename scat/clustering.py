@@ -71,7 +71,9 @@ class ClusterResult:
 
 
 def _default_min_cluster_size(n: int) -> int:
-    return int(min(200, max(15, round(n / 40))))
+    # Softer than n/40 (which over-noised real data ~73%); the health warnings + --min-cluster-size
+    # let the user tune from here.
+    return int(min(100, max(10, round(n / 80))))
 
 
 def cluster_deposits(X, method="hdbscan", min_cluster_size=None, min_samples=None,

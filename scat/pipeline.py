@@ -421,8 +421,8 @@ def _write_cluster_labels_csv(path, profile, cres):
     keep = ["cluster_id", "size", "area_px", "circularity", "mean_hue", "pigment_density"]
     cols = [c for c in keep if c in profile.columns]
     out = profile[profile["cluster_id"] != -1][cols].copy()
-    n_rows = max(1, len(profile["cluster_id"]))
-    out["noise_frac"] = round(cres.n_noise / n_rows, 3)
+    total_deposits = max(1, int(profile["size"].sum()))  # size sums over all rows incl. -1 noise
+    out["noise_frac"] = round(cres.n_noise / total_deposits, 3)
     out["label"] = ""
     out.to_csv(path, index=False)
 
