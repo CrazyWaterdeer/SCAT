@@ -81,7 +81,10 @@ def cluster_deposits(X, method="hdbscan", min_cluster_size=None, min_samples=Non
     """Cluster the (standardized) matrix. HDBSCAN default (auto #clusters, -1 = noise); kmeans
     when a fixed count is wanted. Returns labels + health WARNINGS for degenerate results."""
     n = X.shape[0]
-    mcs = int(min_cluster_size or _default_min_cluster_size(n))
+    if n < 3:  # too few to cluster — HDBSCAN/kmeans would raise; mark all noise
+        return ClusterResult(labels=np.full(n, -1, dtype=int), method=method, n_clusters=0,
+                             n_noise=n, health=["too few deposits to cluster — label manually"])
+    mcs = max(2, min(int(min_cluster_size or _default_min_cluster_size(n)), n))  # HDBSCAN needs <= n
     if method == "kmeans":
         from sklearn.cluster import KMeans
         kk = int(k or max(2, min(8, round(n / 50))))
@@ -89,7 +92,8 @@ def cluster_deposits(X, method="hdbscan", min_cluster_size=None, min_samples=Non
         labels = KMeans(n_clusters=kk, random_state=random_state, n_init=10).fit_predict(X)
     else:
         from sklearn.cluster import HDBSCAN
-        labels = HDBSCAN(min_cluster_size=max(2, mcs), min_samples=min_samples,
+        ms = min(int(min_samples), n) if min_samples else None  # min_samples must be <= n
+        labels = HDBSCAN(min_cluster_size=mcs, min_samples=ms,
                          metric="euclidean", cluster_selection_method="eom",
                          copy=True).fit_predict(X)
 
@@ -193,10 +197,11 @@ class ReadinessReport:
     n_skipped: int
 
 
-def training_readiness(member_labels, largest_cluster_share=None) -> ReadinessReport:
+def training_readiness(member_labels, largest_cluster_share=None, test_size=0.2) -> ReadinessReport:
     """Gate before `scat train`. BLOCKS configs that would crash or poison the RF: <2 labeled
-    classes, or any class with <2 samples (the trainer's stratified split needs >=2 per class).
-    WARNS on extreme imbalance or most labels coming from a single cluster."""
+    classes, any class with <2 samples, or too few labels for the trainer's stratified
+    `train_test_split(test_size=0.2)` — which needs the test split (int(0.2*n)) to hold at least
+    one of every class. WARNS on extreme imbalance or most labels from a single cluster."""
     counts = Counter(l for l in member_labels if l in VALID_LABELS)
     n_labeled = sum(counts.values())
     n_skipped = sum(1 for l in member_labels if l not in VALID_LABELS)
@@ -208,6 +213,11 @@ def training_readiness(member_labels, largest_cluster_share=None) -> ReadinessRe
     if singletons:
         verdict = "block"
         reasons.append(f"class(es) with <2 samples: {singletons} (stratified split fails)")
+    if verdict != "block" and len(counts) >= 2 and int(test_size * n_labeled) < len(counts):
+        verdict = "block"
+        need = int(len(counts) / test_size) + 1
+        reasons.append(f"only {n_labeled} labeled deposits for {len(counts)} classes; the stratified "
+                       f"20% test split needs >= {len(counts)} — label ~{need}+ (more clusters)")
     if verdict != "block" and counts:
         lo, hi = min(counts.values()), max(counts.values())
         if hi >= 10 * max(1, lo):

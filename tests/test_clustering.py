@@ -146,6 +146,26 @@ def test_training_readiness_ok():
     assert rep.class_counts == {"normal": 20, "rod": 20, "artifact": 10}
 
 
+def test_training_readiness_blocks_too_few_for_stratified_split():
+    # 2 classes x 2 samples: no singleton, but int(0.2*4)=0 < 2 classes -> split would crash
+    rep = C.training_readiness(["normal", "normal", "rod", "rod"])
+    assert rep.verdict == "block"
+
+
+def test_cluster_deposits_tiny_n_all_noise():
+    X = np.array([[0.0, 0.0], [1.0, 1.0]])  # n=2 < 3
+    res = C.cluster_deposits(X)
+    assert res.n_clusters == 0 and res.n_noise == 2
+    assert res.labels.tolist() == [-1, -1]
+
+
+def test_cluster_deposits_small_n_does_not_crash():
+    rng = np.random.RandomState(4)
+    X = rng.randn(5, 3)  # default min_cluster_size would be 10 > n -> must be capped, not crash
+    res = C.cluster_deposits(X)  # no explicit min_cluster_size
+    assert res.labels.shape[0] == 5
+
+
 def test_all_noise_clustering_profile_handled():
     rng = np.random.RandomState(9)
     X = rng.randn(50, 2) * 5

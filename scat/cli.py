@@ -137,7 +137,8 @@ def propagate_command(args):
     if s.readiness == "block":
         print("Refusing to recommend training — fix the above (label more/other clusters).")
     else:
-        print(f"Next: scat train --image-dir {args.results_dir}/deposits "
+        img = s.source_images or "<original image folder>"
+        print(f"Next: scat train --image-dir \"{img}\" --label-dir \"{s.labels_dir}\" "
               f"--output <model.pkl>")
 
 

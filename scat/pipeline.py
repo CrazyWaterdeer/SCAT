@@ -285,6 +285,8 @@ class PropagateSummary:
     readiness: str
     reasons: list
     class_counts: dict
+    source_images: Optional[str] = None
+    labels_dir: Optional[str] = None
 
 
 def cluster_folder_service(path: str, output_dir: Optional[str] = None, method: str = "hdbscan",
@@ -297,8 +299,15 @@ def cluster_folder_service(path: str, output_dir: Optional[str] = None, method: 
     keeps ALL deposits (including RF-called 'artifact')."""
     from . import clustering as C
     from .features import FeatureExtractor
+    from .grouping_util import duplicate_basenames
 
     images = list_images(str(path))
+    # labels.json / assignments key deposits by (basename, id); colliding basenames (e.g. from
+    # a recursive folder with same-named files) would cross-apply labels — fail fast instead.
+    dups = duplicate_basenames(images)
+    if dups:
+        raise ValueError(f"duplicate image basenames would collide: {dups[:5]}"
+                         f"{'...' if len(dups) > 5 else ''}. Run on a flat folder of unique names.")
     mtype, mpath = resolve_model_type(None, None)
     az = Analyzer(detector=DepositDetector(),
                   classifier_config=ClassifierConfig(model_type=mtype, model_path=mpath))
@@ -326,6 +335,8 @@ def cluster_folder_service(path: str, output_dir: Optional[str] = None, method: 
     df["cluster_id"] = cres.labels
 
     df[["filename", "deposit_id", "cluster_id"]].to_csv(out / "cluster_assignments.csv", index=False)
+    import json as _json
+    (out / "cluster_meta.json").write_text(_json.dumps({"source_images": str(Path(path).resolve())}))
     _write_cluster_labels_json(out / "deposits", results, df)
     reps = C.representatives(X, cres.labels, per_kind=reps_per_cluster)
     _export_cluster_thumbnails(out / "clusters", df, reps, images)
@@ -363,8 +374,16 @@ def propagate_service(results_dir: str, csv_path: Optional[str] = None) -> Propa
         counts = by[by["_lab"] != "unknown"].groupby("cluster_id").size()
         share = float(counts.max() / counts.sum()) if len(counts) else None
     rep = C.training_readiness(list(labels.values()), largest_cluster_share=share)
+    source = None
+    meta = rd / "cluster_meta.json"
+    if meta.exists():
+        try:
+            source = json.loads(meta.read_text()).get("source_images")
+        except Exception:
+            source = None
     return PropagateSummary(summary["n_labeled"], summary["n_skipped"], rep.verdict,
-                            rep.reasons, rep.class_counts)
+                            rep.reasons, rep.class_counts, source_images=source,
+                            labels_dir=str(rd / "deposits"))
 
 
 def _write_cluster_labels_json(deposits_dir, results, df):
