@@ -157,13 +157,28 @@ def analyze_folder_service(path: str, groups: Optional[dict] = None, model_type:
     if annotate:
         from PIL import Image
         import numpy as np
+        from . import parallel as _parallel
         ann_dir = out / "annotated"; ann_dir.mkdir(exist_ok=True)
-        for img_path, res in zip(images, results):
-            if res.n_total == 0:
-                continue
+
+        def _annotate_one(item):
+            img_path, res = item
             arr = np.array(Image.open(img_path))
-            annotated = analyzer.generate_annotated_image(arr, res.deposits, show_labels=True, skip_artifacts=True)
+            annotated = analyzer.generate_annotated_image(
+                arr, res.deposits, show_labels=True, skip_artifacts=True)
             Image.fromarray(annotated).save(ann_dir / f"{img_path.stem}_annotated.png")
+
+        # Each image writes a distinct PNG, so order is irrelevant. Decode (PIL), draw
+        # (cv2), and PNG encode all release the GIL, so a thread pool overlaps this
+        # I/O-and-native-encode work without process overhead (no model needed here).
+        todo = [(p, r) for p, r in zip(images, results) if r.n_total > 0]
+        if len(todo) > 1:
+            from concurrent.futures import ThreadPoolExecutor
+            workers = max(1, min(_parallel.usable_cores(), len(todo), 8))
+            with ThreadPoolExecutor(max_workers=workers) as ex:
+                list(ex.map(_annotate_one, todo))
+        else:
+            for item in todo:
+                _annotate_one(item)
 
     if visualize:
         try:

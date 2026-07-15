@@ -165,21 +165,14 @@ class SettingsDialog(QDialog):
         self.parallel_check.setToolTip("Process multiple images simultaneously (faster on multi-core systems)")
         parallel_layout.addRow(self.parallel_check)
         
-        # Get CPU thread count for dynamic worker options
-        import os
-        cpu_count = os.cpu_count() or 1
-        
-        # Calculate auto worker count for display
-        try:
-            import psutil
-            available_gb = psutil.virtual_memory().available / (1024**3)
-            memory_workers = max(1, int(available_gb / 0.3))
-        except ImportError:
-            memory_workers = 4
-        cpu_workers = max(1, cpu_count // 2)
-        self.auto_worker_count = min(cpu_workers, memory_workers, 20)  # Max 20 for auto
-        
-        # Available worker counts (up to 32, but limited by CPU threads)
+        # Worker options + the "Auto" count come from the hardware-aware engine
+        # (scat.parallel) that the analysis actually uses, so the displayed "Auto (N)"
+        # matches what runs — a fork process pool sized to the usable cores + free RAM.
+        from .parallel import auto_worker_count, usable_cores
+        cpu_count = usable_cores()
+        self.auto_worker_count = auto_worker_count(10 ** 6)  # hardware cap for a large batch
+
+        # Available worker counts (up to 32, but limited by usable cores)
         all_worker_options = [1, 2, 4, 8, 12, 16, 20, 24, 28, 32]
         self.available_workers = [w for w in all_worker_options if w <= cpu_count]
         
@@ -204,15 +197,13 @@ class SettingsDialog(QDialog):
             except ValueError:
                 self.workers_combo.setCurrentIndex(0)  # Default to Auto if not found
         
-        parallel_layout.addRow("Worker threads:", self.workers_combo)
-        
+        parallel_layout.addRow("Workers:", self.workers_combo)
+
         # System info
-        try:
-            import psutil
-            mem_gb = psutil.virtual_memory().available / (1024**3)
-            sys_info = f"Detected: {cpu_count} CPU threads, {mem_gb:.1f} GB available RAM"
-        except ImportError:
-            sys_info = f"Detected: {cpu_count} CPU threads"
+        from .parallel import _available_gb
+        _mem = _available_gb()
+        sys_info = (f"Detected: {cpu_count} usable CPU cores"
+                    + (f", {_mem:.1f} GB available RAM" if _mem else ""))
         
         info_label = QLabel(f"ℹ️ {sys_info}")
         info_label.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; font-size: 11px;")
