@@ -583,184 +583,153 @@ class ReportGenerator:
         plt.tight_layout()
         return self._fig_to_base64(fig)
     
+    @staticmethod
+    def _deposit_values(deposit_data: pd.DataFrame, column: str):
+        """Non-artifact, non-null values of `column`, or None if unavailable/empty.
+
+        Shared data step for the deposit-level distributions (area/IOD/pH/circularity).
+        """
+        if deposit_data is None or column not in deposit_data.columns:
+            return None
+        valid = deposit_data[deposit_data['label'].isin(['normal', 'rod'])]
+        values = valid[column].dropna()
+        return values if len(values) > 0 else None
+
+    def _histogram_figure(self, draw) -> str:
+        """Shared 8x4 figure lifecycle: draw onto the axes, apply style, encode to base64.
+
+        `draw(ax)` runs each metric's own plotting steps (it may be a no-op when a
+        deposit-level column is missing, yielding an empty styled axes as before).
+        """
+        fig, ax = plt.subplots(figsize=(8, 4))
+        draw(ax)
+        apply_publication_style(ax)
+        plt.tight_layout()
+        return self._fig_to_base64(fig)
+
+    @staticmethod
+    def _hist_with_mean(ax, data, *, bins, mean, mean_label) -> None:
+        """Grey histogram with a red dashed mean line — the common core of most metrics."""
+        ax.hist(data, bins=bins, color=DEFAULT_GRAY, edgecolor='white', alpha=0.8)
+        ax.axvline(mean, color='#E53935', linestyle='--', linewidth=2, label=mean_label)
+
     def _generate_rod_histogram(self, film_summary: pd.DataFrame) -> str:
         """Generate ROD fraction histogram as base64."""
-        fig, ax = plt.subplots(figsize=(8, 4))
-        
-        ax.hist(film_summary['rod_fraction'] * 100, bins=15, 
-                color=DEFAULT_GRAY, edgecolor='white', alpha=0.8)
-        ax.axvline(film_summary['rod_fraction'].mean() * 100, 
-                   color='#E53935', linestyle='--', linewidth=2, label='Mean')
-        
-        ax.set_xlabel('ROD Fraction (%)')
-        ax.set_ylabel('Number of Images')
-        ax.set_title('Distribution of ROD Fraction')
-        ax.legend()
-        
-        # Apply publication style
-        apply_publication_style(ax)
-        
-        plt.tight_layout()
-        return self._fig_to_base64(fig)
-    
+        def draw(ax):
+            self._hist_with_mean(ax, film_summary['rod_fraction'] * 100, bins=15,
+                                 mean=film_summary['rod_fraction'].mean() * 100, mean_label='Mean')
+            ax.set_xlabel('ROD Fraction (%)')
+            ax.set_ylabel('Number of Images')
+            ax.set_title('Distribution of ROD Fraction')
+            ax.legend()
+        return self._histogram_figure(draw)
+
     def _generate_count_distribution(self, film_summary: pd.DataFrame) -> str:
         """Generate deposit count distribution histogram."""
-        fig, ax = plt.subplots(figsize=(8, 4))
-        
-        counts = film_summary['n_total'] if 'n_total' in film_summary.columns else \
-                 film_summary['n_normal'] + film_summary['n_rod']
-        
-        ax.hist(counts, bins=15, color=DEFAULT_GRAY, edgecolor='white', alpha=0.8)
-        ax.axvline(counts.mean(), color='#E53935', linestyle='--', linewidth=2, label='Mean')
-        
-        ax.set_xlabel('Deposit Count per Image')
-        ax.set_ylabel('Number of Images')
-        ax.set_title('Distribution of Deposit Counts')
-        ax.legend()
-        
-        apply_publication_style(ax)
-        plt.tight_layout()
-        return self._fig_to_base64(fig)
-    
+        def draw(ax):
+            counts = film_summary['n_total'] if 'n_total' in film_summary.columns else \
+                     film_summary['n_normal'] + film_summary['n_rod']
+            self._hist_with_mean(ax, counts, bins=15, mean=counts.mean(), mean_label='Mean')
+            ax.set_xlabel('Deposit Count per Image')
+            ax.set_ylabel('Number of Images')
+            ax.set_title('Distribution of Deposit Counts')
+            ax.legend()
+        return self._histogram_figure(draw)
+
     def _generate_area_distribution(self, deposit_data: pd.DataFrame) -> str:
         """Generate area distribution histogram from individual deposits."""
-        fig, ax = plt.subplots(figsize=(8, 4))
-        
-        if deposit_data is not None and 'area_px' in deposit_data.columns:
-            # Filter out artifacts
-            valid_data = deposit_data[deposit_data['label'].isin(['normal', 'rod'])]
-            data = valid_data['area_px'].dropna()
-            
-            if len(data) > 0:
-                # Use 99th percentile as upper limit for better visualization
-                upper_limit = min(data.quantile(0.99) * 1.2, data.max())
-                upper_limit = int(np.ceil(upper_limit / 50) * 50)  # Round to nearest 50
-                
-                # Bin size: 10px
-                bins = np.arange(0, upper_limit + 10, 10)
-                
-                ax.hist(data[data <= upper_limit], bins=bins, color=DEFAULT_GRAY, edgecolor='white', alpha=0.8)
-                ax.axvline(data.mean(), color='#E53935', linestyle='--', linewidth=2, label=f'Mean: {data.mean():.1f}')
-                
-                # Set x-axis ticks at 50 unit intervals
-                ax.set_xticks(np.arange(0, upper_limit + 50, 50))
-                ax.set_xlim(0, upper_limit)
-                
-                ax.set_xlabel('Deposit Area (px²)')
-                ax.set_ylabel('Number of Deposits')
-                ax.set_title('Distribution of Deposit Size')
-                ax.legend()
-                
-                # Add note if data was truncated
-                n_truncated = len(data[data > upper_limit])
-                if n_truncated > 0:
-                    ax.text(0.98, 0.95, f'({n_truncated} deposits > {upper_limit} not shown)', 
-                           transform=ax.transAxes, ha='right', va='top', fontsize=8, color='#666')
-        
-        apply_publication_style(ax)
-        plt.tight_layout()
-        return self._fig_to_base64(fig)
-    
+        def draw(ax):
+            data = self._deposit_values(deposit_data, 'area_px')
+            if data is None:
+                return
+            # Use 99th percentile as upper limit for better visualization
+            upper_limit = min(data.quantile(0.99) * 1.2, data.max())
+            upper_limit = int(np.ceil(upper_limit / 50) * 50)  # Round to nearest 50
+            # Bin size: 10px
+            bins = np.arange(0, upper_limit + 10, 10)
+            self._hist_with_mean(ax, data[data <= upper_limit], bins=bins,
+                                 mean=data.mean(), mean_label=f'Mean: {data.mean():.1f}')
+            # Set x-axis ticks at 50 unit intervals
+            ax.set_xticks(np.arange(0, upper_limit + 50, 50))
+            ax.set_xlim(0, upper_limit)
+            ax.set_xlabel('Deposit Area (px²)')
+            ax.set_ylabel('Number of Deposits')
+            ax.set_title('Distribution of Deposit Size')
+            ax.legend()
+            # Add note if data was truncated
+            n_truncated = len(data[data > upper_limit])
+            if n_truncated > 0:
+                ax.text(0.98, 0.95, f'({n_truncated} deposits > {upper_limit} not shown)',
+                       transform=ax.transAxes, ha='right', va='top', fontsize=8, color='#666')
+        return self._histogram_figure(draw)
+
     def _generate_iod_distribution(self, deposit_data: pd.DataFrame) -> str:
         """Generate IOD distribution histogram from individual deposits."""
-        fig, ax = plt.subplots(figsize=(8, 4))
-        
-        if deposit_data is not None and 'iod' in deposit_data.columns:
-            # Filter out artifacts
-            valid_data = deposit_data[deposit_data['label'].isin(['normal', 'rod'])]
-            data = valid_data['iod'].dropna()
-            
-            if len(data) > 0:
-                # Use 99th percentile as upper limit for better visualization
-                upper_limit = min(data.quantile(0.99) * 1.2, data.max())
-                upper_limit = int(np.ceil(upper_limit / 10) * 10)  # Round to nearest 10
-                
-                # Bin size: 5
-                bins = np.arange(0, upper_limit + 5, 5)
-                
-                ax.hist(data[data <= upper_limit], bins=bins, color=DEFAULT_GRAY, edgecolor='white', alpha=0.8)
-                ax.axvline(data.mean(), color='#E53935', linestyle='--', linewidth=2, label=f'Mean: {data.mean():.1f}')
-                
-                # Set appropriate x-axis ticks
-                tick_interval = 20 if upper_limit > 100 else 10
-                ax.set_xticks(np.arange(0, upper_limit + tick_interval, tick_interval))
-                ax.set_xlim(0, upper_limit)
-                
-                ax.set_xlabel('IOD (Integrated Optical Density)')
-                ax.set_ylabel('Number of Deposits')
-                ax.set_title('Distribution of Pigment Amount (IOD)')
-                ax.legend()
-                
-                # Add note if data was truncated
-                n_truncated = len(data[data > upper_limit])
-                if n_truncated > 0:
-                    ax.text(0.98, 0.95, f'({n_truncated} deposits > {upper_limit} not shown)', 
-                           transform=ax.transAxes, ha='right', va='top', fontsize=8, color='#666')
-        
-        apply_publication_style(ax)
-        plt.tight_layout()
-        return self._fig_to_base64(fig)
-    
+        def draw(ax):
+            data = self._deposit_values(deposit_data, 'iod')
+            if data is None:
+                return
+            # Use 99th percentile as upper limit for better visualization
+            upper_limit = min(data.quantile(0.99) * 1.2, data.max())
+            upper_limit = int(np.ceil(upper_limit / 10) * 10)  # Round to nearest 10
+            # Bin size: 5
+            bins = np.arange(0, upper_limit + 5, 5)
+            self._hist_with_mean(ax, data[data <= upper_limit], bins=bins,
+                                 mean=data.mean(), mean_label=f'Mean: {data.mean():.1f}')
+            # Set appropriate x-axis ticks
+            tick_interval = 20 if upper_limit > 100 else 10
+            ax.set_xticks(np.arange(0, upper_limit + tick_interval, tick_interval))
+            ax.set_xlim(0, upper_limit)
+            ax.set_xlabel('IOD (Integrated Optical Density)')
+            ax.set_ylabel('Number of Deposits')
+            ax.set_title('Distribution of Pigment Amount (IOD)')
+            ax.legend()
+            # Add note if data was truncated
+            n_truncated = len(data[data > upper_limit])
+            if n_truncated > 0:
+                ax.text(0.98, 0.95, f'({n_truncated} deposits > {upper_limit} not shown)',
+                       transform=ax.transAxes, ha='right', va='top', fontsize=8, color='#666')
+        return self._histogram_figure(draw)
+
     def _generate_ph_distribution(self, deposit_data: pd.DataFrame) -> str:
         """Generate pH (Hue) distribution histogram from individual deposits with actual colors."""
-        fig, ax = plt.subplots(figsize=(8, 4))
-        
-        if deposit_data is not None and 'mean_hue' in deposit_data.columns:
-            # Filter out artifacts
-            valid_data = deposit_data[deposit_data['label'].isin(['normal', 'rod'])]
-            all_hues = valid_data['mean_hue'].dropna().values
-            
-            if len(all_hues) > 0:
-                # Bin size: 10 degrees
-                bins = np.arange(0, 370, 10)
-                
-                # Create histogram with colored bars based on hue values
-                n, bin_edges, patches = ax.hist(all_hues, bins=bins, edgecolor='white', alpha=0.8)
-                
-                # Color each bar based on its hue value
-                for patch, bin_left, bin_right in zip(patches, bin_edges[:-1], bin_edges[1:]):
-                    bin_center = (bin_left + bin_right) / 2
-                    patch.set_facecolor(hue_to_rgb(bin_center))
-                
-                ax.axvline(np.mean(all_hues), color='#333333', linestyle='--', 
-                          linewidth=2, label=f'Mean: {np.mean(all_hues):.1f}°')
-                
-                ax.set_xlabel('pH Indicator Hue (°)')
-                ax.set_ylabel('Number of Deposits')
-                ax.set_title('Distribution of pH Indicator (Hue)')
-                ax.legend()
-        
-        apply_publication_style(ax)
-        plt.tight_layout()
-        return self._fig_to_base64(fig)
-    
+        def draw(ax):
+            all_hues = self._deposit_values(deposit_data, 'mean_hue')
+            if all_hues is None:
+                return
+            # Bin size: 10 degrees
+            bins = np.arange(0, 370, 10)
+            # Create histogram with colored bars based on hue values
+            n, bin_edges, patches = ax.hist(all_hues, bins=bins, edgecolor='white', alpha=0.8)
+            # Color each bar based on its hue value
+            for patch, bin_left, bin_right in zip(patches, bin_edges[:-1], bin_edges[1:]):
+                bin_center = (bin_left + bin_right) / 2
+                patch.set_facecolor(hue_to_rgb(bin_center))
+            ax.axvline(np.mean(all_hues), color='#333333', linestyle='--',
+                      linewidth=2, label=f'Mean: {np.mean(all_hues):.1f}°')
+            ax.set_xlabel('pH Indicator Hue (°)')
+            ax.set_ylabel('Number of Deposits')
+            ax.set_title('Distribution of pH Indicator (Hue)')
+            ax.legend()
+        return self._histogram_figure(draw)
+
     def _generate_circularity_distribution(self, deposit_data: pd.DataFrame) -> str:
         """Generate circularity distribution histogram from individual deposits."""
-        fig, ax = plt.subplots(figsize=(8, 4))
-        
-        if deposit_data is not None and 'circularity' in deposit_data.columns:
-            # Filter out artifacts
-            valid_data = deposit_data[deposit_data['label'].isin(['normal', 'rod'])]
-            all_circ = valid_data['circularity'].dropna().values
-            
-            if len(all_circ) > 0:
-                # Bin size: 0.05
-                bins = np.arange(0, 1.05, 0.05)
-                
-                ax.hist(all_circ, bins=bins, color=DEFAULT_GRAY, edgecolor='white', alpha=0.8)
-                ax.axvline(np.mean(all_circ), color='#E53935', linestyle='--', 
-                          linewidth=2, label=f'Mean: {np.mean(all_circ):.3f}')
-                
-                ax.set_xlabel('Circularity (0-1)')
-                ax.set_ylabel('Number of Deposits')
-                ax.set_title('Distribution of Circularity')
-                ax.legend()
-                ax.set_xlim(0, 1)
-        
-        apply_publication_style(ax)
-        plt.tight_layout()
-        return self._fig_to_base64(fig)
-    
+        def draw(ax):
+            all_circ = self._deposit_values(deposit_data, 'circularity')
+            if all_circ is None:
+                return
+            # Bin size: 0.05
+            bins = np.arange(0, 1.05, 0.05)
+            self._hist_with_mean(ax, all_circ, bins=bins, mean=np.mean(all_circ),
+                                 mean_label=f'Mean: {np.mean(all_circ):.3f}')
+            ax.set_xlabel('Circularity (0-1)')
+            ax.set_ylabel('Number of Deposits')
+            ax.set_title('Distribution of Circularity')
+            ax.legend()
+            ax.set_xlim(0, 1)
+        return self._histogram_figure(draw)
+
     def _generate_group_comparison(
         self, 
         film_summary: pd.DataFrame, 
