@@ -45,8 +45,9 @@ from .config import config, get_timestamped_output_dir
 from .artifacts import IMAGE_SUMMARY, ALL_DEPOSITS
 from .ui_common import (
     Theme, NoScrollSpinBox, NoScrollDoubleSpinBox, NoScrollComboBox,
-    load_custom_fonts, get_icon_path
+    CollapsibleSection, load_custom_fonts, get_icon_path
 )
+from . import ui_motion
 
 # Note: trainer is imported lazily when needed to avoid loading sklearn at startup
 
@@ -746,231 +747,238 @@ class AnalysisTab(QWidget):
         self._setup_ui()
     
     def _setup_ui(self):
-        # Main layout for the tab
+        # A scroll area for the form + a sticky footer (progress + Run) that stays visible
+        # regardless of scroll. The form is a width-capped, centered two-column layout so on a
+        # 16:9 / 16:10 display fields don't stretch full-width and Run stays above the fold.
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Create scroll area
+        main_layout.setSpacing(0)
+
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         scroll_area.setFrameShape(QScrollArea.NoFrame)
-        
-        # Container widget for scroll area content
+
         scroll_content = QWidget()
         scroll_content.setObjectName("scrollContent")
-        layout = QVBoxLayout(scroll_content)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(6)
-        
-        # Input/Output
-        io_group = QGroupBox("Input / Output")
-        io_layout = QVBoxLayout()
-        io_layout.setSpacing(6)
-        io_layout.setContentsMargins(10, 12, 10, 10)
-        
-        # Default paths
+        outer = QVBoxLayout(scroll_content)
+        outer.setContentsMargins(10, 10, 10, 10)
+        outer.setSpacing(6)
+
+        # Center + cap the form width; two equal columns inside.
+        center_row = QHBoxLayout()
+        center_row.addStretch(1)
+        container = QWidget()
+        container.setMaximumWidth(1080)
+        cols = QHBoxLayout(container)
+        cols.setContentsMargins(0, 0, 0, 0)
+        cols.setSpacing(12)
+        left_col = QVBoxLayout(); left_col.setSpacing(10)
+        right_col = QVBoxLayout(); right_col.setSpacing(10)
+        cols.addLayout(left_col, 1)
+        cols.addLayout(right_col, 1)
+        center_row.addWidget(container, 0)
+        center_row.addStretch(1)
+        outer.addLayout(center_row)
+        outer.addStretch(1)
+
         default_input = str(Path.home() / "SCAT" / "data" / "images")
         default_output = str(Path.home() / "SCAT" / "data" / "results")
-        
-        # Input: File selector (select one or multiple files)
+
+        # ---- Input / Output (left column) ----
+        io_group = QGroupBox("Input / Output")
+        io_layout = QVBoxLayout()
+        io_layout.setSpacing(8)
+        io_layout.setContentsMargins(10, 12, 10, 10)
+
         input_row = QHBoxLayout()
         input_row.setSpacing(10)
-        
         input_label = QLabel("Input")
-        input_label.setMinimumWidth(70)
-        input_label.setStyleSheet(f"font-weight: bold; color: {Theme.TEXT_PRIMARY}; background-color: transparent;")
-        
+        input_label.setMinimumWidth(90)
+        input_label.setStyleSheet(
+            f"font-weight: {Theme.WEIGHT_LABEL}; color: {Theme.TEXT_PRIMARY}; background-color: transparent;")
         self.input_path_edit = QLineEdit()
-        self.input_path_edit.setPlaceholderText("Select image files...")
+        self.input_path_edit.setPlaceholderText("Select image files…")
         self.input_path_edit.setReadOnly(True)
-        
-        self.browse_btn = QPushButton("Browse...")
-        self.browse_btn.setMinimumWidth(80)
+        self.browse_btn = QPushButton("Browse…")
+        self.browse_btn.setMinimumWidth(90)
         self.browse_btn.setToolTip("Select one or more image files (Ctrl+A to select all in folder)")
         self.browse_btn.clicked.connect(self._browse_input)
-        
         input_row.addWidget(input_label)
         input_row.addWidget(self.input_path_edit, 1)
         input_row.addWidget(self.browse_btn)
-        
         io_layout.addLayout(input_row)
-        
+
         self.output_dir = PathSelector("Output", is_folder=True, config_key="last_output_dir", default_path=default_output)
-        self.model_path = PathSelector("Classifier", filter="Model (*.pkl *.pt)", config_key="last_model_path")
+        # "Classifier model" (the model file) — distinct from the "Method" picker in Options.
+        self.model_path = PathSelector("Classifier model", filter="Model (*.pkl *.pt)", config_key="last_model_path")
+        # U-Net detection model lives under Advanced (optional / rarely changed).
         self.detection_model_path = PathSelector("Detection (U-Net)", filter="Model (*.pt)", config_key="last_detection_model_path")
         self.detection_model_path.setToolTip("Optional: U-Net model for improved deposit detection")
-        
-        # Groups section
+        io_layout.addWidget(self.output_dir)
+        io_layout.addWidget(self.model_path)
+        io_group.setLayout(io_layout)
+        left_col.addWidget(io_group)
+
+        # ---- Options: essentials only (left column) ----
+        options_group = QGroupBox("Options")
+        options_layout = QFormLayout()
+        options_layout.setVerticalSpacing(8)
+        options_layout.setHorizontalSpacing(12)
+        options_layout.setContentsMargins(10, 12, 10, 10)
+        self.model_type = NoScrollComboBox()
+        self.model_type.addItems(["Threshold", "Random Forest", "CNN"])
+        model_type_map = {"threshold": 0, "rf": 1, "cnn": 2}
+        self.model_type.setCurrentIndex(model_type_map.get(config.get("analysis.model_type", "rf"), 1))
+        method_label = QLabel("Method")
+        method_label.setStyleSheet("background-color: transparent;")
+        options_layout.addRow(method_label, self.model_type)
+        self.annotate = QCheckBox("Generate annotated images")
+        self.annotate.setChecked(config.get("analysis.annotate", True))
+        options_layout.addRow(self.annotate)
+        self.visualize = QCheckBox("Generate visualizations")
+        self.visualize.setChecked(config.get("analysis.visualize", True))
+        options_layout.addRow(self.visualize)
+        self.report = QCheckBox("Generate HTML report")
+        self.report.setChecked(config.get("analysis.report", True))
+        options_layout.addRow(self.report)
+        options_group.setLayout(options_layout)
+        left_col.addWidget(options_group)
+        left_col.addStretch(1)
+
+        # ---- Groups (right column) ----
         groups_group = QGroupBox("Groups")
         groups_layout = QVBoxLayout()
-        groups_layout.setSpacing(6)
+        groups_layout.setSpacing(8)
         groups_layout.setContentsMargins(10, 12, 10, 10)
-        
-        # Use groups checkbox
         self.use_groups = QCheckBox("Use groups for comparison")
         self.use_groups.setChecked(config.get("analysis.use_groups", True))
         self.use_groups.toggled.connect(self._on_use_groups_toggled)
         groups_layout.addWidget(self.use_groups)
-        
-        # Deterministic grouping: derive {file: group} from each file's parent subfolder
-        # (SCAT's "one folder per condition" convention). Replaces the drag-drop editor.
+
+        # Grouping actions side by side (no longer full-width banner buttons).
+        group_btn_row = QHBoxLayout()
+        group_btn_row.setSpacing(8)
         self.autogroup_btn = QPushButton("Group by subfolder")
         self.autogroup_btn.setToolTip(
             "Assign each selected image to a group named after its parent subfolder.\n"
             "Double-click a group in the list below to rename it.")
         # wrap: QPushButton.clicked passes a `checked` bool that would shadow `announce`
         self.autogroup_btn.clicked.connect(lambda: self._autogroup_by_subfolder(announce=True))
-        groups_layout.addWidget(self.autogroup_btn)
-
-        # Explicit override: load a {filename -> group} mapping from a CSV (mirrors CLI --metadata),
-        # for users whose folder layout doesn't encode the experimental design.
         self.load_groups_csv_btn = QPushButton("Load grouping CSV…")
         self.load_groups_csv_btn.setToolTip(
             "Load an explicit filename→group mapping from a CSV (columns: filename, group).\n"
             "Overrides subfolder grouping; matches images by filename.")
         self.load_groups_csv_btn.clicked.connect(self._load_grouping_csv)
-        groups_layout.addWidget(self.load_groups_csv_btn)
+        group_btn_row.addWidget(self.autogroup_btn, 1)
+        group_btn_row.addWidget(self.load_groups_csv_btn, 1)
+        groups_layout.addLayout(group_btn_row)
 
         self.groups_hint = QLabel("Select images, then group by subfolder. Double-click a group to rename.")
         self.groups_hint.setWordWrap(True)
-        self.groups_hint.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; font-size: 11px;")
+        self.groups_hint.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; font-size: {Theme.FS_XS}px;")
         groups_layout.addWidget(self.groups_hint)
 
-        # Groups tree (expandable - click to show files; group nodes are editable to rename)
         self.groups_tree = QTreeWidget()
         self.groups_tree.setHeaderHidden(True)
         self.groups_tree.setMinimumHeight(150)
-        self.groups_tree.setMaximumHeight(200)
         self.groups_tree.setIndentation(15)
         self.groups_tree.setAnimated(True)
-        # Single click to expand/collapse
         self.groups_tree.itemClicked.connect(self._on_group_tree_clicked)
-        # Right-click a group to rename it (the review/correct affordance)
         self.groups_tree.setContextMenuPolicy(Qt.CustomContextMenu)
         self.groups_tree.customContextMenuRequested.connect(self._on_groups_context_menu)
-        groups_layout.addWidget(self.groups_tree)
-        
+        groups_layout.addWidget(self.groups_tree, 1)
         groups_group.setLayout(groups_layout)
-        
-        # Note: input row already added above
-        io_layout.addWidget(self.output_dir)
-        io_layout.addWidget(self.model_path)
-        io_layout.addWidget(self.detection_model_path)
-        io_group.setLayout(io_layout)
-        layout.addWidget(io_group)
-        
-        # Add groups section after I/O
-        layout.addWidget(groups_group)
-        
-        # Update groups UI state
-        self._on_use_groups_toggled(self.use_groups.isChecked())
-        
-        # Options
-        options_group = QGroupBox("Options")
-        options_layout = QFormLayout()
-        options_layout.setVerticalSpacing(8)
-        options_layout.setHorizontalSpacing(12)
-        options_layout.setContentsMargins(10, 12, 10, 10)
-        
-        self.model_type = NoScrollComboBox()
-        self.model_type.addItems(["Threshold", "Random Forest", "CNN"])
-        model_type_map = {"threshold": 0, "rf": 1, "cnn": 2}
-        self.model_type.setCurrentIndex(model_type_map.get(config.get("analysis.model_type", "rf"), 1))
-        classifier_label = QLabel("Classifier")
-        classifier_label.setStyleSheet("background-color: transparent;")
-        options_layout.addRow(classifier_label, self.model_type)
-        
-        # Report / visualization options (always available; the report is a follow-up action)
-        self.annotate = QCheckBox("Generate annotated images")
-        self.annotate.setChecked(config.get("analysis.annotate", True))
-        options_layout.addRow(self.annotate)
-        
-        self.visualize = QCheckBox("Generate visualizations")
-        self.visualize.setChecked(config.get("analysis.visualize", True))
-        options_layout.addRow(self.visualize)
-        
-        self.spatial = QCheckBox("Spatial analysis")
-        self.spatial.setChecked(config.get("analysis.spatial", True))
-        options_layout.addRow(self.spatial)
-        
-        self.stats = QCheckBox("Statistical analysis")
-        self.stats.setChecked(config.get("analysis.stats", True))
-        options_layout.addRow(self.stats)
-        
-        self.report = QCheckBox("Generate HTML report")
-        self.report.setChecked(config.get("analysis.report", True))
-        options_layout.addRow(self.report)
-        
-        self.save_json = QCheckBox("Save for retraining (JSON)")
-        self.save_json.setChecked(config.get("analysis.save_json", True))
-        self.save_json.setToolTip("Save contour data for model retraining. Disable to reduce file size.")
-        options_layout.addRow(self.save_json)
-        
-        options_group.setLayout(options_layout)
-        layout.addWidget(options_group)
+        right_col.addWidget(groups_group)
 
-        # Detection settings
-        detect_group = QGroupBox("Detection Settings")
-        detect_layout = QFormLayout()
+        # ---- Advanced settings (collapsible, right column) ----
+        advanced = CollapsibleSection("Advanced settings", expanded=False)
+        advanced.add_widget(self.detection_model_path)
+
+        detect_form_w = QWidget()
+        detect_layout = QFormLayout(detect_form_w)
         detect_layout.setVerticalSpacing(8)
         detect_layout.setHorizontalSpacing(12)
-        detect_layout.setContentsMargins(10, 12, 10, 10)
-        
+        detect_layout.setContentsMargins(0, 0, 0, 0)
         self.min_area = NoScrollSpinBox()
         self.min_area.setRange(1, 1000)
         self.min_area.setValue(config.get("detection.min_area", 20))
         self.min_area.setButtonSymbols(QSpinBox.NoButtons)
         detect_layout.addRow("Min Area", self.min_area)
-        
         self.max_area = NoScrollSpinBox()
         self.max_area.setRange(100, 50000)
         self.max_area.setValue(config.get("detection.max_area", 10000))
         self.max_area.setButtonSymbols(QSpinBox.NoButtons)
         detect_layout.addRow("Max Area", self.max_area)
-        
         self.threshold = NoScrollDoubleSpinBox()
         self.threshold.setRange(0.1, 1.0)
         self.threshold.setSingleStep(0.05)
         self.threshold.setValue(config.get("detection.threshold", 0.6))
         self.threshold.setButtonSymbols(QDoubleSpinBox.NoButtons)
         detect_layout.addRow("Circularity", self.threshold)
-        
-        detect_group.setLayout(detect_layout)
-        layout.addWidget(detect_group)
-        
-        # Run button - PRIMARY color for emphasis
-        self.run_btn = QPushButton("▶  Run Analysis")
-        self.run_btn.setMinimumHeight(48)
-        self.run_btn.setStyleSheet(Theme.button_style(Theme.PRIMARY, "#FFFFFF", Theme.PRIMARY_LIGHT))
-        self.run_btn.clicked.connect(self._run_analysis)
-        layout.addWidget(self.run_btn)
-        
-        # Progress
-        progress_layout = QVBoxLayout()
-        
-        progress_bar_layout = QHBoxLayout()
+        advanced.add_widget(detect_form_w)
+
+        self.spatial = QCheckBox("Spatial analysis")
+        self.spatial.setChecked(config.get("analysis.spatial", True))
+        advanced.add_widget(self.spatial)
+        self.stats = QCheckBox("Statistical analysis")
+        self.stats.setChecked(config.get("analysis.stats", True))
+        advanced.add_widget(self.stats)
+        self.save_json = QCheckBox("Save for retraining (JSON)")
+        self.save_json.setChecked(config.get("analysis.save_json", True))
+        self.save_json.setToolTip("Save contour data for model retraining. Disable to reduce file size.")
+        advanced.add_widget(self.save_json)
+        right_col.addWidget(advanced)
+        right_col.addStretch(1)
+
+        # Update groups UI state
+        self._on_use_groups_toggled(self.use_groups.isChecked())
+
+        scroll_area.setWidget(scroll_content)
+        main_layout.addWidget(scroll_area, 1)
+
+        # ---- Sticky footer: progress + Run (always reachable) ----
+        footer = QWidget()
+        footer.setObjectName("runFooter")
+        footer.setStyleSheet(
+            f"QWidget#runFooter {{ background-color: {Theme.BG_BASE}; border-top: 1px solid {Theme.BORDER}; }}")
+        footer_v = QVBoxLayout(footer)
+        footer_v.setContentsMargins(6, 8, 6, 8)
+        footer_center = QHBoxLayout()
+        footer_center.addStretch(1)
+        footer_inner = QWidget()
+        footer_inner.setMaximumWidth(1080)
+        footer_row = QHBoxLayout(footer_inner)
+        footer_row.setContentsMargins(0, 0, 0, 0)
+        footer_row.setSpacing(10)
         self.progress = QProgressBar()
+        self.progress.setMinimumWidth(320)
         self.progress_label = QLabel("")
-        progress_bar_layout.addWidget(self.progress)
-        progress_bar_layout.addWidget(self.progress_label)
-        progress_layout.addLayout(progress_bar_layout)
-        
         self.eta_label = QLabel("")
         self.eta_label.setStyleSheet(f"color: {Theme.TEXT_SECONDARY};")
-        progress_layout.addWidget(self.eta_label)
-        
-        layout.addLayout(progress_layout)
-        
-        layout.addStretch()
-        
-        # Initialize timing variables
+        self.progress.setVisible(False)          # shown once a run starts
+        self.progress_label.setVisible(False)
+        self.run_btn = QPushButton("▶  Run Analysis")
+        self.run_btn.setMinimumHeight(48)
+        self.run_btn.setMinimumWidth(240)
+        self.run_btn.setStyleSheet(
+            Theme.button_style(Theme.PRIMARY, "#FFFFFF", Theme.PRIMARY_LIGHT, Theme.PRIMARY_DARK))
+        # Responsive depth on the primary action: a coral-tinted shadow lifts on hover and
+        # depresses on press (coral reads on the near-black theme where a neutral shadow can't).
+        ui_motion.attach_button_motion(self.run_btn, primary=True)
+        self.run_btn.clicked.connect(self._run_analysis)
+        footer_row.addStretch(1)
+        footer_row.addWidget(self.progress)
+        footer_row.addWidget(self.progress_label)
+        footer_row.addWidget(self.eta_label)
+        footer_row.addWidget(self.run_btn)
+        footer_center.addWidget(footer_inner, 0)
+        footer_center.addStretch(1)
+        footer_v.addLayout(footer_center)
+        main_layout.addWidget(footer)
+
         self._start_time = None
-        
-        # Set scroll content and add to main layout
-        scroll_area.setWidget(scroll_content)
-        main_layout.addWidget(scroll_area)
     
     def _save_settings(self):
         """Save current settings to config."""
@@ -1220,6 +1228,8 @@ class AnalysisTab(QWidget):
         self._image_files_for_analysis = [str(f) for f in image_files]
         
         self.run_btn.setEnabled(False)
+        self.progress.setVisible(True)
+        self.progress_label.setVisible(True)
         self.progress.setValue(0)
         self.eta_label.setText("")
         self._output_dir = str(output_dir)
@@ -1286,7 +1296,7 @@ class AnalysisTab(QWidget):
         import time
         
         self.progress.setMaximum(total)
-        self.progress.setValue(current)
+        ui_motion.animate_value(self.progress, current)   # eased, interruptible (never hops)
         self.progress_label.setText(f"{current}/{total}")
         
         # Calculate ETA
@@ -2064,7 +2074,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(header_layout)
         
         subtitle = QLabel("Spot Classification and Analysis Tool for Drosophila Excreta")
-        subtitle.setStyleSheet("color: #666; padding-left: 10px;")
+        subtitle.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; padding-left: 10px;")
         layout.addWidget(subtitle)
         
         self.tabs = QTabWidget()
@@ -2120,10 +2130,18 @@ class MainWindow(QMainWindow):
         setup_layout.addWidget(self.setup_sub_tabs)
         self.tabs.addTab(self.setup_tab, "Setup")
 
+        # Crossfade panes on tab switch — connected AFTER population so the initial tab
+        # doesn't fire it. Covers programmatic setCurrentWidget (e.g. jump to Results).
+        self.tabs.currentChanged.connect(self._fade_tab)
+
         # Conversational assistant dock (lazy — the agent stack is optional)
         self._build_chat_dock()
 
         self.statusBar().showMessage("Ready")
+
+        # Post-build polish QSS can't express: pointer cursors on controls + soft elevation
+        # on top-level cards (see scat.ui_motion).
+        ui_motion.apply_ui_polish(self)
 
     def _build_chat_dock(self):
         """Add the Assistant dock. Imported lazily so `import scat.main_gui` and the core GUI
@@ -2150,7 +2168,22 @@ class MainWindow(QMainWindow):
         self.chat_dock.visibilityChanged.connect(self.assistant_btn.setChecked)
 
     def _toggle_chat_dock(self, checked):
-        self.chat_dock.setVisible(checked)
+        # Fade the dock content in/out (drawer curve) rather than popping it.
+        content = self.chat_dock.widget()
+        if checked:
+            self.chat_dock.setVisible(True)
+            if content is not None:
+                ui_motion.fade_in(content, dur=ui_motion.DUR_DOCK, curve=ui_motion.CURVE_DRAWER)
+        elif content is not None:
+            ui_motion.fade_out(content, on_finished=lambda: self.chat_dock.setVisible(False))
+        else:
+            self.chat_dock.setVisible(False)
+
+    def _fade_tab(self, index):
+        """Crossfade the newly-selected tab pane in (covers programmatic switches too)."""
+        w = self.tabs.widget(index)
+        if w is not None:
+            ui_motion.fade_in(w, dur=ui_motion.DUR_TAB, curve=ui_motion.CURVE_OUT)
 
     def _setup_shortcuts(self):
         # Global shortcuts

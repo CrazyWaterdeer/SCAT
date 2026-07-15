@@ -6,7 +6,10 @@ Consolidates Theme, custom widgets, and utility functions.
 import sys
 from pathlib import Path
 
-from PySide6.QtWidgets import QSpinBox, QDoubleSpinBox, QComboBox, QTableWidgetItem
+from PySide6.QtWidgets import (
+    QSpinBox, QDoubleSpinBox, QComboBox, QTableWidgetItem,
+    QWidget, QVBoxLayout, QPushButton,
+)
 from PySide6.QtGui import QWheelEvent, QFontDatabase
 from PySide6.QtCore import Qt
 
@@ -15,72 +18,101 @@ from PySide6.QtCore import Qt
 # Theme Colors - Dark Theme with Coral Accent (DIC2497 #DA4E42)
 # =============================================================================
 class Theme:
-    """SCAT Application Color Theme - Dark with Coral Accent (minimal use)"""
-    
-    # Primary accent - DIC2497 (minimal use for accents only)
-    PRIMARY = "#DA4E42"        # Coral red - selected tabs, primary buttons only
+    """SCAT Application Color Theme — dark, with a single coral accent (DIC2497).
+
+    Token discipline (docs/superpowers/specs/2026-07-15-scat-design-elevation.md):
+      * Surface tiers are role-named and monotonic in lightness
+        (BG_BASE < BG_INSET < BG_SURFACE < BG_HOVER < BG_ACTIVE).
+      * PRIMARY / SECONDARY are CHROME tokens — selection, focus, state — never a data marker.
+      * NORMAL / ROD / ARTIFACT are SEMANTIC data colors, byte-identical to the report tokens.
+    """
+
+    # ---- Chrome accents (UI state only — never a data marker) ----
+    PRIMARY = "#DA4E42"        # Coral (DIC2497) — selected tab, focus ring, primary action
     PRIMARY_DARK = "#C44539"
     PRIMARY_LIGHT = "#E8695E"
-    
-    # Secondary - DIC540 (general UI elements)
-    SECONDARY = "#636867"      # Gray-green
-    SECONDARY_DARK = "#525756"
+
+    SECONDARY = "#636867"      # Gray-green (DIC540) — neutral hover / secondary
+    SECONDARY_DARK = "#4E5251" # pressed feedback
     SECONDARY_LIGHT = "#7A7F7E"
-    
-    # Semantic colors for deposits
-    NORMAL = "#4CAF50"         # Green - normal deposits
-    NORMAL_DARK = "#388E3C"
-    
-    ROD = "#DA4E42"            # Same as primary - RODs  
+
+    # ---- Semantic deposit colors (IDENTICAL to report --normal/--rod/--artifact) ----
+    NORMAL = "#1F9E77"         # Teal — color-blind-safe, ties the pH-axis mid, separates from ROD
+    NORMAL_DARK = "#177A5C"
+    ROD = "#DA4E42"            # Coral — RODs (matches report --rod)
     ROD_DARK = "#C44539"
-    
-    ARTIFACT = "#636867"       # Same as secondary - artifacts
-    ARTIFACT_DARK = "#525756"
-    
-    # Background layers (very dark, almost black)
-    BG_DARKEST = "#0A0A0A"     # Main window background
-    BG_DARK = "#121212"        # Card/group background
-    BG_MEDIUM = "#101010"      # Input field background
-    BG_LIGHT = "#242424"       # Hover state
-    BG_LIGHTER = "#2E2E2E"     # Active/pressed state
-    
-    # Text
-    TEXT_PRIMARY = "#FFFFFF"
-    TEXT_SECONDARY = "#9A9A9A"
-    TEXT_MUTED = "#5A5A5A"
-    
-    # Borders
+    ARTIFACT = "#636867"       # Gray-green — artifacts (matches report --artifact)
+    ARTIFACT_DARK = "#4E5251"
+
+    # ---- Surface tiers (role-named, monotonic in lightness) ----
+    BG_BASE    = "#0A0A0A"     # window
+    BG_INSET   = "#0E0E0E"     # input fields, table alternate rows
+    BG_SURFACE = "#171717"     # group boxes / cards — a visible step above BASE
+    BG_HOVER   = "#242424"     # hover
+    BG_ACTIVE  = "#2E2E2E"     # active / pressed
+    # Backwards-compatible aliases (old names → new tiers). Prefer the role names above.
+    BG_DARKEST = BG_BASE
+    BG_MEDIUM  = BG_INSET
+    BG_DARK    = BG_SURFACE
+    BG_LIGHT   = BG_HOVER
+    BG_LIGHTER = BG_ACTIVE
+
+    # ---- Text (contrast-checked; see spec §6) ----
+    TEXT_PRIMARY   = "#EDEDED"  # near-white — softer than pure #FFF
+    TEXT_SECONDARY = "#9A9A9A"  # the one muted/secondary token (6.66:1 on BASE)
+    TEXT_MUTED     = "#8A8A8A"  # was #5A5A5A (FAIL) → 5.43:1 on SURFACE
+    TEXT_DISABLED  = "#6E6E6E"  # disabled labels — 3.27:1 on #1E1E1E (was #404040, 1.61:1)
+
+    # ---- Borders / focus ----
     BORDER = "#2A2A2A"
-    BORDER_FOCUS = "#DA4E42"   # Focus uses primary
-    
+    BORDER_FOCUS = "#DA4E42"   # focus ring (rendered 2px — 4.67:1 on the inset field)
+    FOCUS_RING = "#DA4E42"
+
+    # ---- Scales (spacing 4/8 · radius · weight · font-size) ----
+    RADIUS_CONTROL = 6         # button, input, combo, checkbox, menu item, tooltip
+    RADIUS_CONTAINER = 8       # group box, tab, table, list, tree, textedit
+    RADIUS_PILL = 17           # chat send button (34px control → full round)
+    SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_6 = 4, 8, 12, 16, 20, 24
+    WEIGHT_BODY, WEIGHT_LABEL, WEIGHT_TITLE = 400, 500, 600
+    FS_XS, FS_SM, FS_BODY, FS_TITLE, FS_DISPLAY = 11, 12, 13, 15, 24
+
     # Cached stylesheet
     _cached_app_stylesheet = None
     _cached_labeling_stylesheet = None
     
     @staticmethod
-    def button_style(bg_color: str, text_color: str = "#FFFFFF", hover_color: str = None) -> str:
-        """Generate button stylesheet with specific colors."""
+    def button_style(bg_color: str, text_color: str = "#FFFFFF",
+                     hover_color: str = None, pressed_color: str = None) -> str:
+        """Generate a filled action-button stylesheet with specific colors (run button, the
+        semantic labeling buttons, …). A 2px focus ring is reserved as a transparent border so
+        keyboard focus never reflows the button. Pass ``pressed_color`` (usually the color's
+        own dark shade) so a coloured button darkens on press instead of flashing neutral gray."""
         if hover_color is None:
-            hover_color = Theme.BG_LIGHTER
+            hover_color = Theme.BG_ACTIVE
+        if pressed_color is None:
+            pressed_color = Theme.BG_HOVER
         return f"""
             QPushButton {{
                 background-color: {bg_color};
                 color: {text_color};
-                border: none;
-                padding: 10px 20px;
-                border-radius: 5px;
+                border: 2px solid transparent;
+                padding: 8px 16px;
+                border-radius: {Theme.RADIUS_CONTROL}px;
                 font-weight: bold;
-                font-size: 13px;
+                font-size: {Theme.FS_BODY}px;
             }}
             QPushButton:hover {{
                 background-color: {hover_color};
             }}
             QPushButton:pressed {{
-                background-color: {Theme.BG_LIGHT};
+                background-color: {pressed_color};
+            }}
+            QPushButton:focus {{
+                border: 2px solid {Theme.FOCUS_RING};
             }}
             QPushButton:disabled {{
                 background-color: #1E1E1E;
-                color: #404040;
+                color: {Theme.TEXT_DISABLED};
             }}
         """
     
@@ -107,36 +139,37 @@ class Theme:
             /* Tab Widget */
             QTabWidget::pane {{
                 border: 1px solid {cls.BORDER};
-                border-radius: 5px;
+                border-radius: {cls.RADIUS_CONTAINER}px;
                 background-color: {cls.BG_DARKEST};
                 margin-top: -1px;
             }}
             QTabBar::tab {{
                 background-color: {cls.BG_MEDIUM};
                 color: {cls.TEXT_SECONDARY};
-                padding: 12px 28px;
+                padding: 12px 24px;
                 margin-right: 3px;
-                border-top-left-radius: 6px;
-                border-top-right-radius: 6px;
-                font-weight: bold;
+                border-top-left-radius: {cls.RADIUS_CONTAINER}px;
+                border-top-right-radius: {cls.RADIUS_CONTAINER}px;
+                font-weight: {cls.WEIGHT_TITLE};
             }}
             QTabBar::tab:selected {{
                 background-color: {cls.PRIMARY};
-                color: {cls.TEXT_PRIMARY};
+                color: #FFFFFF;
             }}
             QTabBar::tab:hover:!selected {{
                 background-color: {cls.BG_LIGHT};
                 color: {cls.TEXT_PRIMARY};
             }}
             
-            /* Group Box */
+            /* Group Box — raised surface (BG_SURFACE over BG_BASE) with a lit top edge for depth */
             QGroupBox {{
                 background-color: {cls.BG_DARK};
                 border: 1px solid {cls.BORDER};
-                border-radius: 8px;
+                border-top: 1px solid #3A3A3A;
+                border-radius: {cls.RADIUS_CONTAINER}px;
                 margin-top: 20px;
                 padding: 20px 12px 12px 12px;
-                font-weight: bold;
+                font-weight: {cls.WEIGHT_TITLE};
             }}
             QGroupBox::title {{
                 subcontrol-origin: margin;
@@ -148,25 +181,26 @@ class Theme:
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 rgba(10, 10, 10, 255),
                     stop:0.55 rgba(10, 10, 10, 255),
-                    stop:0.65 rgba(18, 18, 18, 255),
-                    stop:1 rgba(18, 18, 18, 255));
-                font-size: 13px;
+                    stop:0.65 rgba(23, 23, 23, 255),
+                    stop:1 rgba(23, 23, 23, 255));
+                font-size: {cls.FS_BODY}px;
+                font-weight: {cls.WEIGHT_TITLE};
             }}
-            
+
             /* Scroll Area */
             QScrollArea {{
                 background-color: transparent;
                 border: none;
             }}
-            
+
             /* Buttons - Secondary (gray) by default with visible background */
             QPushButton {{
                 background-color: {cls.BG_LIGHT};
                 color: {cls.TEXT_PRIMARY};
                 border: 1px solid {cls.BORDER};
                 padding: 8px 16px;
-                border-radius: 5px;
-                font-weight: bold;
+                border-radius: {cls.RADIUS_CONTROL}px;
+                font-weight: {cls.WEIGHT_TITLE};
             }}
             QPushButton:hover {{
                 background-color: {cls.SECONDARY};
@@ -175,52 +209,62 @@ class Theme:
             QPushButton:pressed {{
                 background-color: {cls.SECONDARY_DARK};
             }}
+            QPushButton:focus {{
+                border: 2px solid {cls.FOCUS_RING};
+                padding: 7px 15px;
+            }}
             QPushButton:disabled {{
                 background-color: #1E1E1E;
-                color: #404040;
+                color: {cls.TEXT_DISABLED};
+                border-color: {cls.BORDER};
             }}
             
             /* Input Fields - background matches surroundings */
             QLineEdit, QSpinBox, QDoubleSpinBox {{
                 background-color: {cls.BG_MEDIUM};
                 border: 1px solid {cls.BORDER};
-                border-radius: 5px;
+                border-radius: {cls.RADIUS_CONTROL}px;
                 padding: 8px 10px;
                 color: {cls.TEXT_PRIMARY};
                 min-height: 20px;
                 selection-background-color: {cls.SECONDARY};
             }}
             QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {{
-                border-color: {cls.PRIMARY};
+                border: 2px solid {cls.PRIMARY};
+                padding: 7px 9px;
             }}
-            
+
             /* ComboBox - separate styling */
             QComboBox {{
                 background-color: {cls.BG_MEDIUM};
                 border: 1px solid {cls.BORDER};
-                border-radius: 5px;
+                border-radius: {cls.RADIUS_CONTROL}px;
                 padding: 8px 28px 8px 10px;
                 color: {cls.TEXT_PRIMARY};
                 min-height: 20px;
                 selection-background-color: {cls.SECONDARY};
             }}
             QComboBox:focus {{
-                border-color: {cls.PRIMARY};
+                border: 2px solid {cls.PRIMARY};
+                padding: 7px 27px 7px 9px;
             }}
             QComboBox::drop-down {{
                 subcontrol-origin: padding;
                 subcontrol-position: center right;
-                width: 20px;
+                width: 22px;
                 border: none;
                 border-left: 1px solid {cls.BORDER};
-                border-top-right-radius: 5px;
-                border-bottom-right-radius: 5px;
+                border-top-right-radius: {cls.RADIUS_CONTROL}px;
+                border-bottom-right-radius: {cls.RADIUS_CONTROL}px;
                 background-color: transparent;
             }}
             QComboBox::down-arrow {{
-                width: 10px;
-                height: 10px;
-                image: none;
+                width: 12px;
+                height: 12px;
+                image: url("{qss_icon('caret-down.svg')}");
+            }}
+            QComboBox:hover::down-arrow, QComboBox:focus::down-arrow, QComboBox:on::down-arrow {{
+                image: url("{qss_icon('caret-down-hover.svg')}");
             }}
             QComboBox QAbstractItemView {{
                 background-color: {cls.BG_DARK};
@@ -237,23 +281,27 @@ class Theme:
                 background-color: {cls.SECONDARY};
             }}
             
-            /* Labels - no background, bold for form labels */
+            /* Labels - body weight by default; emphasis comes from titles/section headers */
             QLabel {{
                 color: {cls.TEXT_PRIMARY};
                 background-color: transparent;
                 padding: 0px;
-                font-weight: bold;
+                font-weight: {cls.WEIGHT_BODY};
             }}
-            
+
             /* Tables */
             QTableWidget {{
                 background-color: {cls.BG_DARK};
+                alternate-background-color: {cls.BG_INSET};
                 gridline-color: {cls.BORDER};
                 border: 1px solid {cls.BORDER};
-                border-radius: 5px;
+                border-radius: {cls.RADIUS_CONTAINER}px;
             }}
             QTableWidget::item {{
                 padding: 8px;
+            }}
+            QTableWidget::item:hover {{
+                background-color: #1A1A1A;
             }}
             QTableWidget::item:selected {{
                 background-color: {cls.SECONDARY};
@@ -264,7 +312,7 @@ class Theme:
                 padding: 10px 8px;
                 border: none;
                 border-bottom: 1px solid {cls.BORDER};
-                font-weight: bold;
+                font-weight: {cls.WEIGHT_TITLE};
             }}
             QTableCornerButton::section {{
                 background-color: {cls.BG_DARK};
@@ -276,7 +324,7 @@ class Theme:
             QListWidget {{
                 background-color: {cls.BG_DARK};
                 border: 1px solid {cls.BORDER};
-                border-radius: 5px;
+                border-radius: {cls.RADIUS_CONTAINER}px;
             }}
             QListWidget::item {{
                 padding: 10px;
@@ -292,7 +340,7 @@ class Theme:
             QTreeWidget {{
                 background-color: {cls.BG_DARK};
                 border: 1px solid {cls.BORDER};
-                border-radius: 5px;
+                border-radius: {cls.RADIUS_CONTAINER}px;
             }}
             QTreeWidget::item {{
                 padding: 4px 8px;
@@ -322,7 +370,7 @@ class Theme:
                 margin: 2px;
             }}
             QScrollBar::handle:vertical {{
-                background-color: {cls.BG_LIGHTER};
+                background-color: #484848;
                 border-radius: 5px;
                 min-height: 30px;
             }}
@@ -339,7 +387,7 @@ class Theme:
                 margin: 2px;
             }}
             QScrollBar::handle:horizontal {{
-                background-color: {cls.BG_LIGHTER};
+                background-color: #484848;
                 border-radius: 5px;
                 min-width: 30px;
             }}
@@ -353,7 +401,7 @@ class Theme:
             /* Progress Bar */
             QProgressBar {{
                 background-color: {cls.BG_MEDIUM};
-                border-radius: 5px;
+                border-radius: {cls.RADIUS_CONTROL}px;
                 text-align: center;
                 color: {cls.TEXT_PRIMARY};
                 min-height: 22px;
@@ -368,7 +416,7 @@ class Theme:
             QTextEdit {{
                 background-color: {cls.BG_DARK};
                 border: 1px solid {cls.BORDER};
-                border-radius: 5px;
+                border-radius: {cls.RADIUS_CONTAINER}px;
                 padding: 10px;
             }}
             
@@ -389,11 +437,15 @@ class Theme:
             QCheckBox::indicator:checked {{
                 background-color: {cls.PRIMARY};
                 border-color: {cls.PRIMARY};
+                image: url("{qss_icon('check.svg')}");
             }}
             QCheckBox::indicator:hover {{
                 border-color: {cls.PRIMARY_LIGHT};
             }}
-            
+            QCheckBox:focus::indicator {{
+                border-color: {cls.PRIMARY};
+            }}
+
             /* RadioButton - same style as CheckBox */
             QRadioButton {{
                 spacing: 10px;
@@ -415,7 +467,10 @@ class Theme:
             QRadioButton::indicator:hover {{
                 border-color: {cls.PRIMARY_LIGHT};
             }}
-            
+            QRadioButton:focus::indicator {{
+                border-color: {cls.PRIMARY};
+            }}
+
             /* Scroll Area */
             QScrollArea {{
                 border: none;
@@ -434,12 +489,12 @@ class Theme:
             QMenu {{
                 background-color: {cls.BG_DARK};
                 border: 1px solid {cls.BORDER};
-                border-radius: 6px;
+                border-radius: {cls.RADIUS_CONTAINER}px;
                 padding: 6px;
             }}
             QMenu::item {{
-                padding: 10px 24px;
-                border-radius: 4px;
+                padding: 8px 24px;
+                border-radius: {cls.RADIUS_CONTROL}px;
             }}
             QMenu::item:selected {{
                 background-color: {cls.SECONDARY};
@@ -451,7 +506,7 @@ class Theme:
                 color: {cls.TEXT_PRIMARY};
                 border: 1px solid {cls.BORDER};
                 padding: 8px;
-                border-radius: 4px;
+                border-radius: {cls.RADIUS_CONTROL}px;
             }}
         """
         return cls._cached_app_stylesheet
@@ -466,9 +521,10 @@ class Theme:
                 color: {cls.TEXT_PRIMARY};
             }}
             QGroupBox {{
-                font-weight: bold;
+                font-weight: {cls.WEIGHT_TITLE};
                 border: 1px solid {cls.BORDER};
-                border-radius: 8px;
+                border-top: 1px solid #3A3A3A;
+                border-radius: {cls.RADIUS_CONTAINER}px;
                 margin-top: 20px;
                 padding: 20px 12px 12px 12px;
                 background-color: {cls.BG_DARK};
@@ -483,42 +539,53 @@ class Theme:
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 rgba(10, 10, 10, 255),
                     stop:0.55 rgba(10, 10, 10, 255),
-                    stop:0.65 rgba(18, 18, 18, 255),
-                    stop:1 rgba(18, 18, 18, 255));
-                font-size: 13px;
+                    stop:0.65 rgba(23, 23, 23, 255),
+                    stop:1 rgba(23, 23, 23, 255));
+                font-size: {cls.FS_BODY}px;
+                font-weight: {cls.WEIGHT_TITLE};
             }}
             QPushButton {{
                 background-color: {cls.BG_LIGHT};
                 border: 1px solid {cls.BORDER};
-                border-radius: 4px;
+                border-radius: {cls.RADIUS_CONTROL}px;
                 padding: 6px 12px;
-                min-height: 24px;
+                min-height: 28px;
                 color: {cls.TEXT_PRIMARY};
-                font-weight: bold;
+                font-weight: {cls.WEIGHT_TITLE};
             }}
             QPushButton:hover {{
                 background-color: {cls.SECONDARY};
             }}
             QPushButton:pressed {{
-                background-color: {cls.PRIMARY};
+                background-color: {cls.SECONDARY_DARK};
+            }}
+            QPushButton:focus {{
+                border: 2px solid {cls.FOCUS_RING};
+                padding: 5px 11px;
+            }}
+            QPushButton:disabled {{
+                background-color: #1E1E1E;
+                color: {cls.TEXT_DISABLED};
+                border-color: {cls.BORDER};
             }}
             QSpinBox, QDoubleSpinBox {{
                 background-color: {cls.BG_DARK};
                 border: 1px solid {cls.BORDER};
-                border-radius: 4px;
+                border-radius: {cls.RADIUS_CONTROL}px;
                 padding: 4px 8px;
                 min-height: 20px;
                 color: {cls.TEXT_PRIMARY};
             }}
             QSpinBox:focus, QDoubleSpinBox:focus {{
-                border-color: {cls.PRIMARY};
+                border: 2px solid {cls.PRIMARY};
+                padding: 3px 7px;
             }}
-            
+
             /* Table Frame with rounded corners */
             QFrame#tableFrame {{
                 background-color: {cls.BG_DARK};
                 border: 1px solid {cls.BORDER};
-                border-radius: 6px;
+                border-radius: {cls.RADIUS_CONTAINER}px;
             }}
             QFrame#tableFrame QTableWidget {{
                 background-color: transparent;
@@ -548,13 +615,13 @@ class Theme:
                 padding: 6px;
                 border: none;
                 border-bottom: 1px solid {cls.BORDER};
-                font-weight: bold;
+                font-weight: {cls.WEIGHT_TITLE};
             }}
             QRadioButton {{
                 color: {cls.TEXT_PRIMARY};
                 spacing: 8px;
                 padding: 6px 12px;
-                border-radius: 4px;
+                border-radius: {cls.RADIUS_CONTROL}px;
                 background-color: {cls.BG_DARK};
             }}
             QRadioButton:hover {{
@@ -572,7 +639,7 @@ class Theme:
             }}
             QLabel {{
                 color: {cls.TEXT_PRIMARY};
-                font-weight: bold;
+                font-weight: {cls.WEIGHT_BODY};
             }}
             QScrollArea {{
                 border: none;
@@ -587,17 +654,21 @@ class Theme:
             QToolBar QToolButton {{
                 background-color: {cls.BG_DARK};
                 border: 1px solid transparent;
-                border-radius: 4px;
+                border-radius: {cls.RADIUS_CONTROL}px;
                 padding: 6px 12px;
                 color: {cls.TEXT_PRIMARY};
-                font-weight: bold;
+                font-weight: {cls.WEIGHT_TITLE};
             }}
             QToolBar QToolButton:hover {{
                 background-color: {cls.SECONDARY};
                 border-color: {cls.BORDER};
             }}
             QToolBar QToolButton:pressed {{
+                background-color: {cls.SECONDARY_DARK};
+            }}
+            QToolBar QToolButton:checked {{
                 background-color: {cls.PRIMARY};
+                color: #FFFFFF;
             }}
             QSplitter::handle {{
                 background-color: {cls.BORDER};
@@ -605,26 +676,30 @@ class Theme:
             QComboBox {{
                 background-color: {cls.BG_MEDIUM};
                 border: 1px solid {cls.BORDER};
-                border-radius: 4px;
+                border-radius: {cls.RADIUS_CONTROL}px;
                 padding: 4px 24px 4px 8px;
                 min-height: 20px;
                 color: {cls.TEXT_PRIMARY};
             }}
             QComboBox:focus {{
-                border-color: {cls.PRIMARY};
+                border: 2px solid {cls.PRIMARY};
+                padding: 3px 23px 3px 7px;
             }}
             QComboBox::drop-down {{
                 subcontrol-origin: padding;
                 subcontrol-position: center right;
-                width: 18px;
+                width: 20px;
                 border: none;
                 border-left: 1px solid {cls.BORDER};
                 background-color: transparent;
             }}
             QComboBox::down-arrow {{
-                width: 8px;
-                height: 8px;
-                image: none;
+                width: 12px;
+                height: 12px;
+                image: url("{qss_icon('caret-down.svg')}");
+            }}
+            QComboBox:hover::down-arrow, QComboBox:focus::down-arrow, QComboBox:on::down-arrow {{
+                image: url("{qss_icon('caret-down-hover.svg')}");
             }}
             QComboBox QAbstractItemView {{
                 background-color: {cls.BG_DARK};
@@ -638,12 +713,16 @@ class Theme:
             QCheckBox::indicator {{
                 width: 16px;
                 height: 16px;
-                border-radius: 3px;
+                border-radius: 4px;
                 border: 2px solid {cls.BORDER};
                 background-color: {cls.BG_DARK};
             }}
             QCheckBox::indicator:checked {{
                 background-color: {cls.PRIMARY};
+                border-color: {cls.PRIMARY};
+                image: url("{qss_icon('check.svg')}");
+            }}
+            QCheckBox:focus::indicator {{
                 border-color: {cls.PRIMARY};
             }}
             
@@ -655,7 +734,7 @@ class Theme:
                 margin: 2px;
             }}
             QScrollBar::handle:vertical {{
-                background-color: {cls.BG_LIGHTER};
+                background-color: #484848;
                 border-radius: 5px;
                 min-height: 30px;
             }}
@@ -672,7 +751,7 @@ class Theme:
                 margin: 2px;
             }}
             QScrollBar::handle:horizontal {{
-                background-color: {cls.BG_LIGHTER};
+                background-color: #484848;
                 border-radius: 5px;
                 min-width: 30px;
             }}
@@ -740,6 +819,82 @@ class NumericTableWidgetItem(QTableWidgetItem):
         return super().__lt__(other)
 
 
+class CollapsibleSection(QWidget):
+    """A titled section whose body shows/hides via a header toggle — progressive disclosure
+    for advanced settings. The header is a full-width bar with a rotating chevron; the body
+    animates open/closed (height), honoring reduced motion. Add content with ``add_widget`` /
+    ``add_layout`` or by laying out on ``.body``."""
+
+    _MAX = 16777215  # Qt's QWIDGETSIZE_MAX
+
+    def __init__(self, title: str, expanded: bool = False, parent=None):
+        super().__init__(parent)
+        self._title = title
+        self._expanded = expanded
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        self.header = QPushButton()
+        self.header.setCheckable(True)
+        self.header.setChecked(expanded)
+        self.header.setCursor(Qt.PointingHandCursor)
+        self.header.setStyleSheet(f"""
+            QPushButton {{
+                text-align: left;
+                padding: 9px 12px;
+                border: 1px solid {Theme.BORDER};
+                border-radius: {Theme.RADIUS_CONTROL}px;
+                background-color: {Theme.BG_INSET};
+                color: {Theme.TEXT_SECONDARY};
+                font-weight: {Theme.WEIGHT_TITLE};
+            }}
+            QPushButton:hover {{ background-color: {Theme.BG_HOVER}; color: {Theme.TEXT_PRIMARY}; }}
+            QPushButton:checked {{ color: {Theme.TEXT_PRIMARY}; }}
+            QPushButton:focus {{ border: 2px solid {Theme.FOCUS_RING}; padding: 8px 11px; }}
+        """)
+        self.header.clicked.connect(self._toggle)
+        root.addWidget(self.header)
+
+        self.body = QWidget()
+        self.body_layout = QVBoxLayout(self.body)
+        self.body_layout.setContentsMargins(4, 8, 4, 4)
+        self.body_layout.setSpacing(6)
+        root.addWidget(self.body)
+        self.body.setVisible(expanded)
+        self._update_header()
+
+    # -- content API --
+    def add_widget(self, w):
+        self.body_layout.addWidget(w)
+
+    def add_layout(self, layout):
+        self.body_layout.addLayout(layout)
+
+    # -- behaviour --
+    def _update_header(self):
+        chevron = "▾" if self._expanded else "▸"   # ▾ / ▸
+        self.header.setText(f"{chevron}   {self._title}")
+
+    def _toggle(self):
+        from scat import ui_motion
+        self._expanded = self.header.isChecked()
+        self._update_header()
+        if self._expanded:
+            self.body.setVisible(True)
+            target = self.body.sizeHint().height()
+            anim = ui_motion.animate(self.body, b"maximumHeight", target,
+                                     ui_motion.DUR_TAB, ui_motion.CURVE_OUT, start=0)
+            # After opening, lift the cap so the body can grow with its content.
+            anim.finished.connect(lambda: self.body.setMaximumHeight(self._MAX))
+        else:
+            start = self.body.height()
+            anim = ui_motion.animate(self.body, b"maximumHeight", 0,
+                                     ui_motion.DUR_TAB, ui_motion.CURVE_OUT, start=start)
+            anim.finished.connect(lambda: self.body.setVisible(False))
+
+
 # =============================================================================
 # Utility Functions
 # =============================================================================
@@ -750,6 +905,14 @@ def get_resource_path(relative_path: str) -> Path:
         relative_path: Path relative to scat/resources/ (e.g., 'fonts/NotoSans-Regular.ttf')
     """
     return Path(__file__).parent / 'resources' / relative_path
+
+
+def qss_icon(name: str) -> str:
+    """Absolute POSIX path to a bundled QSS icon (``scat/resources/icons/<name>``), for use in
+    a QSS ``image: url(...)``. Forward slashes so Qt accepts it on every platform. Qt's QSS
+    engine does not support the CSS border-triangle caret trick or ``data:`` URIs (verified),
+    so combobox carets and the checkbox glyph are shipped as real SVG files referenced here."""
+    return (Path(__file__).parent / "resources" / "icons" / name).as_posix()
 
 
 def load_custom_fonts():

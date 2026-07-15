@@ -50,6 +50,20 @@ _REPORT_CSS = """\
             --warn-line: #DDA43A;
             --serif: 'Noto Serif', Georgia, 'Times New Roman', serif;
             --sans: 'Noto Sans', ui-sans-serif, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+            /* promoted from scattered inline styles so the report speaks one palette */
+            --fill: #F1F0ED;            /* warm inset panel */
+            --ok-bg: #E7F2EC;           /* significance callout background */
+            --ok-line: #1F9E77;         /* = --normal */
+            --ok-ink: #176B4E;          /* callout heading */
+            --rod-text: #C4453B;        /* rod hue at small text — 4.7:1 on paper */
+            --normal-text: #17805F;     /* normal hue at small text — 4.7:1 on paper */
+            --track-caps: 0.06em;       /* single uppercase-caption tracking */
+            /* motion — strong custom curves, all durations < 400ms */
+            --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+            --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+            --dur-hover: 150ms;
+            --dur-reveal: 360ms;
+            --reveal-stagger: 60ms;
         }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -61,6 +75,7 @@ _REPORT_CSS = """\
             margin: 0 auto;
             padding: 48px 28px 72px;
             -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
         }
         .header { margin-bottom: 40px; }
         .header::before {
@@ -83,7 +98,7 @@ _REPORT_CSS = """\
             font-size: 0.82rem;
             margin-top: 10px;
             text-transform: uppercase;
-            letter-spacing: 0.08em;
+            letter-spacing: var(--track-caps);
         }
         .section {
             background: var(--surface);
@@ -96,10 +111,22 @@ _REPORT_CSS = """\
             font-family: var(--serif);
             font-size: 1.35rem;
             font-weight: 600;
+            letter-spacing: -0.008em;
             margin-bottom: 20px;
             padding-bottom: 12px;
             border-bottom: 1px solid var(--hair);
         }
+        .section h3 {
+            font-family: var(--serif);
+            font-size: 1.05rem;
+            font-weight: 600;
+            letter-spacing: -0.005em;
+            color: var(--accent);
+            margin-top: 28px;
+            margin-bottom: 12px;
+        }
+        .section-intro { color: var(--muted); margin-bottom: 20px; }
+        .appendix-ref { color: var(--muted); font-size: 0.82rem; margin-left: 10px; }
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
@@ -125,7 +152,7 @@ _REPORT_CSS = """\
             font-size: 0.78rem;
             margin-top: 6px;
             text-transform: uppercase;
-            letter-spacing: 0.05em;
+            letter-spacing: var(--track-caps);
         }
         .stat-card.normal .value { color: var(--normal); }
         .stat-card.rod .value { color: var(--rod); }
@@ -146,10 +173,10 @@ _REPORT_CSS = """\
             font-weight: 600;
             color: var(--muted);
             text-transform: uppercase;
-            letter-spacing: 0.04em;
+            letter-spacing: var(--track-caps);
             font-size: 0.76rem;
         }
-        tbody tr:hover { background: var(--accent-soft); }
+        tbody tr { transition: background-color var(--dur-hover) ease; }
         .plot-container {
             text-align: center;
             margin: 22px 0;
@@ -193,6 +220,92 @@ _REPORT_CSS = """\
             font-size: 0.82rem;
             border-top: 1px solid var(--hair);
             margin-top: 32px;
+        }
+
+        /* ---- Token-driven components (promoted from scattered inline styles) ---- */
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.86rem;
+            font-variant-numeric: tabular-nums;
+            margin: 12px 0;
+        }
+        .data-table th, .data-table td {
+            border: 1px solid var(--hair);
+            padding: 8px 10px;
+            text-align: left;
+        }
+        .data-table th { background: var(--accent-soft); color: var(--ink); text-transform: none; letter-spacing: 0; font-size: 0.84rem; }
+        .data-table td.num, .data-table th.num { text-align: center; }
+        .result-box {
+            background: var(--fill);
+            border: 1px solid var(--hair);
+            border-radius: 8px;
+            padding: 12px 14px;
+            margin-top: 12px;
+        }
+        .callout {
+            padding: 15px 18px;
+            border-radius: 8px;
+            border-left: 4px solid var(--hair);
+            margin: 16px 0;
+        }
+        .callout h4 { margin-top: 0; }
+        .callout--warn { background: var(--warn-bg); border-left-color: var(--warn-line); }
+        .callout--ok { background: var(--ok-bg); border-left-color: var(--ok-line); }
+        .callout--ok h4 { color: var(--ok-ink); }
+        .plot-container--sep {
+            margin-bottom: 44px;
+            padding-bottom: 28px;
+            border-bottom: 1px solid var(--hair);
+        }
+
+        /* ---- Hover polish (pointer-only, transform/opacity only) ---- */
+        @media (hover: hover) and (pointer: fine) {
+            tbody tr:hover { background: var(--accent-soft); }
+            .stat-card { transition: transform var(--dur-hover) var(--ease-out), box-shadow var(--dur-hover) var(--ease-out); }
+            .stat-card:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(26, 26, 26, 0.08); }
+            .plot-container img { transition: box-shadow var(--dur-hover) var(--ease-out); }
+            .plot-container img:hover { box-shadow: 0 4px 14px rgba(26, 26, 26, 0.10); }
+        }
+
+        /* ---- Scroll reveal — hidden ONLY when JS confirms it can reveal (.js-reveal on <html>) ---- */
+        .js-reveal .section, .js-reveal .plot-container {
+            opacity: 0;
+            transform: translateY(8px);
+            transition: opacity var(--dur-reveal) var(--ease-out), transform var(--dur-reveal) var(--ease-out);
+        }
+        .js-reveal .section.is-visible, .js-reveal .plot-container.is-visible {
+            opacity: 1;
+            transform: none;
+        }
+
+        /* ---- Accessibility ---- */
+        :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+        @media (prefers-reduced-motion: reduce) {
+            .js-reveal .section, .js-reveal .plot-container { opacity: 1; transform: none; transition: none; }
+            .stat-card, .plot-container img, tbody tr { transition: none; }
+            .stat-card:hover { transform: none; box-shadow: none; }
+            .plot-container img:hover { box-shadow: none; }
+        }
+        @media (prefers-contrast: more) {
+            :root { --hair: #9A9A97; --muted: #3A3A3A; }
+            .section, .stat-card, .plot-container img { border-color: var(--hair); }
+            tbody tr:hover { background: var(--accent-soft); outline: 1px solid var(--accent); }
+        }
+
+        /* ---- Print: no motion, nothing splits across a page ---- */
+        @media print {
+            * { animation: none !important; transition: none !important; }
+            .js-reveal .section, .js-reveal .plot-container { opacity: 1 !important; transform: none !important; }
+            body { max-width: none; padding: 0; }
+            .section, .stat-card, .plot-container, .highlight, .callout, .result-box, .data-table, table, tr {
+                page-break-inside: avoid; break-inside: avoid;
+            }
+            .section h2, .section h3 { break-after: avoid; }
+            .plot-container img { break-inside: avoid; }
+            .section { border: none; }
+            tbody tr:hover { background: transparent; }
         }"""
 
 # Static document footer.
@@ -201,6 +314,39 @@ _REPORT_FOOTER = """
         <p>Generated by SCAT - Spot Classification and Analysis Tool</p>
         <p>Anthropic Claude AI Assistant</p>
     </div>
+    <script>
+    (function () {
+      try {
+        var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        if (reduce || !('IntersectionObserver' in window)) return;   // leave everything visible
+        var targets = document.querySelectorAll('.section, .plot-container');
+        if (!targets.length) return;
+        var io = new IntersectionObserver(function (entries, obs) {
+          var shown = 0;
+          entries.forEach(function (e) {
+            if (e.isIntersecting) {
+              e.target.style.transitionDelay = (Math.min(shown, 4) * 60) + 'ms';
+              e.target.classList.add('is-visible');
+              obs.unobserve(e.target);
+              shown++;
+            }
+          });
+        }, { rootMargin: '0px 0px -8% 0px', threshold: 0.05 });
+        // Hide-then-reveal is armed ONLY now that the observer exists — if setup had thrown,
+        // .js-reveal is never added and content stays visible.
+        document.documentElement.classList.add('js-reveal');
+        targets.forEach(function (t) { io.observe(t); });
+        // Safety net: reveal all after 3s in case anything wedges.
+        setTimeout(function () {
+          document.querySelectorAll('.section, .plot-container').forEach(function (t) {
+            t.classList.add('is-visible');
+          });
+        }, 3000);
+      } catch (e) {
+        document.documentElement.classList.remove('js-reveal');
+      }
+    })();
+    </script>
 </body>
 </html>"""
 
@@ -972,7 +1118,7 @@ class ReportGenerator:
         # Add distribution plots (2 columns x 3 rows)
         if 'count_distribution' in inline_plots:
             html += '''
-        <h3 style="color:#3949ab; margin-top:30px;">Distributions</h3>
+        <h3>Distributions</h3>
         
         <!-- Row 1: Count and Area -->
         <div class="two-column">
@@ -1041,7 +1187,7 @@ class ReportGenerator:
             html += f'''
     <div class="section">
         <h2>📈 Group Comparison ({group_label})</h2>
-        <p style="color:#666; margin-bottom:20px;">Comparing deposit characteristics across different {group_label.lower()} groups.</p>
+        <p class="section-intro">Comparing deposit characteristics across different {group_label.lower()} groups.</p>
 '''
             
             # Define metrics in order matching Summary section
@@ -1068,7 +1214,7 @@ class ReportGenerator:
                 if plot_key not in inline_plots:
                     continue
                     
-                html += f'''        <div class="plot-container" style="margin-bottom:50px; padding-bottom:30px; border-bottom:1px solid #e0e0e0;">
+                html += f'''        <div class="plot-container plot-container--sep">
             <img src="data:image/png;base64,{inline_plots[plot_key]}" alt="{title}">
             <p class="plot-description"><strong>{title}:</strong> {desc}</p>
 '''
@@ -1087,9 +1233,9 @@ class ReportGenerator:
                             sig_icon = '✅' if is_sig else '❌'
                             sig_text = 'At least one group differs' if is_sig else 'No significant difference'
                             
-                            html += f'''            <div style="background:#f5f5f5; padding:10px; border-radius:5px; margin-top:10px;">
+                            html += f'''            <div class="result-box">
                 <strong>Omnibus Test:</strong> {test_name}, p = {p_val:.4f} {sig_icon} {sig_text}
-                <span style="color:#666; font-size:0.9em; margin-left:10px;">→ See Appendix {appendix_num} for pairwise comparisons</span>
+                <span class="appendix-ref">→ See Appendix {appendix_num} for pairwise comparisons</span>
             </div>
 '''
                         else:
@@ -1100,9 +1246,9 @@ class ReportGenerator:
                             sig_icon = '✅' if is_sig else '❌'
                             sig_text = 'Significant difference' if is_sig else 'No significant difference'
                             
-                            html += f'''            <div style="background:#f5f5f5; padding:10px; border-radius:5px; margin-top:10px;">
+                            html += f'''            <div class="result-box">
                 <strong>Statistical Test:</strong> {test_name}, p = {p_val:.4f} {sig_icon} {sig_text}
-                <span style="color:#666; font-size:0.9em; margin-left:10px;">→ See Appendix {appendix_num} for details</span>
+                <span class="appendix-ref">→ See Appendix {appendix_num} for details</span>
             </div>
 '''
                 
@@ -1121,8 +1267,8 @@ class ReportGenerator:
                 
                 if significant_findings:
                     html += '''
-        <div class="highlight" style="background:#e8f5e9; border-left-color:#4caf50;">
-            <h4 style="margin-top:0; color:#2e7d32;">✅ Significant Differences Found</h4>
+        <div class="callout callout--ok">
+            <h4>✅ Significant Differences Found</h4>
             <p style="margin-bottom:0;">
 '''
                     findings_text = ' · '.join([f'<strong>{m}</strong> (p={p:.4f})' for m, p in significant_findings])
@@ -1149,7 +1295,7 @@ class ReportGenerator:
             html += '''
     <div class="section">
         <h2>📑 Appendix: Statistical Details</h2>
-        <p style="color:#666; margin-bottom:20px;">Detailed pairwise comparison results for group comparisons.</p>
+        <p class="section-intro">Detailed pairwise comparison results for group comparisons.</p>
 '''
             # Define metrics in order matching Summary/Group Comparison sections
             ordered_metrics = [
@@ -1175,7 +1321,7 @@ class ReportGenerator:
                     continue
                 
                 appendix_num += 1
-                html += f'        <h3 style="color:#3949ab; margin-top:20px;">{appendix_num}. {metric_title}</h3>\n'
+                html += f'        <h3>{appendix_num}. {metric_title}</h3>\n'
                 
                 if 'overall_test' in result:
                     # 3+ groups: Show pairwise comparisons (omnibus already shown in Group Comparison)
@@ -1189,15 +1335,15 @@ class ReportGenerator:
                         
                         html += f'''        <div style="margin-top:10px;">
             <p><strong>🔄 Pairwise Comparisons{correction_label}:</strong></p>
-            <table style="width:100%; border-collapse:collapse; font-size:0.9em;">
+            <table class="data-table">
                 <thead>
-                    <tr style="background:#e8eaf6;">
-                        <th style="padding:8px; text-align:left; border:1px solid #ddd;">Comparison</th>
-                        <th style="padding:8px; text-align:center; border:1px solid #ddd;">Test</th>
-                        <th style="padding:8px; text-align:center; border:1px solid #ddd;">p (raw)</th>
-                        <th style="padding:8px; text-align:center; border:1px solid #ddd;">{"p (corrected)" if has_correction else "p-value"}</th>
-                        <th style="padding:8px; text-align:center; border:1px solid #ddd;">Effect Size</th>
-                        <th style="padding:8px; text-align:center; border:1px solid #ddd;">Result</th>
+                    <tr>
+                        <th>Comparison</th>
+                        <th class="num">Test</th>
+                        <th class="num">p (raw)</th>
+                        <th class="num">{"p (corrected)" if has_correction else "p-value"}</th>
+                        <th class="num">Effect Size</th>
+                        <th class="num">Result</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -1229,26 +1375,26 @@ class ReportGenerator:
                             # Highlight row if raw p-value was significant but corrected wasn't
                             raw_sig = p_raw < 0.05
                             if raw_sig and not is_sig:
-                                row_bg = '#fff3e0'  # Orange tint - significant before correction
+                                row_bg = 'var(--warn-bg)'  # amber tint - significant before correction
                             elif is_sig:
-                                row_bg = '#e8f5e9'  # Green - significant after correction
+                                row_bg = 'var(--ok-bg)'    # teal tint - significant after correction
                             else:
-                                row_bg = '#fff'  # White - not significant
+                                row_bg = 'var(--surface)'  # plain - not significant
                             
                             html += f'''                    <tr style="background:{row_bg};">
-                        <td style="padding:8px; border:1px solid #ddd;">{g1} vs {g2}</td>
-                        <td style="padding:8px; text-align:center; border:1px solid #ddd;">{test_name}</td>
-                        <td style="padding:8px; text-align:center; border:1px solid #ddd;">{p_raw:.4f}</td>
-                        <td style="padding:8px; text-align:center; border:1px solid #ddd;">{p_display}</td>
-                        <td style="padding:8px; text-align:center; border:1px solid #ddd;">{effect_d:.2f} ({effect_label})</td>
-                        <td style="padding:8px; text-align:center; border:1px solid #ddd;">{sig_icon}</td>
+                        <td>{g1} vs {g2}</td>
+                        <td class="num">{test_name}</td>
+                        <td class="num">{p_raw:.4f}</td>
+                        <td class="num">{p_display}</td>
+                        <td class="num">{effect_d:.2f} ({effect_label})</td>
+                        <td class="num">{sig_icon}</td>
                     </tr>
 '''
                         html += '''                </tbody>
             </table>
-            <p style="margin-top:8px; font-size:0.85em; color:#666;">
-                <span style="display:inline-block; width:12px; height:12px; background:#e8f5e9; border:1px solid #ddd; margin-right:4px;"></span> Significant after correction &nbsp;
-                <span style="display:inline-block; width:12px; height:12px; background:#fff3e0; border:1px solid #ddd; margin-right:4px;"></span> Significant before correction only (lost after adjustment)
+            <p style="margin-top:8px; font-size:0.85em; color:var(--muted);">
+                <span style="display:inline-block; width:12px; height:12px; background:var(--ok-bg); border:1px solid var(--hair); margin-right:4px;"></span> Significant after correction &nbsp;
+                <span style="display:inline-block; width:12px; height:12px; background:var(--warn-bg); border:1px solid var(--hair); margin-right:4px;"></span> Significant before correction only (lost after adjustment)
             </p>
         </div>
 '''
@@ -1278,14 +1424,14 @@ class ReportGenerator:
                         
                         html += '''        <div style="margin-top:15px;">
             <p><strong>📊 Group Statistics:</strong></p>
-            <table style="width:100%; border-collapse:collapse; font-size:0.9em;">
+            <table class="data-table">
                 <thead>
-                    <tr style="background:#e8eaf6;">
-                        <th style="padding:8px; text-align:left; border:1px solid #ddd;">Group</th>
-                        <th style="padding:8px; text-align:center; border:1px solid #ddd;">n</th>
-                        <th style="padding:8px; text-align:center; border:1px solid #ddd;">Mean ± SD</th>
-                        <th style="padding:8px; text-align:center; border:1px solid #ddd;">Median</th>
-                        <th style="padding:8px; text-align:center; border:1px solid #ddd;">CV (%)</th>
+                    <tr>
+                        <th>Group</th>
+                        <th class="num">n</th>
+                        <th class="num">Mean ± SD</th>
+                        <th class="num">Median</th>
+                        <th class="num">CV (%)</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -1299,11 +1445,11 @@ class ReportGenerator:
                             n_val = gstat.get('n', 0)
                             
                             html += f'''                    <tr>
-                        <td style="padding:8px; border:1px solid #ddd;">{gname}</td>
-                        <td style="padding:8px; text-align:center; border:1px solid #ddd;">{n_val}</td>
-                        <td style="padding:8px; text-align:center; border:1px solid #ddd;">{mean_val:.3f} ± {std_val:.3f}</td>
-                        <td style="padding:8px; text-align:center; border:1px solid #ddd;">{median_val:.3f}</td>
-                        <td style="padding:8px; text-align:center; border:1px solid #ddd;">{cv_val:.1f}</td>
+                        <td>{gname}</td>
+                        <td class="num">{n_val}</td>
+                        <td class="num">{mean_val:.3f} ± {std_val:.3f}</td>
+                        <td class="num">{median_val:.3f}</td>
+                        <td class="num">{cv_val:.1f}</td>
                     </tr>
 '''
                         html += '''                </tbody>
@@ -1325,16 +1471,16 @@ class ReportGenerator:
                         g1_mean, g2_mean = g2_mean, g1_mean
                         g1_std, g2_std = g2_std, g1_std
                     
-                    html += f'''        <div style="background:#f5f5f5; padding:10px; border-radius:5px;">
+                    html += f'''        <div class="result-box">
             <p><strong>🔬 Two-Group Comparison:</strong> {result.get('test_name', 'N/A')}</p>
-            <table style="width:100%; border-collapse:collapse; font-size:0.9em; margin:10px 0;">
+            <table class="data-table">
                 <tr>
-                    <td style="padding:8px; border:1px solid #ddd;"><strong>{g1_name}</strong></td>
-                    <td style="padding:8px; text-align:center; border:1px solid #ddd;">{g1_mean:.3f} ± {g1_std:.3f}</td>
+                    <td><strong>{g1_name}</strong></td>
+                    <td class="num">{g1_mean:.3f} ± {g1_std:.3f}</td>
                 </tr>
                 <tr>
-                    <td style="padding:8px; border:1px solid #ddd;"><strong>{g2_name}</strong></td>
-                    <td style="padding:8px; text-align:center; border:1px solid #ddd;">{g2_mean:.3f} ± {g2_std:.3f}</td>
+                    <td><strong>{g2_name}</strong></td>
+                    <td class="num">{g2_mean:.3f} ± {g2_std:.3f}</td>
                 </tr>
             </table>
             <p><strong>p-value:</strong> {result.get('p_value', 0):.4f} 
@@ -1367,8 +1513,8 @@ class ReportGenerator:
                 <div class="label">Edge Fraction</div>
             </div>
         </div>
-        <div class="highlight">
-            <strong>Clustering:</strong> 
+        <div class="callout callout--warn">
+            <strong>Clustering:</strong>
             {spatial_stats.get('n_clustered', 0)} clustered, 
             {spatial_stats.get('n_random', 0)} random, 
             {spatial_stats.get('n_dispersed', 0)} dispersed 
