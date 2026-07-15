@@ -37,7 +37,11 @@ def line_flag(df: pd.DataFrame) -> pd.Series:
     rotated bounding box. `aspect_ratio` alone comes from an axis-aligned bbox and misses DIAGONAL
     boundaries, so prefer the minAreaRect-based `elongation`/`rect_fill`; fall back to aspect+circ."""
     if "elongation" in df.columns and "rect_fill" in df.columns:
-        return (_num(df, "elongation") > 4) & (_num(df, "rect_fill") < 0.4)
+        thin = (_num(df, "elongation") > 4) & (_num(df, "rect_fill") < 0.4)
+        # a SOLID straight line fills its rotated box (rect_fill≈1) yet is extremely elongated with
+        # near-zero circularity — catch those too, else they'd surface as false 'unusual' ROD.
+        straight = (_num(df, "elongation") > 8) & (_num(df, "circularity") < 0.15)
+        return thin | straight
     return (_num(df, "aspect_ratio") > 8) & (_num(df, "circularity") < 0.15)
 
 
@@ -70,7 +74,7 @@ def unusual_ranking(df: pd.DataFrame) -> pd.Series:
     atypical deposit even after z-scoring."""
     def z(s):
         s = pd.to_numeric(s, errors="coerce").fillna(0.0)
-        return (s - s.mean()) / (s.std() + 1e-9)
+        return (s - s.mean()) / (s.std(ddof=0) + 1e-9)  # ddof=0 so a single deposit -> 0, not NaN
     elong = df["elongation"] if "elongation" in df.columns else df["aspect_ratio"]
     score = z(elong) + z(-df["circularity"]) + 0.6 * z(df["area_px"])
     return score.mask(line_flag(df), float("-inf"))

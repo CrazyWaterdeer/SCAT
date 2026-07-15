@@ -77,10 +77,20 @@ def test_line_flag_rotation_invariant():
     line = pd.DataFrame({"aspect_ratio": [1.1], "circularity": [0.05],
                          "elongation": [12.0], "rect_fill": [0.1]})
     assert bool(C.line_flag(line).iloc[0]) is True
-    # a real filled elongated ROD: elongated but well-filled -> NOT a line
+    # a real filled elongated ROD: moderately elongated but well-filled + not near-zero circ -> NOT a line
     rod = pd.DataFrame({"aspect_ratio": [1.2], "circularity": [0.3],
                         "elongation": [6.0], "rect_fill": [0.78]})
     assert bool(C.line_flag(rod).iloc[0]) is False
+    # a SOLID straight line fills its rotated box (rect_fill≈1) yet is extreme + near-zero circ
+    solid_line = pd.DataFrame({"aspect_ratio": [1.1], "circularity": [0.03],
+                               "elongation": [15.0], "rect_fill": [0.95]})
+    assert bool(C.line_flag(solid_line).iloc[0]) is True
+
+
+def test_unusual_ranking_singleton_is_finite():
+    df = pd.DataFrame({"aspect_ratio": [3.0], "circularity": [0.2], "area_px": [120.0]})
+    r = C.unusual_ranking(df)
+    assert np.isfinite(r.iloc[0])  # single deposit -> score 0 (not NaN), so it can still surface
 
 
 def test_cluster_profile_kind_uses_fractions():
