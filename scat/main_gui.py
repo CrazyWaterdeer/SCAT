@@ -760,28 +760,30 @@ class DropZone(QWidget):
         self.setObjectName("dropZone")
         self.setAcceptDrops(True)
         self._active = False
-        self._apply_style()
+        self._compact_mode = False
 
-        v = QVBoxLayout(self)
-        v.setContentsMargins(18, 20, 18, 20)
-        v.setSpacing(6)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
+        # ---- Hero: shown BEFORE any images are chosen ----
+        self._hero = QWidget()
+        hv = QVBoxLayout(self._hero)
+        hv.setContentsMargins(18, 22, 18, 20)
+        hv.setSpacing(6)
         self._icon = QLabel()
         self._icon.setAlignment(Qt.AlignCenter)
         self._icon.setPixmap(icon("add_photo_alternate", Theme.TEXT_SECONDARY, 36).pixmap(36, 36))
-        v.addWidget(self._icon, 0, Qt.AlignHCenter)
-
+        hv.addWidget(self._icon, 0, Qt.AlignHCenter)
         self._title = QLabel("Drop images or a folder here")
         self._title.setAlignment(Qt.AlignCenter)
         self._title.setStyleSheet(
             f"color:{Theme.TEXT_PRIMARY}; font-weight:{Theme.WEIGHT_TITLE}; background:transparent;")
-        v.addWidget(self._title)
-
+        hv.addWidget(self._title)
         self._sub = QLabel("TIFF · PNG · JPG  —  folders are searched recursively")
         self._sub.setAlignment(Qt.AlignCenter)
         self._sub.setStyleSheet(f"color:{Theme.TEXT_MUTED}; font-size:{Theme.FS_XS}px; background:transparent;")
-        v.addWidget(self._sub)
-
+        hv.addWidget(self._sub)
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
         btn_row.addStretch(1)
@@ -794,31 +796,68 @@ class DropZone(QWidget):
         btn_row.addWidget(self._img_btn)
         btn_row.addWidget(self._dir_btn)
         btn_row.addStretch(1)
-        v.addSpacing(4)
-        v.addLayout(btn_row)
+        hv.addSpacing(4)
+        hv.addLayout(btn_row)
+        root.addWidget(self._hero)
+
+        # ---- Compact chip: shown once images are chosen ----
+        self._compact = QWidget()
+        cv = QHBoxLayout(self._compact)
+        cv.setContentsMargins(14, 10, 12, 10)
+        cv.setSpacing(10)
+        c_icon = QLabel()
+        c_icon.setPixmap(icon("photo_library", Theme.NORMAL, 22).pixmap(22, 22))
+        cv.addWidget(c_icon)
+        self._c_label = QLabel("")
+        self._c_label.setStyleSheet(
+            f"color:{Theme.TEXT_PRIMARY}; font-weight:{Theme.WEIGHT_LABEL}; background:transparent;")
+        cv.addWidget(self._c_label, 1)
+        change_btn = QPushButton("Change")
+        change_btn.setIcon(icon("refresh"))
+        change_btn.setToolTip("Choose a different set of images (or drop new ones)")
+        change_btn.clicked.connect(self._show_hero)
+        cv.addWidget(change_btn)
+        self._compact.setVisible(False)
+        root.addWidget(self._compact)
+
+        self._apply_style()
 
     # -- appearance --
     def _apply_style(self):
         border = Theme.PRIMARY if self._active else Theme.BORDER
-        bg = "rgba(218,78,66,0.08)" if self._active else Theme.BG_INSET
-        self.setStyleSheet(
-            f"QWidget#dropZone {{ background-color: {bg}; border: 2px dashed {border}; "
-            f"border-radius: {Theme.RADIUS_CONTAINER}px; }}")
+        if self._compact_mode:
+            self.setStyleSheet(
+                f"QWidget#dropZone {{ background-color: {Theme.BG_SURFACE}; border: 1px solid {border}; "
+                f"border-radius: {Theme.RADIUS_CONTAINER}px; }}")
+        else:
+            bg = "rgba(218,78,66,0.10)" if self._active else Theme.BG_INSET
+            self.setStyleSheet(
+                f"QWidget#dropZone {{ background-color: {bg}; border: 2px dashed {border}; "
+                f"border-radius: {Theme.RADIUS_CONTAINER}px; }}")
 
     def _set_active(self, on):
         if on != self._active:
             self._active = on
             self._apply_style()
 
+    def _show_hero(self):
+        """Revert to the drop hero so the user can drop/browse a different set. The current
+        selection stays active until replaced."""
+        self._compact_mode = False
+        self._compact.setVisible(False)
+        self._hero.setVisible(True)
+        self._apply_style()
+
     def set_count(self, n: int):
+        self._compact_mode = n > 0
         if n > 0:
-            self._title.setText(f"{n} image{'s' if n != 1 else ''} selected")
-            self._sub.setText("Drop more, or choose again to replace")
-            self._icon.setPixmap(icon("photo_library", Theme.NORMAL, 36).pixmap(36, 36))
+            self._c_label.setText(f"{n} image{'s' if n != 1 else ''} selected")
+            self._hero.setVisible(False)
+            self._compact.setVisible(True)
         else:
-            self._title.setText("Drop images or a folder here")
-            self._sub.setText("TIFF · PNG · JPG  —  folders are searched recursively")
-            self._icon.setPixmap(icon("add_photo_alternate", Theme.TEXT_SECONDARY, 36).pixmap(36, 36))
+            self._hero.setVisible(True)
+            self._compact.setVisible(False)
+        self._apply_style()
 
     # -- drag & drop --
     def dragEnterEvent(self, event):
