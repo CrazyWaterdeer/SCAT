@@ -17,19 +17,7 @@ A machine learning-based analysis tool for *Drosophila* excreta classification a
 
 ## Installation
 
-### Option 1: Windows Executable (Recommended)
-
-1. Download `SCAT.zip` from [Releases](https://github.com/CrazyWaterdeer/SCAT/releases)
-2. Extract the folder
-3. Double-click `SCAT.exe` to run
-
-The distribution includes a pre-trained Random Forest model (`Models/model_rf.pkl`).
-
-> **Note:** the frozen `.exe` ships **without** the conversational **Assistant** — its Claude
-> backend needs a source install (and a Claude login / API key). Install from source for the
-> Assistant. On WSL you can still get a one-click desktop icon (see below).
-
-### Option 2: From Source
+### From source
 
 ```bash
 git clone https://github.com/CrazyWaterdeer/SCAT.git
@@ -37,6 +25,8 @@ cd SCAT
 pip install -e .            # core analysis + GUI
 python -m scat.cli gui
 ```
+
+The repo ships a pre-trained Random Forest model (`models/model_rf.pkl`).
 
 **Optional extras:**
 ```bash
@@ -53,8 +43,8 @@ If you run SCAT under WSL2 on Windows 11, create a desktop shortcut that launche
 bash scripts/install_desktop_shortcut.sh
 ```
 
-This puts an **SCAT** icon on your Windows desktop. (This is the recommended alternative to the
-frozen `.exe`, which can't bundle the Assistant's external `claude` CLI.)
+This puts an **SCAT** icon on your Windows desktop — one-click launch of the full GUI (Assistant
+included), no console window.
 
 ## AI Assistant (conversational agent)
 
@@ -121,8 +111,8 @@ image004.tif,Treatment
 
 ## Requirements
 
-- Windows 10/11 (for executable)
-- Python 3.10+ (for source installation)
+- Python 3.10+
+- Windows 11 + WSL2/WSLg for the one-click desktop icon (optional)
 - 8GB RAM recommended
 
 ## Acknowledgments

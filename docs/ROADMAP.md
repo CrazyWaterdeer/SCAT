@@ -36,9 +36,9 @@ High-leverage: makes the just-merged agent + chat dock reach users reliably.
   **Decision (user):** do NOT bundle the agent stack into a frozen exe — the subscription backend
   needs the external `claude` CLI, which PyInstaller can't bundle. Instead ship the Assistant via
   the source install and provide a **one-click Windows desktop shortcut** (`scripts/install_desktop_shortcut.sh`)
-  that launches the WSL GUI via WSLg (no console). `SCAT.spec` left as a core-only exe.
-  README now documents `pip install -e .[agent]`, `scat chat`, the Assistant dock + backends, and
-  the desktop shortcut.
+  that launches the WSL GUI via WSLg (no console). **The exe path was dropped entirely** (SCAT.spec /
+  build.py / scripts/launcher.py + the pyinstaller dep removed) — install from source.
+  README documents `pip install -e .[agent]`, `scat chat`, the Assistant dock + backends, and the shortcut.
 
 ---
 

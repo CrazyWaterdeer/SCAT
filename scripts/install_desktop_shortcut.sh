@@ -2,9 +2,9 @@
 # Create a Windows desktop shortcut that launches the SCAT GUI (with the Assistant) from this
 # WSL source install via WSLg — no console window. Re-run any time to refresh it.
 #
-# Why this instead of a PyInstaller .exe: the Assistant's subscription backend needs the external
-# `claude` CLI + login, which can't be bundled into a frozen exe. Running the source install keeps
-# the Assistant fully working; this shortcut just makes it a one-click desktop icon.
+# SCAT runs from this source install (no packaged .exe): the Assistant's subscription backend needs
+# the external `claude` CLI + login, which a frozen build can't bundle. This shortcut just makes the
+# source GUI a one-click desktop icon.
 #
 # Requires: WSL2 with Windows interop (powershell.exe on PATH) and WSLg (Windows 11) for the GUI.
 set -euo pipefail
