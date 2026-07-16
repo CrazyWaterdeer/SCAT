@@ -2018,56 +2018,22 @@ class ResultsTab(QWidget):
         self._load_statistics_tab(results)
     
     def _load_statistics_tab(self, results: dict):
-        """Load combined statistics and visualizations."""
-        # Clear existing
+        """The working view is for triage; the report carries the full distributions, group comparisons
+        and statistics. Show ONE quiet, report-state-aware pointer instead of duplicating (and out-dumping)
+        the report. stats_layout is retained so re-loads (edit -> _reload_results -> load_results) work."""
         while self.stats_layout.count():
             item = self.stats_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        
-        film_summary = results['film_summary']
-        viz_results = results.get('viz_results', {})
-        stats_results = results.get('stats_results', {})
-        spatial_stats = results.get('spatial_stats', {})
-        
-        # ===== Visualizations — lead with a few overview charts, collapse the long tail =====
-        # (One calm scroll: the quick-look shouldn't out-dump the curated HTML report.)
-        if viz_results:
-            self.stats_layout.addWidget(self._section_label("VISUALIZATIONS"))
-            items = list(viz_results.items())
-            HERO = ['dashboard', 'area_iod', 'heatmap', 'scatter_matrix', 'pca']
-            hero = sorted((kp for kp in items if kp[0] in HERO), key=lambda kp: HERO.index(kp[0]))
-            rest = [kp for kp in items if kp[0] not in HERO]
-            if not hero:                        # no overview plots — lead with the first few
-                hero, rest = items[:4], items[4:]
-            self.stats_layout.addWidget(self._viz_grid(hero))
-            if rest:
-                more = CollapsibleSection(f"Show all {len(rest)} more charts", expanded=False)
-                more.add_widget(self._viz_grid(rest))
-                self.stats_layout.addWidget(more)
-
-        # ===== Descriptive statistics ===== (one section idiom: muted uppercase label, no card)
-        self.stats_layout.addWidget(self._section_label("DESCRIPTIVE STATISTICS"))
-        desc_label = QLabel(self._generate_descriptive_stats(film_summary))
-        desc_label.setWordWrap(True)
-        desc_label.setTextFormat(Qt.RichText)
-        self.stats_layout.addWidget(desc_label)
-
-        # ===== Group comparisons =====
-        if stats_results:
-            self.stats_layout.addWidget(self._section_label("GROUP COMPARISONS"))
-            comp_label = QLabel(self._generate_comparison_stats(stats_results))
-            comp_label.setWordWrap(True)
-            comp_label.setTextFormat(Qt.RichText)
-            self.stats_layout.addWidget(comp_label)
-
-        # ===== Spatial analysis =====
-        if spatial_stats:
-            self.stats_layout.addWidget(self._section_label("SPATIAL ANALYSIS"))
-            spatial_label = QLabel(self._generate_spatial_stats(spatial_stats))
-            spatial_label.setWordWrap(True)
-            spatial_label.setTextFormat(Qt.RichText)
-            self.stats_layout.addWidget(spatial_label)
+        out = results.get("output_dir", "")
+        report_exists = bool(out) and (Path(out) / "report.html").exists()
+        text = ("Full distributions, group comparisons and statistics are in the report."
+                if report_exists else
+                "Generate a report to see the full distributions, group comparisons and statistics.")
+        pointer = QLabel(text)
+        pointer.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FS_SM}px; padding-top: 8px;")
+        pointer.setWordWrap(True)
+        self.stats_layout.addWidget(pointer)
     
     def _format_viz_name(self, name: str) -> str:
         """Format visualization key names for display."""
