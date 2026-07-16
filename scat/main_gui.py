@@ -1721,111 +1721,193 @@ class ResultsTab(QWidget):
         self._setup_ui()
     
     def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        
-        self.sub_tabs = QTabWidget()
-        layout.addWidget(self.sub_tabs)
-        
-        # Overview tab
-        self.overview_widget = QWidget()
-        overview_layout = QVBoxLayout(self.overview_widget)
-        
-        # Top row: Summary + Buttons
-        top_row = QHBoxLayout()
-        
-        # Summary (left)
-        summary_group = QGroupBox("Analysis Summary")
-        summary_layout = QVBoxLayout()
-        self.summary_label = QLabel("No results loaded. Run analysis first.")
-        self.summary_label.setWordWrap(True)
-        summary_layout.addWidget(self.summary_label)
-        
-        # Open folder button under summary
-        self.open_folder_btn = QPushButton("Open Output Folder")
+        """One calm, answer-first scroll (no sub-tabs): hero summary → per-image table →
+        visualizations & statistics, in reading order — matching the app's tabless direction and
+        the HTML report it produces."""
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        content = QWidget()
+        content.setObjectName("scrollContent")
+        oc = QVBoxLayout(content)
+        oc.setContentsMargins(16, 18, 16, 28)
+        oc.setSpacing(0)
+        cap = CenteredCap(1120)
+        cap.content_layout.setSpacing(20)
+        oc.addWidget(cap)
+        oc.addStretch(1)
+        self.col = cap.content_layout           # everything lands in the width-capped column
+        scroll.setWidget(content)
+        outer.addWidget(scroll)
+
+        # ---- Hero card: lead with the answer (rebuilt on each load) ----
+        self._hero_card = QWidget()
+        self._hero_card.setObjectName("heroCard")
+        self._hero_card.setStyleSheet(
+            f"QWidget#heroCard {{ background-color: {Theme.BG_SURFACE}; border: 1px solid {Theme.BORDER};"
+            f" border-radius: {Theme.RADIUS_CONTAINER}px; }}")
+        hv = QVBoxLayout(self._hero_card)
+        hv.setContentsMargins(24, 22, 24, 22)
+        hv.setSpacing(16)
+
+        top = QHBoxLayout()
+        top.setSpacing(20)
+        numcol = QVBoxLayout()
+        numcol.setSpacing(2)
+        self.hero_kicker = QLabel("MEAN ROD FRACTION")
+        self.hero_kicker.setStyleSheet(
+            f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FS_XS}px; font-weight: {Theme.WEIGHT_TITLE};"
+            f" letter-spacing: 1px;")
+        self.hero_value = QLabel("—")
+        self.hero_value.setStyleSheet(f"color: {Theme.TEXT_PRIMARY}; font-size: 34px; font-weight: 700;")
+        self.hero_sub = QLabel("")
+        self.hero_sub.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; font-size: {Theme.FS_BODY}px;")
+        numcol.addWidget(self.hero_kicker)
+        numcol.addWidget(self.hero_value)
+        numcol.addWidget(self.hero_sub)
+        top.addLayout(numcol)
+        top.addStretch(1)
+
+        act = QVBoxLayout()
+        act.setSpacing(8)
+        # Button hierarchy: Open report is the payoff → coral primary once a report exists.
+        self.open_report_btn = QPushButton("Open report")
+        self.open_report_btn.setIcon(icon("open_in_new", "#FFFFFF"))
+        self.open_report_btn.setMinimumHeight(38)
+        self.open_report_btn.setStyleSheet(
+            Theme.button_style(Theme.PRIMARY, "#FFFFFF", Theme.PRIMARY_LIGHT, Theme.PRIMARY_DARK))
+        ui_motion.attach_button_motion(self.open_report_btn, primary=True)
+        self.open_report_btn.clicked.connect(self._open_report)
+        # Generate/rebuild is a utility → quiet secondary.
+        self.generate_report_btn = QPushButton("Rebuild after edits")
+        self.generate_report_btn.setIcon(icon("refresh"))
+        self.generate_report_btn.setToolTip(
+            "Regenerate annotated images, statistics, visualizations and the HTML report.\n"
+            "Use after editing/correcting results in the labeling window.")
+        self.generate_report_btn.clicked.connect(self._generate_report)
+        self.open_folder_btn = QPushButton("Open folder")
         self.open_folder_btn.setIcon(icon("folder_open"))
         self.open_folder_btn.clicked.connect(self._open_folder)
-        self.open_folder_btn.setVisible(False)
-        summary_layout.addWidget(self.open_folder_btn)
-        
-        summary_group.setLayout(summary_layout)
-        top_row.addWidget(summary_group, 2)
-        
-        # Buttons (right)
-        buttons_group = QGroupBox("Actions")
-        buttons_layout = QVBoxLayout()
-        
-        self.load_results_btn = QPushButton("Load Previous Results")
-        self.load_results_btn.setIcon(icon("folder_open"))
-        self.load_results_btn.setToolTip("Load results from a previous analysis session")
+        for b in (self.open_report_btn, self.generate_report_btn, self.open_folder_btn):
+            b.setCursor(Qt.PointingHandCursor)
+            act.addWidget(b)
+        top.addLayout(act)
+        hv.addLayout(top)
+
+        # KPI tiles (rebuilt on each load)
+        self.tiles_host = QWidget()
+        self.tiles_layout = QHBoxLayout(self.tiles_host)
+        self.tiles_layout.setContentsMargins(0, 0, 0, 0)
+        self.tiles_layout.setSpacing(10)
+        hv.addWidget(self.tiles_host)
+
+        self.col.addWidget(self._hero_card)
+
+        # Quiet secondary: load a previous session (belongs to the "open" family, de-emphasized).
+        self.load_results_btn = QPushButton("Load a previous results folder…")
+        self.load_results_btn.setStyleSheet(
+            f"QPushButton {{ background: transparent; border: none; color: {Theme.TEXT_MUTED};"
+            f" font-size: {Theme.FS_SM}px; text-align: left; padding: 2px 0; }}"
+            f"QPushButton:hover {{ color: {Theme.TEXT_SECONDARY}; }}")
+        self.load_results_btn.setCursor(Qt.PointingHandCursor)
         self.load_results_btn.clicked.connect(self._load_previous_results)
-        buttons_layout.addWidget(self.load_results_btn)
-        
-        buttons_layout.addSpacing(10)
-        
-        self.generate_report_btn = QPushButton("Generate Report")
-        self.generate_report_btn.setIcon(icon("description", "#FFFFFF"))
-        self.generate_report_btn.setToolTip(
-            "Regenerate annotated images, statistics, visualizations, and the HTML report.\n"
-            "Use after editing/correcting results in the labeling window."
-        )
-        # Primary action of the Results tab — coral, with responsive depth.
-        self.generate_report_btn.setMinimumHeight(40)
-        self.generate_report_btn.setStyleSheet(
-            Theme.button_style(Theme.PRIMARY, "#FFFFFF", Theme.PRIMARY_LIGHT, Theme.PRIMARY_DARK))
-        ui_motion.attach_button_motion(self.generate_report_btn, primary=True)
-        self.generate_report_btn.clicked.connect(self._generate_report)
-        buttons_layout.addWidget(self.generate_report_btn)
-        
-        self.open_report_btn = QPushButton("Open HTML Report")
-        self.open_report_btn.setIcon(icon("open_in_new"))
-        self.open_report_btn.clicked.connect(self._open_report)
-        self.open_report_btn.setVisible(False)  # Hidden until report is generated
-        buttons_layout.addWidget(self.open_report_btn)
-        
-        buttons_layout.addStretch()
-        buttons_group.setLayout(buttons_layout)
-        top_row.addWidget(buttons_group, 1)
-        
-        overview_layout.addLayout(top_row)
-        
-        # Progress bar for report generation
+        self.col.addWidget(self.load_results_btn)
+
         self.progress = QProgressBar()
         self.progress.setVisible(False)
-        overview_layout.addWidget(self.progress)
-        
-        # Table (double-click to view image)
-        table_label = QLabel("Double-click a row to view and edit image details:")
-        overview_layout.addWidget(table_label)
-        
+        self.col.addWidget(self.progress)
+
+        # ---- Per-image table ----
+        self.col.addWidget(self._section_label("PER-IMAGE RESULTS"))
+        hint = QLabel("Double-click a row to view and edit an image's deposits.")
+        hint.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FS_SM}px;")
+        self.col.addWidget(hint)
         self.summary_table = QTableWidget()
         self.summary_table.setColumnCount(6)
         self.summary_table.setHorizontalHeaderLabels(["Filename", "Normal", "ROD", "Artifact", "ROD %", "Total IOD"])
         self.summary_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.summary_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.summary_table.setSelectionBehavior(QTableWidget.SelectRows)  # Select entire row
-        self.summary_table.setSortingEnabled(True)  # Enable column sorting
+        self.summary_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.summary_table.setSortingEnabled(True)
+        self.summary_table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.summary_table.doubleClicked.connect(self._on_table_double_click)
-        overview_layout.addWidget(self.summary_table)
-        
-        self.sub_tabs.addTab(self.overview_widget, "Overview")
-        
-        # Statistics tab (merged with Visualizations) — content capped + centered for
-        # readability (long stat text shouldn't run the full width of a widescreen).
-        self.stats_widget = QScrollArea()
-        self.stats_widget.setWidgetResizable(True)
-        self.stats_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.stats_content = QWidget()
-        self.stats_content.setObjectName("scrollContent")
-        _stats_outer = QVBoxLayout(self.stats_content)
-        _stats_outer.setContentsMargins(12, 12, 12, 12)
-        _stats_outer.setSpacing(0)
-        _stats_cap = CenteredCap(1120)
-        _stats_cap.content_layout.setSpacing(14)
-        _stats_outer.addWidget(_stats_cap)
-        _stats_outer.addStretch(1)
-        self.stats_layout = _stats_cap.content_layout   # sections are added into the capped column
-        self.stats_widget.setWidget(self.stats_content)
-        self.sub_tabs.addTab(self.stats_widget, "Statistics")
+        self.col.addWidget(self.summary_table)
+
+        # ---- Visualizations + statistics (added by _load_statistics_tab) ----
+        self.stats_host = QWidget()
+        self.stats_layout = QVBoxLayout(self.stats_host)
+        self.stats_layout.setContentsMargins(0, 0, 0, 0)
+        self.stats_layout.setSpacing(20)
+        self.col.addWidget(self.stats_host)
+
+        # Empty until results arrive.
+        for b in (self.open_report_btn, self.generate_report_btn, self.open_folder_btn):
+            b.setVisible(False)
+
+    # ---- small building blocks ----
+    def _section_label(self, text: str) -> QLabel:
+        """A small muted uppercase section label (the app's calm-card heading idiom)."""
+        lbl = QLabel(text)
+        lbl.setStyleSheet(
+            f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FS_XS}px; font-weight: {Theme.WEIGHT_TITLE};"
+            f" letter-spacing: 1px; margin-top: 4px;")
+        return lbl
+
+    def _kpi_tile(self, value, label: str, color: str = None) -> QWidget:
+        """A calm stat tile: number over a small uppercase label — mirrors the report's stat-card."""
+        w = QWidget()
+        w.setObjectName("kpiTile")
+        w.setStyleSheet(
+            f"QWidget#kpiTile {{ background-color: {Theme.BG_INSET}; border: 1px solid {Theme.BORDER};"
+            f" border-radius: {Theme.RADIUS_CONTROL}px; }}")
+        v = QVBoxLayout(w)
+        v.setContentsMargins(14, 10, 14, 10)
+        v.setSpacing(1)
+        val = QLabel(str(value))
+        val.setStyleSheet(f"color: {color or Theme.TEXT_PRIMARY}; font-size: 19px; font-weight: 700;")
+        lab = QLabel(label)
+        lab.setStyleSheet(
+            f"color: {Theme.TEXT_MUTED}; font-size: 10px; font-weight: {Theme.WEIGHT_TITLE}; letter-spacing: 0.6px;")
+        v.addWidget(val)
+        v.addWidget(lab)
+        return w
+
+    def _apply_action_state(self, report_exists: bool):
+        """Swap the primary action by state: Open report leads once a report exists; otherwise
+        Generate becomes the coral primary (the way to create one)."""
+        self.open_report_btn.setVisible(report_exists)
+        if report_exists:
+            self.generate_report_btn.setText("Rebuild after edits")
+            self.generate_report_btn.setStyleSheet("")   # inherit the app's secondary QPushButton QSS
+        else:
+            self.generate_report_btn.setText("Generate report")
+            self.generate_report_btn.setStyleSheet(
+                Theme.button_style(Theme.PRIMARY, "#FFFFFF", Theme.PRIMARY_LIGHT, Theme.PRIMARY_DARK))
+
+    def _set_num(self, row: int, col: int, value, fmt: str, color: str = None):
+        """A right-aligned, sort-correct numeric cell (magnitudes line up like a ledger)."""
+        item = NumericTableWidgetItem(value, fmt)
+        item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        if color:
+            item.setForeground(QColor(color))
+        self.summary_table.setItem(row, col, item)
+
+    def _fit_table_height(self):
+        """Size the table to its rows so the page is one scroll — capped so a huge run still
+        scrolls internally rather than making the page absurdly tall."""
+        t = self.summary_table
+        if t.rowCount() == 0:
+            h = t.horizontalHeader().height() + 48
+        else:
+            h = (t.horizontalHeader().height() + 2 * t.frameWidth() + 4
+                 + sum(t.rowHeight(r) for r in range(t.rowCount())))
+        h = min(h, 560)
+        t.setMinimumHeight(h)
+        t.setMaximumHeight(h)
     
     def load_results(self, results: dict):
         self.results = results
@@ -1835,40 +1917,47 @@ class ResultsTab(QWidget):
         total_rod = film_summary['n_rod'].sum()
         total_artifact = film_summary['n_artifact'].sum()
         mean_rod_frac = film_summary['rod_fraction'].mean()
+        std_rod_frac = film_summary['rod_fraction'].std()
+        n = len(film_summary)
 
-        summary_text = f"""
-        <h3>Summary</h3>
-        <p><b>Total Images:</b> {len(film_summary)}</p>
-        <p><b>Total Deposits:</b> {film_summary['n_total'].sum():.0f}</p>
-        <p><b>Normal:</b> {total_normal:.0f} | <b>ROD:</b> {total_rod:.0f} | <b>Artifact:</b> {total_artifact:.0f}</p>
-        <p><b>Mean ROD Fraction:</b> {mean_rod_frac*100:.1f}% (±{film_summary['rod_fraction'].std()*100:.1f}%)</p>
-        <p><b>Output:</b> {results.get('output_dir', '')}</p>
-        """
-        self.summary_label.setText(summary_text)
-        
-        # Show/hide buttons based on state
+        # Hero: lead with the headline answer.
+        self.hero_value.setText(f"{mean_rod_frac*100:.1f}%")
+        self.hero_sub.setText(f"±{std_rod_frac*100:.1f}%   ·   across {n} image{'s' if n != 1 else ''}")
+
+        # KPI tiles (rebuilt each load).
+        while self.tiles_layout.count():
+            it = self.tiles_layout.takeAt(0)
+            if it.widget():
+                it.widget().deleteLater()
+        self.tiles_layout.addWidget(self._kpi_tile(n, "IMAGES"))
+        self.tiles_layout.addWidget(self._kpi_tile(f"{film_summary['n_total'].sum():.0f}", "DEPOSITS"))
+        self.tiles_layout.addWidget(self._kpi_tile(f"{total_normal:.0f}", "NORMAL", Theme.NORMAL))
+        self.tiles_layout.addWidget(self._kpi_tile(f"{total_rod:.0f}", "ROD", Theme.ROD))
+        self.tiles_layout.addWidget(self._kpi_tile(f"{total_artifact:.0f}", "ARTIFACT", Theme.TEXT_SECONDARY))
+        if 'total_iod' in film_summary.columns:
+            self.tiles_layout.addWidget(self._kpi_tile(f"{film_summary['total_iod'].sum():.0f}", "TOTAL IOD"))
+        self.tiles_layout.addStretch(1)
+
+        # Actions: state-driven hierarchy (Open report leads once one exists).
         output_dir = results.get('output_dir', '')
+        report_exists = bool(output_dir) and (Path(output_dir) / 'report.html').exists()
+        self.generate_report_btn.setVisible(True)
         self.open_folder_btn.setVisible(bool(output_dir))
-        
-        # Check if report.html exists
-        report_exists = False
-        if output_dir:
-            report_path = Path(output_dir) / 'report.html'
-            report_exists = report_path.exists()
-        self.open_report_btn.setVisible(report_exists)
-        
-        self.summary_table.setSortingEnabled(False)  # Disable during population
-        self.summary_table.setRowCount(len(film_summary))
+        self._apply_action_state(report_exists)
+
+        # Per-image table — right-aligned tabular numbers, gentle semantic tint on the class counts.
+        self.summary_table.setSortingEnabled(False)
+        self.summary_table.setRowCount(n)
         for i, (_, row) in enumerate(film_summary.iterrows()):
             self.summary_table.setItem(i, 0, QTableWidgetItem(str(row['filename'])))
-            # Use NumericTableWidgetItem for numeric columns for proper sorting
-            self.summary_table.setItem(i, 1, NumericTableWidgetItem(row['n_normal'], "{:.0f}"))
-            self.summary_table.setItem(i, 2, NumericTableWidgetItem(row['n_rod'], "{:.0f}"))
-            self.summary_table.setItem(i, 3, NumericTableWidgetItem(row['n_artifact'], "{:.0f}"))
-            self.summary_table.setItem(i, 4, NumericTableWidgetItem(row['rod_fraction']*100, "{:.1f}%"))
-            self.summary_table.setItem(i, 5, NumericTableWidgetItem(row.get('total_iod', 0), "{:.0f}"))
-        self.summary_table.setSortingEnabled(True)  # Re-enable after population
-        
+            self._set_num(i, 1, row['n_normal'], "{:.0f}", Theme.NORMAL)
+            self._set_num(i, 2, row['n_rod'], "{:.0f}", Theme.ROD)
+            self._set_num(i, 3, row['n_artifact'], "{:.0f}", Theme.TEXT_MUTED)
+            self._set_num(i, 4, row['rod_fraction'] * 100, "{:.1f}%")
+            self._set_num(i, 5, row.get('total_iod', 0), "{:.0f}")
+        self.summary_table.setSortingEnabled(True)
+        self._fit_table_height()
+
         self._load_statistics_tab(results)
     
     def _load_statistics_tab(self, results: dict):
@@ -1897,7 +1986,12 @@ class ResultsTab(QWidget):
             for idx, (name, path) in enumerate(viz_results.items()):
                 btn = QPushButton()
                 btn.setToolTip(f"Click to enlarge: {name}")
-                
+                # Flat button — the framed cell provides the chrome, not the plot's white edge.
+                btn.setStyleSheet(
+                    "QPushButton { background: transparent; border: none; padding: 0; }"
+                    "QPushButton:hover { background: transparent; }")
+                btn.setCursor(Qt.PointingHandCursor)
+
                 pixmap = QPixmap(path)
                 if not pixmap.isNull():
                     scaled = pixmap.scaled(380, 280, Qt.KeepAspectRatio, Qt.SmoothTransformation)
@@ -1905,15 +1999,24 @@ class ResultsTab(QWidget):
                     btn.setIconSize(scaled.size())
                     btn.setFixedSize(scaled.size() + QSize(10, 10))
                     btn.clicked.connect(lambda checked, p=path, n=name: self._show_image_dialog(p, n))
-                
+
+                # Framed cell so bright plots don't slam edge-to-edge on the dark card
+                # (mirrors the report's .plot-container).
                 container = QWidget()
+                container.setObjectName("vizCell")
+                container.setStyleSheet(
+                    f"QWidget#vizCell {{ background-color: {Theme.BG_INSET}; border: 1px solid {Theme.BORDER};"
+                    f" border-radius: {Theme.RADIUS_CONTAINER}px; }}")
                 container_layout = QVBoxLayout(container)
-                container_layout.setContentsMargins(0, 0, 0, 0)
-                container_layout.addWidget(btn)
+                container_layout.setContentsMargins(10, 10, 10, 8)
+                container_layout.setSpacing(8)
+                container_layout.addWidget(btn, alignment=Qt.AlignCenter)
                 label = QLabel(self._format_viz_name(name))
                 label.setAlignment(Qt.AlignCenter)
+                label.setStyleSheet(
+                    f"color: {Theme.TEXT_SECONDARY}; font-size: {Theme.FS_SM}px; background: transparent; border: none;")
                 container_layout.addWidget(label)
-                
+
                 row = idx // 2
                 col = idx % 2
                 viz_grid.addWidget(container, row, col)
@@ -1951,7 +2054,7 @@ class ResultsTab(QWidget):
         
         # ===== Spatial Analysis Section =====
         if spatial_stats:
-            spatial_group = QGroupBox("🗺️ Spatial Analysis")
+            spatial_group = QGroupBox("Spatial Analysis")
             spatial_layout = QVBoxLayout()
             
             spatial_text = self._generate_spatial_stats(spatial_stats)
@@ -1962,8 +2065,6 @@ class ResultsTab(QWidget):
             
             spatial_group.setLayout(spatial_layout)
             self.stats_layout.addWidget(spatial_group)
-        
-        self.stats_layout.addStretch()
     
     def _format_viz_name(self, name: str) -> str:
         """Format visualization key names for display."""
@@ -2011,14 +2112,14 @@ class ResultsTab(QWidget):
         from scipy import stats as sp_stats
         
         text = "<table style='border-collapse: collapse; width: 100%;'>"
-        text += "<tr style='background-color: #3D3D4D;'>"
+        text += f"<tr style='background-color: {Theme.BG_HOVER};'>"
         text += "<th style='padding: 8px; text-align: left;'>Metric</th>"
         text += "<th style='padding: 8px;'>Mean</th>"
         text += "<th style='padding: 8px;'>SD</th>"
         text += "<th style='padding: 8px;'>Median</th>"
         text += "<th style='padding: 8px;'>IQR</th>"
         text += "<th style='padding: 8px;'>95% CI</th>"
-        text += "<th style='padding: 8px;'>Normal?</th>"
+        text += "<th style='padding: 8px;'>Distribution</th>"
         text += "</tr>"
         
         metrics = [
@@ -2045,75 +2146,100 @@ class ResultsTab(QWidget):
             ci_low = mean - 1.96 * sem
             ci_high = mean + 1.96 * sem
             
-            # Normality test
+            # Normality test — plain words, not a pass/fail check (a skewed metric is a valid finding).
             if len(data) >= 3:
                 _, p_norm = sp_stats.shapiro(data[:5000])
-                is_normal = "✓" if p_norm > 0.05 else "✗"
+                is_normal = "normal" if p_norm > 0.05 else "skewed"
             else:
-                is_normal = "-"
-            
+                is_normal = "—"
+
             text += f"<tr>"
             text += f"<td style='padding: 6px;'><b>{name}</b></td>"
-            text += f"<td style='padding: 6px; text-align: center;'>{mean:.2f}{unit}</td>"
-            text += f"<td style='padding: 6px; text-align: center;'>{std:.2f}</td>"
-            text += f"<td style='padding: 6px; text-align: center;'>{median:.2f}</td>"
-            text += f"<td style='padding: 6px; text-align: center;'>{iqr:.2f}</td>"
-            text += f"<td style='padding: 6px; text-align: center;'>[{ci_low:.2f}, {ci_high:.2f}]</td>"
-            text += f"<td style='padding: 6px; text-align: center;'>{is_normal}</td>"
+            text += f"<td style='padding: 6px; text-align: right;'>{mean:.2f}{unit}</td>"
+            text += f"<td style='padding: 6px; text-align: right;'>{std:.2f}</td>"
+            text += f"<td style='padding: 6px; text-align: right;'>{median:.2f}</td>"
+            text += f"<td style='padding: 6px; text-align: right;'>{iqr:.2f}</td>"
+            text += f"<td style='padding: 6px; text-align: right;'>[{ci_low:.2f}, {ci_high:.2f}]</td>"
+            text += f"<td style='padding: 6px; text-align: center; color: {Theme.TEXT_SECONDARY};'>{is_normal}</td>"
             text += "</tr>"
-        
+
         text += "</table>"
-        text += f"<p style='color: #B0B0B0; font-size: 11px;'>n = {len(film_summary)} images | CI = Confidence Interval | Normal? = Shapiro-Wilk p > 0.05</p>"
+        text += f"<p style='color: {Theme.TEXT_MUTED}; font-size: 11px;'>n = {len(film_summary)} images &nbsp;·&nbsp; CI = 95% confidence interval &nbsp;·&nbsp; Distribution = Shapiro-Wilk (p &gt; 0.05 → normal)</p>"
         
         return text
     
     def _generate_comparison_stats(self, stats_results: dict) -> str:
-        """Generate group comparison statistics."""
-        text = ""
-        
+        """Group comparisons as one compact, humane table — not a raw dict dump.
+        Metric names are humanized via the same map the report uses, so the two surfaces agree."""
+        from .report import ReportGenerator
         if not isinstance(stats_results, dict):
-            return text
-        
+            return ""
+
+        rows = ""
+        pairwise_blocks = ""
         for metric, result in stats_results.items():
-            # Skip if result is not a dict
             if not isinstance(result, dict):
                 continue
+            label = ReportGenerator.get_metric_display_name(metric)
             if 'error' in result:
-                text += f"<p><b>{metric}:</b> {result['error']}</p>"
+                rows += (f"<tr><td style='padding:7px 10px;'><b>{label}</b></td>"
+                         f"<td style='padding:7px 10px;' colspan='4'>{result['error']}</td></tr>")
                 continue
-            
-            text += f"<h4 style='color: {Theme.PRIMARY_LIGHT};'>{metric}</h4>"
-            
+
             if 'overall_test' in result:
-                # Multiple group comparison
-                text += f"<p><b>Test:</b> {result['overall_test']}</p>"
-                text += f"<p><b>Statistic:</b> {result['overall_statistic']:.3f}</p>"
-                p = result['overall_p_value']
-                sig = "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else ""
-                text += f"<p><b>p-value:</b> {p:.4f} {sig}</p>"
-                
-                if result.get('pairwise_comparisons'):
-                    text += "<p><b>Pairwise:</b></p><ul>"
-                    for pair in result['pairwise_comparisons']:
-                        p_corr = pair.get('p_value_corrected', pair['p_value'])
-                        sig = "***" if p_corr < 0.001 else "**" if p_corr < 0.01 else "*" if p_corr < 0.05 else ""
-                        text += f"<li>{pair['group1_name']} vs {pair['group2_name']}: "
-                        text += f"p={p_corr:.4f}{sig}, d={pair['cohens_d']:.2f} ({pair['effect_size']})</li>"
-                    text += "</ul>"
+                test = result['overall_test']
+                p = result.get('overall_p_value', 1.0)
+                is_sig = result.get('overall_significant', p < 0.05)
+                effect = "—"
             else:
-                # Two group comparison
-                text += f"<p><b>Groups:</b> {result['group1_name']} (n={result['n1']}) vs {result['group2_name']} (n={result['n2']})</p>"
-                text += f"<p><b>Means:</b> {result['mean1']:.3f} ± {result['std1']:.3f} vs {result['mean2']:.3f} ± {result['std2']:.3f}</p>"
-                text += f"<p><b>Test:</b> {result['test_name']}</p>"
-                
-                p = result['p_value']
-                sig = "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else ""
-                color = Theme.ROD if p < 0.05 else Theme.TEXT_SECONDARY
-                text += f"<p><b>p-value:</b> <span style='color: {color};'>{p:.4f} {sig}</span></p>"
-                text += f"<p><b>Effect size:</b> Cohen's d = {result['cohens_d']:.2f} ({result['effect_size']})</p>"
-        
-        text += "<p style='color: #B0B0B0; font-size: 11px;'>* p < 0.05 | ** p < 0.01 | *** p < 0.001</p>"
-        return text
+                test = result.get('test_name', 'N/A')
+                p = result.get('p_value', 1.0)
+                is_sig = result.get('significant', p < 0.05)
+                d = result.get('cohens_d')
+                effect = f"d = {d:.2f} ({result.get('effect_size', '')})" if d is not None else "—"
+
+            stars = "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else ""
+            verdict = (f"<span style='color:{Theme.TEXT_PRIMARY};'>&#9679; Significant</span>"
+                       if is_sig else f"<span style='color:{Theme.TEXT_MUTED};'>Not significant</span>")
+            rows += (
+                "<tr>"
+                f"<td style='padding:7px 10px;'><b>{label}</b></td>"
+                f"<td style='padding:7px 10px;'>{test}</td>"
+                f"<td style='padding:7px 10px; text-align:right;'>{p:.4f} {stars}</td>"
+                f"<td style='padding:7px 10px; text-align:right;'>{effect}</td>"
+                f"<td style='padding:7px 10px;'>{verdict}</td>"
+                "</tr>")
+
+            # Compact pairwise — only the pairs that reach significance.
+            if result.get('pairwise_comparisons'):
+                sig_pairs = []
+                for pair in result['pairwise_comparisons']:
+                    p_corr = pair.get('p_value_corrected', pair['p_value'])
+                    if p_corr < 0.05:
+                        sig_pairs.append(
+                            f"{pair['group1_name']} vs {pair['group2_name']} "
+                            f"(p={p_corr:.4f}, d={pair['cohens_d']:.2f})")
+                if sig_pairs:
+                    pairwise_blocks += (
+                        f"<p style='margin:2px 0; color:{Theme.TEXT_SECONDARY}; font-size:12px;'>"
+                        f"<b>{label}</b> — {' · '.join(sig_pairs)}</p>")
+
+        if not rows:
+            return ""
+        table = (
+            f"<table style='border-collapse:collapse; width:100%;'>"
+            f"<tr style='background-color:{Theme.BG_HOVER};'>"
+            f"<th style='padding:8px 10px; text-align:left;'>Metric</th>"
+            f"<th style='padding:8px 10px; text-align:left;'>Test</th>"
+            f"<th style='padding:8px 10px; text-align:right;'>p-value</th>"
+            f"<th style='padding:8px 10px; text-align:right;'>Effect size</th>"
+            f"<th style='padding:8px 10px; text-align:left;'>Result</th></tr>"
+            f"{rows}</table>")
+        footnote = (f"<p style='color:{Theme.TEXT_MUTED}; font-size:11px; margin-top:6px;'>"
+                    f"* p &lt; 0.05 &nbsp; ** p &lt; 0.01 &nbsp; *** p &lt; 0.001</p>")
+        pw = ((f"<p style='color:{Theme.TEXT_MUTED}; font-size:11px; margin-top:10px;'>"
+               f"Significant pairwise differences</p>{pairwise_blocks}") if pairwise_blocks else "")
+        return table + footnote + pw
     
     def _generate_spatial_stats(self, spatial_stats: dict) -> str:
         """Generate spatial analysis statistics."""
@@ -2134,7 +2260,7 @@ class ResultsTab(QWidget):
             text += f"<td style='padding: 6px;'>{spatial_stats['density_per_mm2']:.2f} /mm²</td></tr>"
         
         text += "</table>"
-        text += "<p style='color: #B0B0B0; font-size: 11px;'>Clark-Evans R: &lt;1 clustered, =1 random, &gt;1 regular</p>"
+        text += f"<p style='color: {Theme.TEXT_MUTED}; font-size: 11px;'>Clark-Evans R: &lt;1 clustered, =1 random, &gt;1 regular</p>"
         return text
     
     def _show_image_dialog(self, path: str, title: str):
@@ -2377,9 +2503,10 @@ class ResultsTab(QWidget):
                 else stats.get('basic', {}).get('metrics', {}) or {})
 
             self.progress.setVisible(False)
+            # The refresh IS the feedback — load_results re-reveals the now-current "Open report"
+            # primary; no blocking success modal.
             self.load_results(self.results)
-            QMessageBox.information(self, "Success", "Report generated successfully!")
-            
+
         except Exception as e:
             import traceback
             QMessageBox.critical(self, "Error", f"Regeneration failed: {str(e)}\n\n{traceback.format_exc()}")
