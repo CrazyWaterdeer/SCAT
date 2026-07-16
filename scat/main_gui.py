@@ -45,6 +45,7 @@ from PySide6.QtGui import (
 from .config import config, get_timestamped_output_dir
 from .artifacts import IMAGE_SUMMARY, ALL_DEPOSITS
 from . import metrics as _metrics
+from . import confidence as _conf
 from .ui_common import (
     Theme, NoScrollSpinBox, NoScrollDoubleSpinBox, NoScrollComboBox,
     CollapsibleSection, CenteredCap, ToggleSwitch, setting_row,
@@ -1781,9 +1782,14 @@ class ResultsTab(QWidget):
             f" letter-spacing: {Theme.TRACK_DISPLAY};")
         self.hero_sub = QLabel("")
         self.hero_sub.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; font-size: {Theme.FS_BODY}px;")
+        # One factual trust line: a neutral count vs the fixed confidence threshold — muted, no
+        # colored verdict/dot (a reliability claim the uncalibrated score can't support).
+        self.trust_line = QLabel("")
+        self.trust_line.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FS_SM}px;")
         numcol.addWidget(self.hero_kicker)
         numcol.addWidget(self.hero_value)
         numcol.addWidget(self.hero_sub)
+        numcol.addWidget(self.trust_line)
         top.addLayout(numcol)
         top.addStretch(1)
 
@@ -1953,6 +1959,10 @@ class ResultsTab(QWidget):
         vals = _metrics.metric_values(film_summary, pm).dropna()
         sd = vals.std() if len(vals) > 1 else 0.0
         self.hero_sub.setText(f"±{sd:.1f}{m.unit}   ·   across {n} image{'s' if n != 1 else ''}")
+        # Factual trust line: count of deposits below the fixed confidence threshold (no verdict).
+        self.trust_line.setText(
+            _conf.run_trust(results.get("deposit_data"),
+                            results.get("confidence_threshold", 0.60))["line"])
 
         # KPI tiles (rebuilt each load).
         while self.tiles_layout.count():

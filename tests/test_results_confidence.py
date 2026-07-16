@@ -28,3 +28,13 @@ def test_review_column_survives_missing_deposit_data(synth_dir, tmp_path):
     d = _results_dict_from_output(Path(res.output_dir)); d["deposit_data"] = None
     tab = ResultsTab(); tab.load_results(d)  # must not raise
     assert tab.summary_table.item(0, 1).text() == "—"
+
+
+def test_hero_has_factual_trust_line(synth_dir, tmp_path):
+    QApplication.instance() or QApplication([])
+    res = analyze_folder_service(str(synth_dir), output_dir=str(tmp_path / "out"), annotate=False)
+    tab = ResultsTab(); tab.load_results(_results_dict_from_output(Path(res.output_dir)))
+    txt = tab.trust_line.text().lower()
+    assert "confidence-score threshold" in txt
+    for bad in ("high-confidence", "reviewed", "reliable", "trustworthy"):
+        assert bad not in txt
