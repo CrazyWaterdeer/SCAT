@@ -1819,12 +1819,12 @@ class ResultsTab(QWidget):
         top.addLayout(act)
         hv.addLayout(top)
 
-        # KPI tiles (rebuilt on each load)
-        self.tiles_host = QWidget()
-        self.tiles_layout = QHBoxLayout(self.tiles_host)
-        self.tiles_layout.setContentsMargins(0, 0, 0, 0)
-        self.tiles_layout.setSpacing(10)
-        hv.addWidget(self.tiles_host)
+        # Composition strip (one thin semantic line — replaces the six KPI tiles).
+        self.composition_line = QLabel("")
+        self.composition_line.setStyleSheet(
+            f"color: {Theme.TEXT_SECONDARY}; font-size: {Theme.FS_BODY}px; padding-top: 4px;")
+        self.composition_line.setTextFormat(Qt.RichText)
+        hv.addWidget(self.composition_line)
 
         self.col.addWidget(self._hero_card)
 
@@ -1964,22 +1964,20 @@ class ResultsTab(QWidget):
             _conf.run_trust(results.get("deposit_data"),
                             results.get("confidence_threshold", 0.60))["line"])
 
-        # KPI tiles (rebuilt each load).
-        while self.tiles_layout.count():
-            it = self.tiles_layout.takeAt(0)
-            if it.widget():
-                it.widget().deleteLater()
+        # Composition strip (one thin semantic line — replaces the six KPI tiles).
         # "Deposits" = Normal + ROD (artifacts are the reject class) — matches the report's
         # total_deposits so the app and the report it produces agree on the headline count.
-        # Equal stretch (factor 1, no trailing stretch) justifies the tiles edge-to-edge like
-        # the report's stat-card grid, instead of packing them left with a dead band on the right.
-        self.tiles_layout.addWidget(self._kpi_tile(n, "IMAGES"), 1)
-        self.tiles_layout.addWidget(self._kpi_tile(f"{(total_normal + total_rod):.0f}", "DEPOSITS"), 1)
-        self.tiles_layout.addWidget(self._kpi_tile(f"{total_normal:.0f}", "NORMAL", Theme.NORMAL), 1)
-        self.tiles_layout.addWidget(self._kpi_tile(f"{total_rod:.0f}", "ROD", Theme.ROD), 1)
-        self.tiles_layout.addWidget(self._kpi_tile(f"{total_artifact:.0f}", "ARTIFACT", Theme.TEXT_SECONDARY), 1)
-        if 'total_iod' in film_summary.columns:
-            self.tiles_layout.addWidget(self._kpi_tile(f"{film_summary['total_iod'].sum():.0f}", "TOTAL IOD"), 1)
+        sep = " &nbsp;·&nbsp; "
+        parts = [
+            f"Deposits <b>{total_normal + total_rod:.0f}</b>",
+            f"Normal <b style='color:{Theme.NORMAL}'>{total_normal:.0f}</b>",
+            f"ROD <b style='color:{Theme.ROD}'>{total_rod:.0f}</b>",
+            f"ROD fraction <b>{mean_rod_frac*100:.1f}%</b>",
+            f"Artifact <span style='color:{Theme.TEXT_MUTED}'>{total_artifact:.0f}</span>",
+        ]
+        if 'total_iod' in film_summary.columns:              # omit when absent — never show a fake "0"
+            parts.append(f"Total IOD <b>{film_summary['total_iod'].sum():.0f}</b>")
+        self.composition_line.setText(sep.join(parts))
 
         # Actions: state-driven hierarchy (Open report leads once one exists).
         output_dir = results.get('output_dir', '')
