@@ -89,3 +89,17 @@ def format_headline(film: pd.DataFrame, key: str, normalization: str, meta: dict
         noun = m.label.lower().replace("total ", "")  # "Total deposits" -> "deposits"
         return f"{m.fmt.format(rate)} {noun} / {unit}"
     return f"{m.fmt.format(float(vals.mean()))}{m.unit}"
+
+
+def flagged_by_image(deposits_df, threshold: float) -> dict[str, dict]:
+    """Per-image count of low-confidence deposits (confidence < threshold), any label. Returns
+    {filename: {"flagged": int, "total": int}}. Empty dict if the frame lacks the needed columns.
+    Confidence is the classifier's score (RF class probability OR the rule-based circularity score);
+    it is NOT a calibrated probability of correctness — this is only a workload/triage signal."""
+    import pandas as pd
+    if deposits_df is None or not {"filename", "confidence"} <= set(getattr(deposits_df, "columns", [])):
+        return {}
+    out: dict[str, dict] = {}
+    for fn, grp in deposits_df.groupby("filename"):
+        out[str(fn)] = {"flagged": int((grp["confidence"] < threshold).sum()), "total": int(len(grp))}
+    return out

@@ -66,3 +66,32 @@ def test_per_fly_with_metadata_normalizes():
     assert mode == "per_fly" and note == ""
     # (12+20)/8 = 4.0 deposits / fly
     assert metrics.format_headline(_film(), "total_deposits", "per_fly", meta={"n_flies": 8}) == "4.0 deposits / fly"
+
+
+import pandas as pd
+
+
+def _deps():
+    return pd.DataFrame({
+        "filename": ["a", "a", "a", "b"],
+        "label":    ["rod", "normal", "artifact", "rod"],
+        "confidence": [0.55, 0.90, 0.50, 0.95],
+    })
+
+
+def test_flagged_by_image_counts_all_below_threshold():
+    f = metrics.flagged_by_image(_deps(), threshold=0.60)
+    # image a: two below 0.60 (rod 0.55, artifact 0.50); image b: none
+    assert f["a"] == {"flagged": 2, "total": 3}
+    assert f["b"] == {"flagged": 0, "total": 1}
+
+
+def test_flagged_by_image_threshold_is_strict_less_than():
+    f = metrics.flagged_by_image(
+        pd.DataFrame({"filename": ["a"], "label": ["rod"], "confidence": [0.60]}), threshold=0.60)
+    assert f["a"]["flagged"] == 0          # exactly at threshold is NOT flagged
+
+
+def test_flagged_by_image_missing_columns_returns_empty():
+    assert metrics.flagged_by_image(None, 0.6) == {}
+    assert metrics.flagged_by_image(pd.DataFrame({"filename": ["a"]}), 0.6) == {}
