@@ -65,6 +65,7 @@ class Theme:
 
     # ---- Borders / focus ----
     BORDER = "#2A2A2A"
+    BORDER_LIT = "#3A3A3A"     # a lit top edge for dark-theme card depth (drop shadows vanish on near-black)
     BORDER_FOCUS = "#DA4E42"   # focus ring (rendered 2px — 4.67:1 on the inset field)
     FOCUS_RING = "#DA4E42"
 
@@ -75,6 +76,9 @@ class Theme:
     SPACE_1, SPACE_2, SPACE_3, SPACE_4, SPACE_5, SPACE_6 = 4, 8, 12, 16, 20, 24
     WEIGHT_BODY, WEIGHT_LABEL, WEIGHT_TITLE = 400, 500, 600
     FS_XS, FS_SM, FS_BODY, FS_TITLE, FS_DISPLAY = 11, 12, 13, 15, 24
+    # Letter-spacing tokens (Qt QSS uses px): tighten the largest display numbers, one caps tracking.
+    TRACK_DISPLAY = "-0.5px"   # size-specific tightening for hero/display numbers
+    TRACK_CAPS = "0.6px"       # uppercase captions (hero kicker, section labels, tile labels)
 
     # Cached stylesheet
     _cached_app_stylesheet = None

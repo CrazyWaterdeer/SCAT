@@ -1749,7 +1749,7 @@ class ResultsTab(QWidget):
         self._hero_card.setObjectName("heroCard")
         self._hero_card.setStyleSheet(
             f"QWidget#heroCard {{ background-color: {Theme.BG_SURFACE}; border: 1px solid {Theme.BORDER};"
-            f" border-radius: {Theme.RADIUS_CONTAINER}px; }}")
+            f" border-top: 1px solid {Theme.BORDER_LIT}; border-radius: {Theme.RADIUS_CONTAINER}px; }}")
         hv = QVBoxLayout(self._hero_card)
         hv.setContentsMargins(24, 22, 24, 22)
         hv.setSpacing(16)
@@ -1761,9 +1761,11 @@ class ResultsTab(QWidget):
         self.hero_kicker = QLabel("MEAN ROD FRACTION")
         self.hero_kicker.setStyleSheet(
             f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FS_XS}px; font-weight: {Theme.WEIGHT_TITLE};"
-            f" letter-spacing: 1px;")
+            f" letter-spacing: {Theme.TRACK_CAPS};")
         self.hero_value = QLabel("—")
-        self.hero_value.setStyleSheet(f"color: {Theme.TEXT_PRIMARY}; font-size: 34px; font-weight: 700;")
+        self.hero_value.setStyleSheet(
+            f"color: {Theme.TEXT_PRIMARY}; font-size: 34px; font-weight: 700;"
+            f" letter-spacing: {Theme.TRACK_DISPLAY};")
         self.hero_sub = QLabel("")
         self.hero_sub.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; font-size: {Theme.FS_BODY}px;")
         numcol.addWidget(self.hero_kicker)
@@ -1815,7 +1817,8 @@ class ResultsTab(QWidget):
             f"QPushButton:hover {{ color: {Theme.TEXT_SECONDARY}; }}")
         self.load_results_btn.setCursor(Qt.PointingHandCursor)
         self.load_results_btn.clicked.connect(self._load_previous_results)
-        self.col.addWidget(self.load_results_btn)
+        # Added to the column as a quiet footer below the results (see end of _setup_ui) — a
+        # session-switch action shouldn't interrupt the hero→table reading flow.
 
         self.progress = QProgressBar()
         self.progress.setVisible(False)
@@ -1844,6 +1847,9 @@ class ResultsTab(QWidget):
         self.stats_layout.setSpacing(20)
         self.col.addWidget(self.stats_host)
 
+        # Session switch — a quiet footer below the current results, out of the reading flow.
+        self.col.addWidget(self.load_results_btn)
+
         # Empty until results arrive.
         for b in (self.open_report_btn, self.generate_report_btn, self.open_folder_btn):
             b.setVisible(False)
@@ -1854,7 +1860,7 @@ class ResultsTab(QWidget):
         lbl = QLabel(text)
         lbl.setStyleSheet(
             f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FS_XS}px; font-weight: {Theme.WEIGHT_TITLE};"
-            f" letter-spacing: 1px; margin-top: 4px;")
+            f" letter-spacing: {Theme.TRACK_CAPS}; margin-top: 4px;")
         return lbl
 
     def _kpi_tile(self, value, label: str, color: str = None) -> QWidget:
@@ -1863,15 +1869,18 @@ class ResultsTab(QWidget):
         w.setObjectName("kpiTile")
         w.setStyleSheet(
             f"QWidget#kpiTile {{ background-color: {Theme.BG_INSET}; border: 1px solid {Theme.BORDER};"
-            f" border-radius: {Theme.RADIUS_CONTROL}px; }}")
+            f" border-top: 1px solid {Theme.BORDER_LIT}; border-radius: {Theme.RADIUS_CONTROL}px; }}")
         v = QVBoxLayout(w)
         v.setContentsMargins(14, 10, 14, 10)
         v.setSpacing(1)
         val = QLabel(str(value))
-        val.setStyleSheet(f"color: {color or Theme.TEXT_PRIMARY}; font-size: 19px; font-weight: 700;")
+        val.setStyleSheet(
+            f"color: {color or Theme.TEXT_PRIMARY}; font-size: 19px; font-weight: 700;"
+            f" letter-spacing: {Theme.TRACK_DISPLAY};")
         lab = QLabel(label)
         lab.setStyleSheet(
-            f"color: {Theme.TEXT_MUTED}; font-size: 10px; font-weight: {Theme.WEIGHT_TITLE}; letter-spacing: 0.6px;")
+            f"color: {Theme.TEXT_MUTED}; font-size: 10px; font-weight: {Theme.WEIGHT_TITLE};"
+            f" letter-spacing: {Theme.TRACK_CAPS};")
         v.addWidget(val)
         v.addWidget(lab)
         return w
@@ -1929,14 +1938,17 @@ class ResultsTab(QWidget):
             it = self.tiles_layout.takeAt(0)
             if it.widget():
                 it.widget().deleteLater()
-        self.tiles_layout.addWidget(self._kpi_tile(n, "IMAGES"))
-        self.tiles_layout.addWidget(self._kpi_tile(f"{film_summary['n_total'].sum():.0f}", "DEPOSITS"))
-        self.tiles_layout.addWidget(self._kpi_tile(f"{total_normal:.0f}", "NORMAL", Theme.NORMAL))
-        self.tiles_layout.addWidget(self._kpi_tile(f"{total_rod:.0f}", "ROD", Theme.ROD))
-        self.tiles_layout.addWidget(self._kpi_tile(f"{total_artifact:.0f}", "ARTIFACT", Theme.TEXT_SECONDARY))
+        # "Deposits" = Normal + ROD (artifacts are the reject class) — matches the report's
+        # total_deposits so the app and the report it produces agree on the headline count.
+        # Equal stretch (factor 1, no trailing stretch) justifies the tiles edge-to-edge like
+        # the report's stat-card grid, instead of packing them left with a dead band on the right.
+        self.tiles_layout.addWidget(self._kpi_tile(n, "IMAGES"), 1)
+        self.tiles_layout.addWidget(self._kpi_tile(f"{(total_normal + total_rod):.0f}", "DEPOSITS"), 1)
+        self.tiles_layout.addWidget(self._kpi_tile(f"{total_normal:.0f}", "NORMAL", Theme.NORMAL), 1)
+        self.tiles_layout.addWidget(self._kpi_tile(f"{total_rod:.0f}", "ROD", Theme.ROD), 1)
+        self.tiles_layout.addWidget(self._kpi_tile(f"{total_artifact:.0f}", "ARTIFACT", Theme.TEXT_SECONDARY), 1)
         if 'total_iod' in film_summary.columns:
-            self.tiles_layout.addWidget(self._kpi_tile(f"{film_summary['total_iod'].sum():.0f}", "TOTAL IOD"))
-        self.tiles_layout.addStretch(1)
+            self.tiles_layout.addWidget(self._kpi_tile(f"{film_summary['total_iod'].sum():.0f}", "TOTAL IOD"), 1)
 
         # Actions: state-driven hierarchy (Open report leads once one exists).
         output_dir = results.get('output_dir', '')
@@ -1973,98 +1985,44 @@ class ResultsTab(QWidget):
         stats_results = results.get('stats_results', {})
         spatial_stats = results.get('spatial_stats', {})
         
-        # ===== Visualizations Section =====
+        # ===== Visualizations — lead with a few overview charts, collapse the long tail =====
+        # (One calm scroll: the quick-look shouldn't out-dump the curated HTML report.)
         if viz_results:
-            viz_group = QGroupBox("Visualizations")
-            viz_inner = QVBoxLayout()
-            
-            # Grid layout for images (2 columns)
-            from PySide6.QtWidgets import QGridLayout
-            viz_grid = QGridLayout()
-            viz_grid.setSpacing(15)
-            
-            for idx, (name, path) in enumerate(viz_results.items()):
-                btn = QPushButton()
-                btn.setToolTip(f"Click to enlarge: {name}")
-                # Flat button — the framed cell provides the chrome, not the plot's white edge.
-                btn.setStyleSheet(
-                    "QPushButton { background: transparent; border: none; padding: 0; }"
-                    "QPushButton:hover { background: transparent; }")
-                btn.setCursor(Qt.PointingHandCursor)
+            self.stats_layout.addWidget(self._section_label("VISUALIZATIONS"))
+            items = list(viz_results.items())
+            HERO = ['dashboard', 'area_iod', 'heatmap', 'scatter_matrix', 'pca']
+            hero = sorted((kp for kp in items if kp[0] in HERO), key=lambda kp: HERO.index(kp[0]))
+            rest = [kp for kp in items if kp[0] not in HERO]
+            if not hero:                        # no overview plots — lead with the first few
+                hero, rest = items[:4], items[4:]
+            self.stats_layout.addWidget(self._viz_grid(hero))
+            if rest:
+                more = CollapsibleSection(f"Show all {len(rest)} more charts", expanded=False)
+                more.add_widget(self._viz_grid(rest))
+                self.stats_layout.addWidget(more)
 
-                pixmap = QPixmap(path)
-                if not pixmap.isNull():
-                    scaled = pixmap.scaled(380, 280, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                    btn.setIcon(QIcon(scaled))
-                    btn.setIconSize(scaled.size())
-                    btn.setFixedSize(scaled.size() + QSize(10, 10))
-                    btn.clicked.connect(lambda checked, p=path, n=name: self._show_image_dialog(p, n))
-
-                # Framed cell so bright plots don't slam edge-to-edge on the dark card
-                # (mirrors the report's .plot-container).
-                container = QWidget()
-                container.setObjectName("vizCell")
-                container.setStyleSheet(
-                    f"QWidget#vizCell {{ background-color: {Theme.BG_INSET}; border: 1px solid {Theme.BORDER};"
-                    f" border-radius: {Theme.RADIUS_CONTAINER}px; }}")
-                container_layout = QVBoxLayout(container)
-                container_layout.setContentsMargins(10, 10, 10, 8)
-                container_layout.setSpacing(8)
-                container_layout.addWidget(btn, alignment=Qt.AlignCenter)
-                label = QLabel(self._format_viz_name(name))
-                label.setAlignment(Qt.AlignCenter)
-                label.setStyleSheet(
-                    f"color: {Theme.TEXT_SECONDARY}; font-size: {Theme.FS_SM}px; background: transparent; border: none;")
-                container_layout.addWidget(label)
-
-                row = idx // 2
-                col = idx % 2
-                viz_grid.addWidget(container, row, col)
-            
-            viz_inner.addLayout(viz_grid)
-            viz_group.setLayout(viz_inner)
-            self.stats_layout.addWidget(viz_group)
-        
-        # ===== Descriptive Statistics Section =====
-        desc_group = QGroupBox("Descriptive Statistics")
-        desc_layout = QVBoxLayout()
-        
-        desc_text = self._generate_descriptive_stats(film_summary)
-        desc_label = QLabel(desc_text)
+        # ===== Descriptive statistics ===== (one section idiom: muted uppercase label, no card)
+        self.stats_layout.addWidget(self._section_label("DESCRIPTIVE STATISTICS"))
+        desc_label = QLabel(self._generate_descriptive_stats(film_summary))
         desc_label.setWordWrap(True)
         desc_label.setTextFormat(Qt.RichText)
-        desc_layout.addWidget(desc_label)
-        
-        desc_group.setLayout(desc_layout)
-        self.stats_layout.addWidget(desc_group)
-        
-        # ===== Group Comparison Section =====
+        self.stats_layout.addWidget(desc_label)
+
+        # ===== Group comparisons =====
         if stats_results:
-            comp_group = QGroupBox("Group Comparisons")
-            comp_layout = QVBoxLayout()
-            
-            comp_text = self._generate_comparison_stats(stats_results)
-            comp_label = QLabel(comp_text)
+            self.stats_layout.addWidget(self._section_label("GROUP COMPARISONS"))
+            comp_label = QLabel(self._generate_comparison_stats(stats_results))
             comp_label.setWordWrap(True)
             comp_label.setTextFormat(Qt.RichText)
-            comp_layout.addWidget(comp_label)
-            
-            comp_group.setLayout(comp_layout)
-            self.stats_layout.addWidget(comp_group)
-        
-        # ===== Spatial Analysis Section =====
+            self.stats_layout.addWidget(comp_label)
+
+        # ===== Spatial analysis =====
         if spatial_stats:
-            spatial_group = QGroupBox("Spatial Analysis")
-            spatial_layout = QVBoxLayout()
-            
-            spatial_text = self._generate_spatial_stats(spatial_stats)
-            spatial_label = QLabel(spatial_text)
+            self.stats_layout.addWidget(self._section_label("SPATIAL ANALYSIS"))
+            spatial_label = QLabel(self._generate_spatial_stats(spatial_stats))
             spatial_label.setWordWrap(True)
             spatial_label.setTextFormat(Qt.RichText)
-            spatial_layout.addWidget(spatial_label)
-            
-            spatial_group.setLayout(spatial_layout)
-            self.stats_layout.addWidget(spatial_group)
+            self.stats_layout.addWidget(spatial_label)
     
     def _format_viz_name(self, name: str) -> str:
         """Format visualization key names for display."""
@@ -2087,26 +2045,84 @@ class ResultsTab(QWidget):
         
         if name in name_map:
             return name_map[name]
-        
-        # Generic formatting: remove prefix, replace underscores, proper case
-        formatted = name
-        for prefix in ['violin_', 'box_', 'bar_', 'scatter_']:
-            if formatted.startswith(prefix):
-                formatted = formatted[len(prefix):]
+
+        s = name
+        suffix = ""
+        # Every group chart carries "_by_group" — redundant on the caption; drop it globally.
+        if s.endswith('_by_group'):
+            s = s[:-len('_by_group')]
+        # Confidence-interval plots: express the interval as a suffix, not a doubled-"Mean Ci" prefix.
+        if s.startswith('mean_ci_'):
+            s = s[len('mean_ci_'):]
+            suffix = " (95% CI)"
+        for prefix in ('violin_', 'box_', 'bar_', 'scatter_'):
+            if s.startswith(prefix):
+                s = s[len(prefix):]
                 break
-        
-        # Special abbreviations that should stay uppercase
-        upper_words = {'iod': 'IOD', 'rod': 'ROD', 'nnd': 'NND', 'pca': 'PCA'}
-        words = formatted.split('_')
-        formatted_words = []
-        for w in words:
-            if w.lower() in upper_words:
-                formatted_words.append(upper_words[w.lower()])
+        # n_total is Normal+ROD deposits — name it the way the rest of the app does.
+        s = s.replace('n_total', 'total_deposits')
+
+        # Abbreviations that stay uppercase; "by" stays a lowercase connector.
+        upper_words = {'iod': 'IOD', 'rod': 'ROD', 'nnd': 'NND', 'pca': 'PCA', 'ci': 'CI'}
+        words = []
+        for w in s.split('_'):
+            lw = w.lower()
+            if lw in upper_words:
+                words.append(upper_words[lw])
+            elif lw == 'by':
+                words.append('by')
             else:
-                formatted_words.append(w.capitalize())
-        
-        return ' '.join(formatted_words)
+                words.append(w.capitalize())
+        # Collapse an accidental doubled "Mean".
+        out = []
+        for w in words:
+            if w == 'Mean' and out and out[-1] == 'Mean':
+                continue
+            out.append(w)
+        return ' '.join(out) + suffix
     
+    def _viz_cell(self, name: str, path: str) -> QWidget:
+        """One framed, click-to-enlarge plot thumbnail (mirrors the report's .plot-container)."""
+        btn = QPushButton()
+        btn.setToolTip(f"Click to enlarge: {self._format_viz_name(name)}")
+        btn.setStyleSheet(
+            "QPushButton { background: transparent; border: none; padding: 0; }"
+            "QPushButton:hover { background: transparent; }")
+        btn.setCursor(Qt.PointingHandCursor)
+        pixmap = QPixmap(path)
+        if not pixmap.isNull():
+            scaled = pixmap.scaled(380, 280, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            btn.setIcon(QIcon(scaled))
+            btn.setIconSize(scaled.size())
+            btn.setFixedSize(scaled.size() + QSize(10, 10))
+            btn.clicked.connect(lambda checked, p=path, n=name: self._show_image_dialog(p, n))
+        container = QWidget()
+        container.setObjectName("vizCell")
+        container.setStyleSheet(
+            f"QWidget#vizCell {{ background-color: {Theme.BG_INSET}; border: 1px solid {Theme.BORDER};"
+            f" border-radius: {Theme.RADIUS_CONTAINER}px; }}")
+        cl = QVBoxLayout(container)
+        cl.setContentsMargins(10, 10, 10, 8)
+        cl.setSpacing(8)
+        cl.addWidget(btn, alignment=Qt.AlignCenter)
+        label = QLabel(self._format_viz_name(name))
+        label.setAlignment(Qt.AlignCenter)
+        label.setStyleSheet(
+            f"color: {Theme.TEXT_SECONDARY}; font-size: {Theme.FS_SM}px; background: transparent; border: none;")
+        cl.addWidget(label)
+        return container
+
+    def _viz_grid(self, items) -> QWidget:
+        """A 2-column grid of framed plot thumbnails for the given (name, path) pairs."""
+        from PySide6.QtWidgets import QGridLayout
+        host = QWidget()
+        grid = QGridLayout(host)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(15)
+        for idx, (name, path) in enumerate(items):
+            grid.addWidget(self._viz_cell(name, path), idx // 2, idx % 2)
+        return host
+
     def _generate_descriptive_stats(self, film_summary: pd.DataFrame) -> str:
         """Generate detailed descriptive statistics."""
         from scipy import stats as sp_stats
@@ -2114,17 +2130,18 @@ class ResultsTab(QWidget):
         text = "<table style='border-collapse: collapse; width: 100%;'>"
         text += f"<tr style='background-color: {Theme.BG_HOVER};'>"
         text += "<th style='padding: 8px; text-align: left;'>Metric</th>"
-        text += "<th style='padding: 8px;'>Mean</th>"
-        text += "<th style='padding: 8px;'>SD</th>"
-        text += "<th style='padding: 8px;'>Median</th>"
-        text += "<th style='padding: 8px;'>IQR</th>"
-        text += "<th style='padding: 8px;'>95% CI</th>"
-        text += "<th style='padding: 8px;'>Distribution</th>"
+        text += "<th style='padding: 8px; text-align: right;'>Mean</th>"
+        text += "<th style='padding: 8px; text-align: right;'>SD</th>"
+        text += "<th style='padding: 8px; text-align: right;'>Median</th>"
+        text += "<th style='padding: 8px; text-align: right;'>IQR</th>"
+        text += "<th style='padding: 8px; text-align: right;'>95% CI</th>"
+        text += "<th style='padding: 8px; text-align: center;'>Distribution</th>"
         text += "</tr>"
         
         metrics = [
             ('ROD Fraction', film_summary['rod_fraction'] * 100, '%'),
-            ('Total Deposits', film_summary['n_total'], ''),
+            # "Deposits" = Normal + ROD (artifacts excluded), consistent with the KPI tile + report.
+            ('Total Deposits', film_summary['n_normal'] + film_summary['n_rod'], ''),
             ('Normal Count', film_summary['n_normal'], ''),
             ('ROD Count', film_summary['n_rod'], ''),
         ]
