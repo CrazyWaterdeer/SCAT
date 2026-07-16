@@ -13,6 +13,9 @@ data/
 # Installed agent skills (personal tooling via `npx skills`, not part of the project)
 .agents/
 
+# Brainstorming visual-companion mockups (local design session scratch)
+.superpowers/
+
 # Python
 __pycache__/
 .venv/
