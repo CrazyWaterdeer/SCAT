@@ -16,6 +16,8 @@ from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 
+from scat import metrics as _metrics
+
 from .artifacts import RUN_MANIFEST
 
 SCHEMA = "scat.run_manifest/1"
@@ -111,9 +113,15 @@ def _abspath(p) -> str:
 
 def write_run_manifest(output_dir, *, path=None, image_paths, model_type=None, model_path=None,
                        circularity=None, groups=None, group_column=None, detection=None,
-                       warnings=None) -> dict:
+                       warnings=None, primary_metric=None, normalization=None,
+                       confidence_threshold=None) -> dict:
     """Write <output_dir>/run_manifest.json describing this analysis run. Best-effort (OSError
     is swallowed) and additive — a new sidecar file that never touches the CSV outputs."""
+    def _thr(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return _metrics.DEFAULT_THRESHOLD
     manifest = {
         "schema": SCHEMA,
         "created_at": _now_iso(),
@@ -127,6 +135,13 @@ def write_run_manifest(output_dir, *, path=None, image_paths, model_type=None, m
                   "circularity": circularity},
         "grouping": ({"column": group_column, "mapping": groups} if groups else None),
         "detection": dict(detection) if detection else {},
+        # the analysis contract — guarded so a bad value degrades to the registry default, never raises
+        "analysis": {
+            "primary_metric": _metrics.resolve_metric(primary_metric),
+            "normalization": (normalization if normalization in _metrics.NORMALIZATIONS
+                              else _metrics.DEFAULT_NORMALIZATION),
+            "confidence_threshold": _thr(confidence_threshold),
+        },
         "warnings": list(warnings) if warnings else [],
     }
     try:
