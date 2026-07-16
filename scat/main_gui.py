@@ -44,6 +44,7 @@ from PySide6.QtGui import (
 # Import SCAT modules
 from .config import config, get_timestamped_output_dir
 from .artifacts import IMAGE_SUMMARY, ALL_DEPOSITS
+from . import metrics as _metrics
 from .ui_common import (
     Theme, NoScrollSpinBox, NoScrollDoubleSpinBox, NoScrollComboBox,
     CollapsibleSection, CenteredCap, ToggleSwitch, setting_row,
@@ -735,6 +736,14 @@ def _results_dict_from_output(output_dir, group_by=None, image_paths=None, stats
     if stats and not stats.get("skipped"):
         stats_results = stats.get("basic", {}).get("metrics", {}) or {}
 
+    analysis = {}
+    mpath = out / "run_manifest.json"
+    if mpath.exists():
+        try:
+            analysis = (_json.loads(mpath.read_text()) or {}).get("analysis", {}) or {}
+        except Exception:
+            analysis = {}
+
     return {
         "output_dir": str(out),
         "film_summary": film_summary,   # holds image_summary; key kept for compatibility
@@ -744,6 +753,10 @@ def _results_dict_from_output(output_dir, group_by=None, image_paths=None, stats
         "stats_results": stats_results,
         "group_by": group_by,
         "image_paths": list(image_paths) if image_paths else [],
+        "primary_metric": _metrics.resolve_metric(analysis.get("primary_metric")),
+        "normalization": analysis.get("normalization") or _metrics.DEFAULT_NORMALIZATION,
+        "confidence_threshold": float(analysis.get("confidence_threshold", _metrics.DEFAULT_THRESHOLD)),
+        "run_meta": {},   # n_flies/roi_area/duration land here in the metadata-capture task
     }
 
 
