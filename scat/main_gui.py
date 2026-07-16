@@ -1843,8 +1843,9 @@ class ResultsTab(QWidget):
         hint.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FS_SM}px;")
         self.col.addWidget(hint)
         self.summary_table = QTableWidget()
-        self.summary_table.setColumnCount(6)
-        self.summary_table.setHorizontalHeaderLabels(["Filename", "Normal", "ROD", "Artifact", "ROD %", "Total IOD"])
+        self.summary_table.setColumnCount(7)
+        self.summary_table.setHorizontalHeaderLabels(
+            ["Filename", "Review", "Normal", "ROD", "Artifact", "ROD %", "Total IOD"])
         self.summary_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.summary_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.summary_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -1977,16 +1978,32 @@ class ResultsTab(QWidget):
         self.open_folder_btn.setVisible(bool(output_dir))
         self._apply_action_state(report_exists)
 
+        # Per-image low-confidence counts (triage signal, not a reliability claim) — Review column.
+        flagged = _metrics.flagged_by_image(
+            results.get("deposit_data"), results.get("confidence_threshold", 0.60))
+
         # Per-image table — right-aligned tabular numbers, gentle semantic tint on the class counts.
         self.summary_table.setSortingEnabled(False)
         self.summary_table.setRowCount(n)
         for i, (_, row) in enumerate(film_summary.iterrows()):
             self.summary_table.setItem(i, 0, QTableWidgetItem(str(row['filename'])))
-            self._set_num(i, 1, row['n_normal'], "{:.0f}", Theme.NORMAL)
-            self._set_num(i, 2, row['n_rod'], "{:.0f}", Theme.ROD)
-            self._set_num(i, 3, row['n_artifact'], "{:.0f}", Theme.TEXT_MUTED)
-            self._set_num(i, 4, row['rod_fraction'] * 100, "{:.1f}%")
-            self._set_num(i, 5, row.get('total_iod', 0), "{:.0f}")
+            info = flagged.get(str(row['filename']))
+            rev = NumericTableWidgetItem(info["flagged"] if info else 0, "{:.0f}")
+            rev.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            if info and info["flagged"]:
+                rev.setForeground(QColor(Theme.PRIMARY_LIGHT))
+                frac = 100.0 * info["flagged"] / info["total"] if info["total"] else 0.0
+                rev.setToolTip(
+                    f"{info['flagged']} of {info['total']} deposits below the "
+                    f"confidence-score threshold ({frac:.0f}%)")
+            else:
+                rev.setText("—")
+            self.summary_table.setItem(i, 1, rev)
+            self._set_num(i, 2, row['n_normal'], "{:.0f}", Theme.NORMAL)
+            self._set_num(i, 3, row['n_rod'], "{:.0f}", Theme.ROD)
+            self._set_num(i, 4, row['n_artifact'], "{:.0f}", Theme.TEXT_MUTED)
+            self._set_num(i, 5, row['rod_fraction'] * 100, "{:.1f}%")
+            self._set_num(i, 6, row.get('total_iod', 0), "{:.0f}")
         self.summary_table.setSortingEnabled(True)
         self._fit_table_height()
 
