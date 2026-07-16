@@ -39,8 +39,9 @@ _REPORT_CSS = """\
             --ink: #1A1A1A;
             --muted: #5A5A5A;
             --hair: #E4E3E0;
-            --accent: #2F6B9E;          /* Imajin steel blue */
-            --accent-soft: #EAF1F6;
+            --rule: #C9C7C3;            /* neutral structural rule (plot-caption left-borders) */
+            --accent: #2F6B9E;          /* focus affordance only — chrome is neutral, blue is the pH-basic DATA axis */
+            --wash: #F1F0EC;            /* neutral table-header / row-hover wash (was a steel-blue tint) */
             --ph-acidic: #DDA43A;       /* Bromophenol-Blue axis (pH views only) */
             --ph-mid: #1F9E77;
             --ph-basic: #2F6B9E;
@@ -122,7 +123,7 @@ _REPORT_CSS = """\
             font-size: 1.05rem;
             font-weight: 600;
             letter-spacing: -0.005em;
-            color: var(--accent);
+            color: var(--ink);             /* structure, not color — matches the app's neutral section headings */
             margin-top: 28px;
             margin-bottom: 12px;
         }
@@ -146,15 +147,18 @@ _REPORT_CSS = """\
             font-weight: 700;
             color: var(--ink);              /* numbers are ink; color is reserved for meaning */
             font-variant-numeric: tabular-nums;
+            letter-spacing: -0.01em;        /* size-specific tightening, like the serif headings */
             line-height: 1.1;
         }
         .stat-card .label {
             color: var(--muted);
             font-size: 0.78rem;
             margin-top: 6px;
+            min-height: 2.1em;              /* reserve two lines so every card's value shares a baseline */
             text-transform: uppercase;
             letter-spacing: var(--track-caps);
         }
+        .stat-card .label .lc { text-transform: none; }   /* keep domain casing (pH, not PH) */
         .stat-card.normal .value { color: var(--normal); }
         .stat-card.rod .value { color: var(--rod); }
         .stat-card.artifact .value { color: var(--artifact); }
@@ -196,7 +200,7 @@ _REPORT_CSS = """\
             padding: 10px 14px;
             background: var(--paper);
             border-radius: 6px;
-            border-left: 3px solid var(--accent);
+            border-left: 3px solid var(--rule);
         }
         .two-column {
             display: grid;
@@ -236,7 +240,7 @@ _REPORT_CSS = """\
             padding: 8px 10px;
             text-align: left;
         }
-        .data-table th { background: var(--accent-soft); color: var(--ink); text-transform: none; letter-spacing: 0; font-size: 0.84rem; }
+        .data-table th { background: var(--wash); color: var(--ink); text-transform: none; letter-spacing: 0; font-size: 0.84rem; }
         .data-table td.num, .data-table th.num { text-align: center; }
         .result-box {
             background: var(--fill);
@@ -261,7 +265,7 @@ _REPORT_CSS = """\
         .verdict--sig { color: var(--ink); }
         .verdict--sig::before {
             content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%;
-            background: var(--accent); margin-right: 7px; vertical-align: 0.06em;
+            background: var(--ink); margin-right: 7px; vertical-align: 0.06em;
         }
         .verdict--ns { color: var(--muted); font-weight: 500; }
         .omnibus-line { color: var(--muted); font-size: 0.85rem; margin-top: 8px; }
@@ -274,7 +278,7 @@ _REPORT_CSS = """\
 
         /* ---- Hover polish (pointer-only, transform/opacity only) ---- */
         @media (hover: hover) and (pointer: fine) {
-            tbody tr:hover { background: var(--accent-soft); }
+            tbody tr:hover { background: var(--wash); }
             .stat-card { transition: transform var(--dur-hover) var(--ease-out), box-shadow var(--dur-hover) var(--ease-out); }
             .stat-card:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(26, 26, 26, 0.08); }
             .plot-container img { transition: box-shadow var(--dur-hover) var(--ease-out); }
@@ -303,7 +307,7 @@ _REPORT_CSS = """\
         @media (prefers-contrast: more) {
             :root { --hair: #9A9A97; --muted: #3A3A3A; }
             .section, .stat-card, .plot-container img { border-color: var(--hair); }
-            tbody tr:hover { background: var(--accent-soft); outline: 1px solid var(--accent); }
+            tbody tr:hover { background: var(--wash); outline: 1px solid var(--accent); }
         }
 
         /* ---- Print: no motion, nothing splits across a page ---- */
@@ -360,6 +364,11 @@ _REPORT_FOOTER = """
     </script>
 </body>
 </html>"""
+
+
+# One neutral reference/mean line for every histogram — a mean marker is structure, not a data
+# category, so it is never a semantic color (was a stray Material red on the grey histograms).
+_MEAN_LINE = "#333333"
 
 
 class ReportGenerator:
@@ -768,7 +777,7 @@ class ReportGenerator:
     def _hist_with_mean(ax, data, *, bins, mean, mean_label) -> None:
         """Grey histogram with a red dashed mean line — the common core of most metrics."""
         ax.hist(data, bins=bins, color=DEFAULT_GRAY, edgecolor='white', alpha=0.8)
-        ax.axvline(mean, color='#E53935', linestyle='--', linewidth=2, label=mean_label)
+        ax.axvline(mean, color=_MEAN_LINE, linestyle='--', linewidth=2, label=mean_label)
 
     def _generate_rod_histogram(self, film_summary: pd.DataFrame) -> str:
         """Generate ROD fraction histogram as base64."""
@@ -862,7 +871,7 @@ class ReportGenerator:
             for patch, bin_left, bin_right in zip(patches, bin_edges[:-1], bin_edges[1:]):
                 bin_center = (bin_left + bin_right) / 2
                 patch.set_facecolor(hue_to_rgb(bin_center))
-            ax.axvline(np.mean(all_hues), color='#333333', linestyle='--',
+            ax.axvline(np.mean(all_hues), color=_MEAN_LINE, linestyle='--',
                       linewidth=2, label=f'Mean: {np.mean(all_hues):.1f}°')
             ax.set_xlabel('pH Indicator Hue (°)')
             ax.set_ylabel('Number of Deposits')
@@ -1087,6 +1096,10 @@ class ReportGenerator:
     <div class="section">
         <h2>Summary</h2>
         <div class="stats-grid">
+            <div class="stat-card rod">
+                <div class="value">{summary['mean_rod_fraction']*100:.1f}%</div>
+                <div class="label">ROD Fraction (±{summary['std_rod_fraction']*100:.1f}%)</div>
+            </div>
             <div class="stat-card">
                 <div class="value">{summary['total_films']}</div>
                 <div class="label">Total Images</div>
@@ -1113,11 +1126,7 @@ class ReportGenerator:
             </div>
             <div class="stat-card">
                 <div class="value">{summary['mean_hue']:.1f}°</div>
-                <div class="label">Mean pH Indicator (Hue)</div>
-            </div>
-            <div class="stat-card rod">
-                <div class="value">{summary['mean_rod_fraction']*100:.1f}%</div>
-                <div class="label">ROD Fraction (±{summary['std_rod_fraction']*100:.1f}%)</div>
+                <div class="label">Mean <span class="lc">pH</span> Indicator (Hue)</div>
             </div>
         </div>
 '''
@@ -1195,10 +1204,14 @@ class ReportGenerator:
         # Group comparison - show metrics vertically with omnibus results
         if group_by and 'group_comparison' in inline_plots:
             group_label = self.get_metric_label(group_by)
+            # Don't echo a generic column name back ("Group Comparison (Group)" / "across different group groups").
+            _generic = group_label.strip().lower() in ("group", "groups", "condition")
+            _heading = "Group Comparison" if _generic else f"Group Comparison ({group_label})"
+            _across = "groups" if _generic else f"{group_label.lower()} groups"
             html += f'''
     <div class="section">
-        <h2>Group Comparison ({group_label})</h2>
-        <p class="section-intro">Comparing deposit characteristics across different {group_label.lower()} groups.</p>
+        <h2>{_heading}</h2>
+        <p class="section-intro">Comparing deposit characteristics across {_across}.</p>
 '''
             
             # Define metrics in order matching Summary section
