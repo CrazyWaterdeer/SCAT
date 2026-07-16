@@ -53,24 +53,38 @@ Test `tests/test_results_recomposition.py`
 import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from pathlib import Path
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QWidget
 from scat.main_gui import ResultsTab, _results_dict_from_output
 from scat.pipeline import analyze_folder_service
 
 
-def _tab(tmp_path, synth_dir):
+def _tab(tmp_path, synth_dir, **kw):
     QApplication.instance() or QApplication([])
-    res = analyze_folder_service(str(synth_dir), output_dir=str(tmp_path / "out"), annotate=False)
-    tab = ResultsTab(); tab.load_results(_results_dict_from_output(Path(res.output_dir)))
-    return tab
+    res = analyze_folder_service(str(synth_dir), output_dir=str(tmp_path / "out"), annotate=False, **kw)
+    d = _results_dict_from_output(Path(res.output_dir))
+    tab = ResultsTab(); tab.load_results(d)
+    return tab, d
 
 
 def test_composition_strip_replaces_kpi_tiles(synth_dir, tmp_path):
-    tab = _tab(tmp_path, synth_dir)
-    assert not hasattr(tab, "tiles_layout")           # KPI tile band gone
+    tab, d = _tab(tmp_path, synth_dir)
+    assert not hasattr(tab, "tiles_layout")                 # KPI tile band gone
+    # no residual KPI tile widgets
+    assert not [w for w in tab.findChildren(QWidget) if w.objectName() == "kpiTile"]
+    fs = d["film_summary"]
+    n_normal, n_rod = int(fs['n_normal'].sum()), int(fs['n_rod'].sum())
     txt = tab.composition_line.text()
-    for token in ("Normal", "ROD", "Artifact"):        # one semantic composition line
+    assert f"{n_normal + n_rod}" in txt          # explicit Deposits count preserved
+    assert str(n_normal) in txt and str(n_rod) in txt
+    for token in ("Deposits", "Normal", "ROD", "Artifact"):
         assert token in txt
+
+
+def test_total_iod_omitted_when_column_absent(synth_dir, tmp_path):
+    tab, d = _tab(tmp_path, synth_dir)
+    d2 = dict(d); d2["film_summary"] = d["film_summary"].drop(columns=["total_iod"], errors="ignore")
+    tab.load_results(d2)                          # must not raise, must not show "Total IOD 0"
+    assert "Total IOD 0" not in tab.composition_line.text()
 ```
 
 - [ ] **Step 3: Run** — `QT_QPA_PLATFORM=offscreen /home/lab/SCAT/.venv/bin/python -m pytest tests/test_results_recomposition.py -q` → FAIL (`tiles_layout` still exists / no `composition_line`).
@@ -93,13 +107,17 @@ In `load_results`, delete the tiles loop (the `while self.tiles_layout...` clear
 the already-computed `total_normal/total_rod/total_artifact`; compute the rest inline:
 
 ```python
-_iod = film_summary['total_iod'].sum() if 'total_iod' in film_summary.columns else 0
-self.composition_line.setText(
-    f"Normal <b style='color:{Theme.NORMAL}'>{total_normal:.0f}</b> &nbsp;·&nbsp; "
-    f"ROD <b style='color:{Theme.ROD}'>{total_rod:.0f}</b> &nbsp;·&nbsp; "
-    f"ROD fraction <b>{mean_rod_frac*100:.1f}%</b> &nbsp;·&nbsp; "
-    f"Artifact <span style='color:{Theme.TEXT_MUTED}'>{total_artifact:.0f}</span> &nbsp;·&nbsp; "
-    f"Total IOD <b>{_iod:.0f}</b>")
+sep = " &nbsp;·&nbsp; "
+parts = [
+    f"Deposits <b>{total_normal + total_rod:.0f}</b>",
+    f"Normal <b style='color:{Theme.NORMAL}'>{total_normal:.0f}</b>",
+    f"ROD <b style='color:{Theme.ROD}'>{total_rod:.0f}</b>",
+    f"ROD fraction <b>{mean_rod_frac*100:.1f}%</b>",
+    f"Artifact <span style='color:{Theme.TEXT_MUTED}'>{total_artifact:.0f}</span>",
+]
+if 'total_iod' in film_summary.columns:              # omit when absent — never show a fake "0"
+    parts.append(f"Total IOD <b>{film_summary['total_iod'].sum():.0f}</b>")
+self.composition_line.setText(sep.join(parts))
 ```
 
 (Leave `_kpi_tile` defined but unused — a follow-up cleanup removes it.)
@@ -129,16 +147,39 @@ annotated overlay (unchanged).
 
 ```python
 # append to tests/test_results_recomposition.py
-def test_report_grade_content_is_exiled_to_a_pointer(synth_dir, tmp_path):
-    tab = _tab(tmp_path, synth_dir)
-    # No in-app Visualizations / Descriptive-stats / Group-comparison section labels remain.
+from scat.ui_common import CollapsibleSection
+
+
+def test_report_grade_content_is_exiled_to_one_pointer(synth_dir, tmp_path):
+    tab, d = _tab(tmp_path, synth_dir)
+    # The stats area holds exactly ONE widget (the pointer) — no gallery, tables, or sections.
+    assert tab.stats_layout.count() == 1
+    assert not [w for w in tab.findChildren(QWidget) if w.objectName() == "vizCell"]
+    assert not tab.findChildren(CollapsibleSection)
     from PySide6.QtWidgets import QLabel
     labels = [w.text() for w in tab.findChildren(QLabel)]
     assert not any("VISUALIZATIONS" in t or "DESCRIPTIVE STATISTICS" in t or "GROUP COMPARISONS" in t
                    for t in labels)
-    # A pointer to the report is present instead.
-    assert any("report" in t.lower() and ("distribution" in t.lower() or "statistic" in t.lower())
-               for t in labels)
+
+
+def test_pointer_is_report_state_aware(synth_dir, tmp_path):
+    # analyze with annotate=False does NOT write report.html -> pointer must not claim it exists.
+    tab, d = _tab(tmp_path, synth_dir)
+    ptxt = tab.stats_layout.itemAt(0).widget().text().lower()
+    assert "report" in ptxt
+    assert "generate" in ptxt          # no report yet -> "Generate a report…", not "in the report"
+    # now pretend a report exists and re-load -> pointer flips to the "in the report" wording
+    (Path(d["output_dir"]) / "report.html").write_text("<html></html>")
+    tab.load_results(_results_dict_from_output(Path(d["output_dir"])))
+    assert "in the report" in tab.stats_layout.itemAt(0).widget().text().lower()
+    assert tab.stats_layout.count() == 1     # reload still leaves exactly one pointer
+
+
+def test_reload_updates_composition_and_clears_stats(synth_dir, tmp_path):
+    tab, d = _tab(tmp_path, synth_dir)
+    tab.load_results(d)                      # second load (as _reload_results does after an edit)
+    assert tab.stats_layout.count() == 1
+    assert "Deposits" in tab.composition_line.text()
 ```
 
 - [ ] **Step 3: Run** → FAIL (the VISUALIZATIONS/DESCRIPTIVE labels still exist).
@@ -149,16 +190,24 @@ def test_report_grade_content_is_exiled_to_a_pointer(synth_dir, tmp_path):
 ```python
 def _load_statistics_tab(self, results: dict):
     """The working view is for triage; the report carries the full distributions, group comparisons
-    and statistics. Show a quiet pointer to it instead of duplicating (and out-dumping) the report."""
+    and statistics. Show ONE quiet, report-state-aware pointer instead of duplicating (and out-dumping)
+    the report. stats_layout is retained so re-loads (edit -> _reload_results -> load_results) work."""
     while self.stats_layout.count():
         item = self.stats_layout.takeAt(0)
         if item.widget():
             item.widget().deleteLater()
-    pointer = QLabel("Full distributions, group comparisons and statistics are in the report.")
+    out = results.get("output_dir", "")
+    report_exists = bool(out) and (Path(out) / "report.html").exists()
+    text = ("Full distributions, group comparisons and statistics are in the report."
+            if report_exists else
+            "Generate a report to see the full distributions, group comparisons and statistics.")
+    pointer = QLabel(text)
     pointer.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FS_SM}px; padding-top: 8px;")
     pointer.setWordWrap(True)
     self.stats_layout.addWidget(pointer)
 ```
+
+(`Path` is already imported in `main_gui.py`.)
 
 - [ ] **Step 5: Run + full suite** — PASS; `pytest -q` all pass. (No tests referenced the removed
   sections, verified — but re-run the full suite to be sure.)
