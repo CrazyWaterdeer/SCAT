@@ -33,6 +33,8 @@ Pipeline recipe for "analyze this folder":
 3. analyze_folder(path, groups=<your {filename: group} mapping>) — detect + classify.
    (It errors on duplicate basenames across subfolders — if that happens, tell the user
    to flatten/rename or use a metadata CSV.)
+   Before analyze_folder, confirm the primary metric (what the experiment measures) with
+   the user and pass it as primary_metric; default total_deposits if they don't specify.
 4. If the analysis reports >=2 groups, run_statistics(results_dir, group_col="group").
 5. generate_report(results_dir, statistical_results=<from step 4 if any>, group_by="group").
 6. Report to the user: total deposits, Normal/ROD/Artifact counts, the groups used, and \
