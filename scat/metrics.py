@@ -51,3 +51,41 @@ def resolve_metric(key: str | None) -> str:
 
 def metric_values(film: pd.DataFrame, key: str) -> pd.Series:
     return METRICS[resolve_metric(key)].values(film)
+
+
+NORMALIZATIONS = ("per_image", "per_fly", "per_area", "per_time")
+DEFAULT_NORMALIZATION = "per_image"
+
+# Each non-default mode needs run metadata (captured in a LATER task — see Plan 1 scope note); until
+# then it degrades to per_image with a note. Keys are the run_meta names the pipeline will provide.
+_NORM_META_KEY = {"per_fly": "n_flies", "per_area": "roi_area", "per_time": "duration"}
+_NORM_UNIT = {"per_image": "image", "per_fly": "fly", "per_area": "mm²", "per_time": "h"}
+
+
+def effective_normalization(mode: str, meta: dict) -> tuple[str, str, str]:
+    """Resolve a requested normalization against available run metadata.
+    Returns (unit_label, effective_mode, degrade_note). degrade_note is "" when not degraded."""
+    mode = mode if mode in NORMALIZATIONS else DEFAULT_NORMALIZATION
+    if mode == "per_image":
+        return (_NORM_UNIT["per_image"], "per_image", "")
+    if meta.get(_NORM_META_KEY[mode]):
+        return (_NORM_UNIT[mode], mode, "")
+    return (_NORM_UNIT["per_image"], "per_image",
+            f"no {_NORM_META_KEY[mode]} metadata — showing per image")
+
+
+def format_headline(film: pd.DataFrame, key: str, normalization: str, meta: dict) -> str:
+    """Primary-metric headline. Rate metrics show a rate (divisor = image count for per_image, or the
+    metadata value), never a pooled total (spec §2.1). Fraction/mean metrics show a per-image mean."""
+    m = METRICS[resolve_metric(key)]
+    vals = m.values(film).dropna()
+    if len(vals) == 0:
+        return "—"
+    if m.is_rate:
+        unit, eff, _note = effective_normalization(normalization, meta)
+        divisor = {"per_image": len(film), "per_fly": meta.get("n_flies"),
+                   "per_area": meta.get("roi_area"), "per_time": meta.get("duration")}[eff] or len(film)
+        rate = float(vals.sum()) / float(divisor)
+        noun = m.label.lower().replace("total ", "")  # "Total deposits" -> "deposits"
+        return f"{m.fmt.format(rate)} {noun} / {unit}"
+    return f"{m.fmt.format(float(vals.mean()))}{m.unit}"
