@@ -1128,7 +1128,7 @@ class LabelingWindow(QMainWindow):
         self.statusBar().showMessage(f"Detected {len(self.deposits)} deposits")
     
     def _finalize_deposit_from_contour(self, contour, *, fallback_centroid=None,
-                                       min_area=0, manual=False):
+                                       min_area=0, manual=False, merged=False):
         """Shared tail of every add-from-<shape> handler: derive metrics from `contour`, build and
         register a Deposit, refresh the UI. Returns the Deposit, or None if it's below `min_area`.
         `fallback_centroid` is used only when the contour has zero moment area (default: bbox center)."""
@@ -1152,7 +1152,7 @@ class LabelingWindow(QMainWindow):
             x=bx, y=by, width=bw, height=bh,
             area=area, perimeter=perimeter,
             circularity=circularity, aspect_ratio=aspect_ratio,
-            centroid=(cx, cy)
+            centroid=(cx, cy), merged=merged
         )
         self.next_id += 1
 
@@ -1162,7 +1162,10 @@ class LabelingWindow(QMainWindow):
 
         self._update_table()
         self._update_stats()
-        self.statusBar().showMessage(f"Added {'manual ' if manual else ''}deposit {deposit.id}")
+        if merged:
+            self.statusBar().showMessage(f"Merged into deposit {deposit.id}")
+        else:
+            self.statusBar().showMessage(f"Added {'manual ' if manual else ''}deposit {deposit.id}")
         return deposit
 
     def _add_deposit_from_rect(self, rect: QRectF):
@@ -1319,39 +1322,15 @@ class LabelingWindow(QMainWindow):
             all_points.extend(contour.tolist())
         
         hull = cv2.convexHull(np.array(all_points))
-        
-        area = cv2.contourArea(hull)
-        perimeter = cv2.arcLength(hull, True)
-        circularity = 4 * np.pi * area / (perimeter ** 2) if perimeter > 0 else 0
-        
-        bx, by, bw, bh = cv2.boundingRect(hull)
-        aspect_ratio = max(bw, bh) / min(bw, bh) if min(bw, bh) > 0 else 1
-        
-        M = cv2.moments(hull)
-        cx = int(M["m10"] / M["m00"]) if M["m00"] > 0 else bx + bw // 2
-        cy = int(M["m01"] / M["m00"]) if M["m00"] > 0 else by + bh // 2
-        
-        merged = Deposit(
-            id=self.next_id, contour=hull,
-            x=bx, y=by, width=bw, height=bh,
-            area=area, perimeter=perimeter,
-            circularity=circularity, aspect_ratio=aspect_ratio,
-            centroid=(cx, cy),
-            merged=True  # Mark as merged for U-Net training
-        )
-        self.next_id += 1
-        
+
+        # Remove the source deposits first; the merged deposit then takes the next id and
+        # gets its metrics, feature extraction, registration and UI refresh from the shared
+        # finalizer (merged=True marks it for U-Net training and sets the status wording).
         for item in self.viewer.selected_items[:]:
             self.deposits.remove(item.deposit)
             self.viewer.remove_deposit_item(item)
-        
-        self.deposits.append(merged)
-        self.extractor.extract_features(self.image, [merged])
-        self.viewer.add_deposit(merged)
-        
-        self._update_table()
-        self._update_stats()
-        self.statusBar().showMessage(f"Merged into deposit {merged.id}")
+
+        self._finalize_deposit_from_contour(hull, merged=True)
     
     def _group_selected(self):
         """Group selected deposits together (keeps individual contours)."""
