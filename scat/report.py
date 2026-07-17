@@ -603,7 +603,58 @@ class ReportGenerator:
     def __init__(self, output_dir: Union[str, Path]):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
-    
+
+    @staticmethod
+    def _effective_groups(film, group_by):
+        """Real group labels in first-seen order, excluding NaN/blank/the 'ungrouped' sentinel."""
+        if group_by is None or group_by not in getattr(film, "columns", []):
+            return []
+        seen = []
+        for g in film[group_by].tolist():
+            if g is None or (isinstance(g, float) and g != g):
+                continue
+            s = str(g).strip()
+            if not s or s == "ungrouped" or s in seen:
+                continue
+            seen.append(s)
+        return seen
+
+    # columns rendered in the per-group table — real image_summary columns, mirroring the report's
+    # group-comparison metrics. (mean_hue/circularity use the normal_* columns that actually exist.)
+    _PER_GROUP_COLS = [
+        ("Deposits / img", lambda s: (s["n_normal"] + s["n_rod"]).mean(), "{:.1f}"),
+        ("ROD %",          lambda s: (s["rod_fraction"] * 100).mean(),    "{:.1f}%"),
+        ("Mean area (px²)", lambda s: s["mean_area"].mean(),              "{:.0f}"),
+        ("Total IOD",      lambda s: s["total_iod"].mean(),               "{:.0f}"),
+        ("pH (hue °)",     lambda s: s["normal_mean_hue"].mean(),         "{:.0f}"),
+        ("Circularity",    lambda s: s["normal_mean_circularity"].mean(), "{:.3f}"),
+    ]
+
+    def _html_per_group_table(self, film, group_by):
+        import html as _h
+        groups = self._effective_groups(film, group_by)
+        # stable column set: keep a column only if its source columns exist in film
+        cols = []
+        for label, fn, fmt in self._PER_GROUP_COLS:
+            try:
+                fn(film.head(1)); cols.append((label, fn, fmt))
+            except Exception:
+                pass
+        head = "".join(f"<th>{_h.escape(c[0])}</th>" for c in cols)
+        rows = ""
+        for g in groups:
+            sub = film[film[group_by].astype(str).str.strip() == g]
+            cells = f"<td>{_h.escape(g)}</td><td class='num'>{len(sub)}</td>"
+            for _label, fn, fmt in cols:
+                try:
+                    v = fn(sub)
+                    cells += f"<td class='num'>{fmt.format(v)}</td>" if v == v else "<td class='num'>—</td>"
+                except Exception:
+                    cells += "<td class='num'>—</td>"
+            rows += f"<tr>{cells}</tr>"
+        return (f'<table class="data-table"><thead><tr><th>Group</th><th class="num">n</th>{head}</tr>'
+                f'</thead><tbody>{rows}</tbody></table>')
+
     def generate_html_report(
         self,
         film_summary: pd.DataFrame,
