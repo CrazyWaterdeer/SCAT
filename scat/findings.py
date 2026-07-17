@@ -12,16 +12,34 @@ _STATS_KEY = {
     "mean_hue": "mean_hue", "total_iod": "total_iod", "mean_circularity": "mean_circularity",
 }
 
+# The stats module compares split-by-class metrics: image_summary has no COMBINED mean_area/mean_hue/
+# mean_circularity comparison — only normal_*/rod_*. Fall back to the normal_* comparison (matching the
+# report boxplots + the metric value column) so these primary metrics get a real verdict, not the
+# descriptive fallback.
+_STATS_KEY_FALLBACK = {
+    "mean_area": "normal_mean_area", "mean_hue": "normal_mean_hue",
+    "mean_circularity": "normal_mean_circularity",
+}
+
 
 def _fmt_p(p: float) -> str:
     return "p < 0.001" if p < 0.001 else f"p = {p:.3f}"
+
+
+def _lookup_comparison(stats, pm):
+    for key in (_STATS_KEY.get(pm), _STATS_KEY_FALLBACK.get(pm)):
+        if key:
+            e = stats.get(key)
+            if isinstance(e, dict) and "error" not in e:
+                return e
+    return None
 
 
 def _primary_comparison(stats, primary_metric):
     """{test, p, significant, is_omnibus} for the primary metric, or None if unavailable/skipped."""
     if not isinstance(stats, dict) or stats.get("skipped"):
         return None
-    entry = stats.get(_STATS_KEY.get(_metrics.resolve_metric(primary_metric)))
+    entry = _lookup_comparison(stats, _metrics.resolve_metric(primary_metric))
     if not isinstance(entry, dict) or "error" in entry:
         return None
     if "overall_test" in entry:                       # 3+ groups (omnibus)

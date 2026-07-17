@@ -33,13 +33,24 @@ def _col(name: str) -> Callable[[pd.DataFrame], pd.Series]:
     return lambda film: film[name].astype(float)
 
 
+def _col_or_normal(name: str) -> Callable[[pd.DataFrame], pd.Series]:
+    """A per-image value column, falling back to the ``normal_<name>`` variant. image_summary.csv has
+    no combined ``mean_hue``/``mean_circularity`` column — only ``normal_*``/``rod_*`` — so these
+    metrics use the normal-deposit column, matching the report's group-comparison boxplots
+    (_generate_all_group_comparisons falls back the same way)."""
+    def f(film: pd.DataFrame) -> pd.Series:
+        col = name if name in film.columns else f"normal_{name}"
+        return film[col].astype(float)
+    return f
+
+
 METRICS: dict[str, Metric] = {
     "total_deposits":   Metric("total_deposits", "Total deposits", _deposits, True, "", "{:.1f}"),
     "rod_fraction":     Metric("rod_fraction", "ROD fraction", lambda f: f["rod_fraction"].astype(float) * 100, False, "%", "{:.1f}"),
-    "mean_area":        Metric("mean_area", "Mean deposit area", _col("mean_area"), False, " px²", "{:.1f}"),
-    "mean_hue":         Metric("mean_hue", "pH indicator (hue)", _col("mean_hue"), False, "°", "{:.1f}"),
+    "mean_area":        Metric("mean_area", "Mean deposit area", _col_or_normal("mean_area"), False, " px²", "{:.1f}"),
+    "mean_hue":         Metric("mean_hue", "pH indicator (hue)", _col_or_normal("mean_hue"), False, "°", "{:.1f}"),
     "total_iod":        Metric("total_iod", "Total pigment (IOD)", _col("total_iod"), True, "", "{:.0f}"),
-    "mean_circularity": Metric("mean_circularity", "Mean circularity", _col("mean_circularity"), False, "", "{:.3f}"),
+    "mean_circularity": Metric("mean_circularity", "Mean circularity", _col_or_normal("mean_circularity"), False, "", "{:.3f}"),
 }
 
 DEFAULT_METRIC = "total_deposits"
