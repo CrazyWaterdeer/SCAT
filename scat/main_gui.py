@@ -20,7 +20,6 @@ if sys.platform == 'win32':
 import json
 from pathlib import Path
 from typing import List
-import numpy as np
 import pandas as pd
 import cv2
 
@@ -31,14 +30,14 @@ from PySide6.QtWidgets import (
     QProgressBar, QTextEdit, QTableWidget, QTableWidgetItem,
     QHeaderView, QLineEdit, QMessageBox, QScrollArea,
     QDialog, QKeySequenceEdit, QDialogButtonBox,
-    QGraphicsView, QGraphicsScene, QMenu, QInputDialog,
+    QMenu, QInputDialog,
     QTreeWidget, QTreeWidgetItem, QDockWidget,
-    QSizePolicy, QGridLayout, QFrame, QStackedWidget
+    QSizePolicy, QGridLayout, QStackedWidget
 )
-from PySide6.QtCore import Qt, QThread, Signal, QSize, QRectF
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import (
     QFont, QPixmap, QIcon, QKeySequence,
-    QColor, QShortcut, QFontDatabase, QPainter
+    QColor, QShortcut, QFontDatabase
 )
 
 # Import SCAT modules
@@ -49,7 +48,7 @@ from . import confidence as _conf
 from .ui_common import (
     Theme, NoScrollSpinBox, NoScrollDoubleSpinBox, NoScrollComboBox,
     CollapsibleSection, CenteredCap, ToggleSwitch, setting_row,
-    icon, load_custom_fonts, get_icon_path
+    NumericTableWidgetItem, icon, load_custom_fonts, get_icon_path
 )
 from . import ui_motion
 
@@ -356,109 +355,6 @@ class PathSelector(QWidget):
         self.path_edit.setText(display_path)
         if self.config_key:
             config.set(self.config_key, path)
-
-
-class ZoomableGraphicsView(QGraphicsView):
-    """QGraphicsView with Ctrl+wheel zoom support."""
-    
-    def __init__(self, scene=None):
-        super().__init__(scene) if scene else super().__init__()
-        self.setRenderHint(QPainter.Antialiasing)
-        self.setRenderHint(QPainter.SmoothPixmapTransform)
-        self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
-        self.setDragMode(QGraphicsView.ScrollHandDrag)
-    
-    def wheelEvent(self, event):
-        """Handle Ctrl+wheel for zoom."""
-        if event.modifiers() & Qt.ControlModifier:
-            factor = 1.15 if event.angleDelta().y() > 0 else 1 / 1.15
-            self.scale(factor, factor)
-        else:
-            super().wheelEvent(event)
-
-
-class ImageViewerDialog(QDialog):
-    """Dialog for viewing images in full size with fit to window."""
-    
-    def __init__(self, image_path: str, title: str = "Image Viewer", parent=None):
-        super().__init__(parent)
-        self.setWindowTitle(title)
-        self.setMinimumSize(900, 700)
-        self.image_path = image_path
-        
-        layout = QVBoxLayout(self)
-        
-        # Use ZoomableGraphicsView for scaling with Ctrl+wheel
-        self.scene = QGraphicsScene()
-        self.view = ZoomableGraphicsView(self.scene)
-        
-        pixmap = QPixmap(image_path)
-        if not pixmap.isNull():
-            self.pixmap_item = self.scene.addPixmap(pixmap)
-            self.scene.setSceneRect(QRectF(pixmap.rect()))
-        
-        layout.addWidget(self.view)
-        
-        # Hint label
-        hint_label = QLabel("Tip: Ctrl + Mouse wheel to zoom")
-        hint_label.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; font-size: 11px;")
-        hint_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(hint_label)
-        
-        # Buttons
-        btn_layout = QHBoxLayout()
-        
-        fit_btn = QPushButton("Fit to Window")
-        fit_btn.clicked.connect(self._fit_to_window)
-        btn_layout.addWidget(fit_btn)
-        
-        actual_btn = QPushButton("Actual Size (100%)")
-        actual_btn.clicked.connect(self._actual_size)
-        btn_layout.addWidget(actual_btn)
-        
-        close_btn = QPushButton("Close (Esc)")
-        close_btn.clicked.connect(self.close)
-        btn_layout.addWidget(close_btn)
-        
-        layout.addLayout(btn_layout)
-        
-        # Escape to close
-        QShortcut(QKeySequence(Qt.Key_Escape), self, self.close)
-        
-        # Fit to window on open
-        self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
-    
-    def _fit_to_window(self):
-        self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
-    
-    def _actual_size(self):
-        self.view.resetTransform()
-    
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        # Auto-fit on resize
-        self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
-    
-    def showEvent(self, event):
-        super().showEvent(event)
-        # Fit after dialog is shown
-        self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
-
-
-class NumericTableWidgetItem(QTableWidgetItem):
-    """QTableWidgetItem that sorts numerically instead of alphabetically."""
-    
-    def __init__(self, value, display_format: str = None):
-        if display_format:
-            super().__init__(display_format.format(value))
-        else:
-            super().__init__(str(value))
-        self._value = value
-    
-    def __lt__(self, other):
-        if isinstance(other, NumericTableWidgetItem):
-            return self._value < other._value
-        return super().__lt__(other)
 
 
 class TrainingTab(QWidget):
@@ -1883,28 +1779,6 @@ class ResultsTab(QWidget):
             f" letter-spacing: {Theme.TRACK_CAPS}; margin-top: 4px;")
         return lbl
 
-    def _kpi_tile(self, value, label: str, color: str = None) -> QWidget:
-        """A calm stat tile: number over a small uppercase label — mirrors the report's stat-card."""
-        w = QWidget()
-        w.setObjectName("kpiTile")
-        w.setStyleSheet(
-            f"QWidget#kpiTile {{ background-color: {Theme.BG_INSET}; border: 1px solid {Theme.BORDER};"
-            f" border-top: 1px solid {Theme.BORDER_LIT}; border-radius: {Theme.RADIUS_CONTROL}px; }}")
-        v = QVBoxLayout(w)
-        v.setContentsMargins(14, 10, 14, 10)
-        v.setSpacing(1)
-        val = QLabel(str(value))
-        val.setStyleSheet(
-            f"color: {color or Theme.TEXT_PRIMARY}; font-size: 19px; font-weight: 700;"
-            f" letter-spacing: {Theme.TRACK_DISPLAY};")
-        lab = QLabel(label)
-        lab.setStyleSheet(
-            f"color: {Theme.TEXT_MUTED}; font-size: 10px; font-weight: {Theme.WEIGHT_TITLE};"
-            f" letter-spacing: {Theme.TRACK_CAPS};")
-        v.addWidget(val)
-        v.addWidget(lab)
-        return w
-
     def _apply_action_state(self, report_exists: bool):
         """Swap the primary action by state: Open report leads once a report exists; otherwise
         Generate becomes the coral primary (the way to create one)."""
@@ -2055,266 +1929,6 @@ class ResultsTab(QWidget):
         pointer.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FS_SM}px; padding-top: 8px;")
         pointer.setWordWrap(True)
         self.stats_layout.addWidget(pointer)
-    
-    def _format_viz_name(self, name: str) -> str:
-        """Format visualization key names for display."""
-        # Special mappings for known keys
-        name_map = {
-            'dashboard': 'Dashboard',
-            'pca': 'PCA Analysis',
-            'heatmap': 'Feature Heatmap',
-            'scatter_matrix': 'Feature Relationships',
-            'area_iod': 'Area vs IOD',
-            'nnd_histogram': 'Nearest Neighbor Distance',
-            'clark_evans': 'Clark-Evans Index',
-            'density_map': 'Deposit Density Map',
-            'quadrant_plot': 'Quadrant Analysis',
-            'violin_total_iod': 'Total IOD Distribution',
-            'violin_rod_fraction': 'ROD Fraction Distribution',
-            'violin_n_deposits': 'Deposit Count Distribution',
-            'violin_mean_area': 'Mean Area Distribution',
-        }
-        
-        if name in name_map:
-            return name_map[name]
-
-        s = name
-        suffix = ""
-        # Every group chart carries "_by_group" — redundant on the caption; drop it globally.
-        if s.endswith('_by_group'):
-            s = s[:-len('_by_group')]
-        # Confidence-interval plots: express the interval as a suffix, not a doubled-"Mean Ci" prefix.
-        if s.startswith('mean_ci_'):
-            s = s[len('mean_ci_'):]
-            suffix = " (95% CI)"
-        for prefix in ('violin_', 'box_', 'bar_', 'scatter_'):
-            if s.startswith(prefix):
-                s = s[len(prefix):]
-                break
-        # n_total is Normal+ROD deposits — name it the way the rest of the app does.
-        s = s.replace('n_total', 'total_deposits')
-
-        # Abbreviations that stay uppercase; "by" stays a lowercase connector.
-        upper_words = {'iod': 'IOD', 'rod': 'ROD', 'nnd': 'NND', 'pca': 'PCA', 'ci': 'CI'}
-        words = []
-        for w in s.split('_'):
-            lw = w.lower()
-            if lw in upper_words:
-                words.append(upper_words[lw])
-            elif lw == 'by':
-                words.append('by')
-            else:
-                words.append(w.capitalize())
-        # Collapse an accidental doubled "Mean".
-        out = []
-        for w in words:
-            if w == 'Mean' and out and out[-1] == 'Mean':
-                continue
-            out.append(w)
-        return ' '.join(out) + suffix
-    
-    def _viz_cell(self, name: str, path: str) -> QWidget:
-        """One framed, click-to-enlarge plot thumbnail (mirrors the report's .plot-container)."""
-        btn = QPushButton()
-        btn.setToolTip(f"Click to enlarge: {self._format_viz_name(name)}")
-        btn.setStyleSheet(
-            "QPushButton { background: transparent; border: none; padding: 0; }"
-            "QPushButton:hover { background: transparent; }")
-        btn.setCursor(Qt.PointingHandCursor)
-        pixmap = QPixmap(path)
-        if not pixmap.isNull():
-            scaled = pixmap.scaled(380, 280, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            btn.setIcon(QIcon(scaled))
-            btn.setIconSize(scaled.size())
-            btn.setFixedSize(scaled.size() + QSize(10, 10))
-            btn.clicked.connect(lambda checked, p=path, n=name: self._show_image_dialog(p, n))
-        container = QWidget()
-        container.setObjectName("vizCell")
-        container.setStyleSheet(
-            f"QWidget#vizCell {{ background-color: {Theme.BG_INSET}; border: 1px solid {Theme.BORDER};"
-            f" border-radius: {Theme.RADIUS_CONTAINER}px; }}")
-        cl = QVBoxLayout(container)
-        cl.setContentsMargins(10, 10, 10, 8)
-        cl.setSpacing(8)
-        cl.addWidget(btn, alignment=Qt.AlignCenter)
-        label = QLabel(self._format_viz_name(name))
-        label.setAlignment(Qt.AlignCenter)
-        label.setStyleSheet(
-            f"color: {Theme.TEXT_SECONDARY}; font-size: {Theme.FS_SM}px; background: transparent; border: none;")
-        cl.addWidget(label)
-        return container
-
-    def _viz_grid(self, items) -> QWidget:
-        """A 2-column grid of framed plot thumbnails for the given (name, path) pairs."""
-        from PySide6.QtWidgets import QGridLayout
-        host = QWidget()
-        grid = QGridLayout(host)
-        grid.setContentsMargins(0, 0, 0, 0)
-        grid.setSpacing(15)
-        for idx, (name, path) in enumerate(items):
-            grid.addWidget(self._viz_cell(name, path), idx // 2, idx % 2)
-        return host
-
-    def _generate_descriptive_stats(self, film_summary: pd.DataFrame) -> str:
-        """Generate detailed descriptive statistics."""
-        from scipy import stats as sp_stats
-        
-        text = "<table style='border-collapse: collapse; width: 100%;'>"
-        text += f"<tr style='background-color: {Theme.BG_HOVER};'>"
-        text += "<th style='padding: 8px; text-align: left;'>Metric</th>"
-        text += "<th style='padding: 8px; text-align: right;'>Mean</th>"
-        text += "<th style='padding: 8px; text-align: right;'>SD</th>"
-        text += "<th style='padding: 8px; text-align: right;'>Median</th>"
-        text += "<th style='padding: 8px; text-align: right;'>IQR</th>"
-        text += "<th style='padding: 8px; text-align: right;'>95% CI</th>"
-        text += "<th style='padding: 8px; text-align: center;'>Distribution</th>"
-        text += "</tr>"
-        
-        metrics = [
-            ('ROD Fraction', film_summary['rod_fraction'] * 100, '%'),
-            # "Deposits" = Normal + ROD (artifacts excluded), consistent with the KPI tile + report.
-            ('Total Deposits', film_summary['n_normal'] + film_summary['n_rod'], ''),
-            ('Normal Count', film_summary['n_normal'], ''),
-            ('ROD Count', film_summary['n_rod'], ''),
-        ]
-        
-        if 'total_iod' in film_summary.columns:
-            metrics.append(('Total IOD', film_summary['total_iod'], ''))
-        
-        for name, data, unit in metrics:
-            data = data.dropna()
-            if len(data) < 2:
-                continue
-            
-            mean = data.mean()
-            std = data.std()
-            median = data.median()
-            q1, q3 = data.quantile([0.25, 0.75])
-            iqr = q3 - q1
-            sem = std / np.sqrt(len(data))
-            ci_low = mean - 1.96 * sem
-            ci_high = mean + 1.96 * sem
-            
-            # Normality test — plain words, not a pass/fail check (a skewed metric is a valid finding).
-            if len(data) >= 3:
-                _, p_norm = sp_stats.shapiro(data[:5000])
-                is_normal = "normal" if p_norm > 0.05 else "skewed"
-            else:
-                is_normal = "—"
-
-            text += f"<tr>"
-            text += f"<td style='padding: 6px;'><b>{name}</b></td>"
-            text += f"<td style='padding: 6px; text-align: right;'>{mean:.2f}{unit}</td>"
-            text += f"<td style='padding: 6px; text-align: right;'>{std:.2f}</td>"
-            text += f"<td style='padding: 6px; text-align: right;'>{median:.2f}</td>"
-            text += f"<td style='padding: 6px; text-align: right;'>{iqr:.2f}</td>"
-            text += f"<td style='padding: 6px; text-align: right;'>[{ci_low:.2f}, {ci_high:.2f}]</td>"
-            text += f"<td style='padding: 6px; text-align: center; color: {Theme.TEXT_SECONDARY};'>{is_normal}</td>"
-            text += "</tr>"
-
-        text += "</table>"
-        text += f"<p style='color: {Theme.TEXT_MUTED}; font-size: 11px;'>n = {len(film_summary)} images &nbsp;·&nbsp; CI = 95% confidence interval &nbsp;·&nbsp; Distribution = Shapiro-Wilk (p &gt; 0.05 → normal)</p>"
-        
-        return text
-    
-    def _generate_comparison_stats(self, stats_results: dict) -> str:
-        """Group comparisons as one compact, humane table — not a raw dict dump.
-        Metric names are humanized via the same map the report uses, so the two surfaces agree."""
-        from .report import ReportGenerator
-        if not isinstance(stats_results, dict):
-            return ""
-
-        rows = ""
-        pairwise_blocks = ""
-        for metric, result in stats_results.items():
-            if not isinstance(result, dict):
-                continue
-            label = ReportGenerator.get_metric_display_name(metric)
-            if 'error' in result:
-                rows += (f"<tr><td style='padding:7px 10px;'><b>{label}</b></td>"
-                         f"<td style='padding:7px 10px;' colspan='4'>{result['error']}</td></tr>")
-                continue
-
-            if 'overall_test' in result:
-                test = result['overall_test']
-                p = result.get('overall_p_value', 1.0)
-                is_sig = result.get('overall_significant', p < 0.05)
-                effect = "—"
-            else:
-                test = result.get('test_name', 'N/A')
-                p = result.get('p_value', 1.0)
-                is_sig = result.get('significant', p < 0.05)
-                d = result.get('cohens_d')
-                effect = f"d = {d:.2f} ({result.get('effect_size', '')})" if d is not None else "—"
-
-            stars = "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else ""
-            verdict = (f"<span style='color:{Theme.TEXT_PRIMARY};'>&#9679; Significant</span>"
-                       if is_sig else f"<span style='color:{Theme.TEXT_MUTED};'>Not significant</span>")
-            rows += (
-                "<tr>"
-                f"<td style='padding:7px 10px;'><b>{label}</b></td>"
-                f"<td style='padding:7px 10px;'>{test}</td>"
-                f"<td style='padding:7px 10px; text-align:right;'>{p:.4f} {stars}</td>"
-                f"<td style='padding:7px 10px; text-align:right;'>{effect}</td>"
-                f"<td style='padding:7px 10px;'>{verdict}</td>"
-                "</tr>")
-
-            # Compact pairwise — only the pairs that reach significance.
-            if result.get('pairwise_comparisons'):
-                sig_pairs = []
-                for pair in result['pairwise_comparisons']:
-                    p_corr = pair.get('p_value_corrected', pair['p_value'])
-                    if p_corr < 0.05:
-                        sig_pairs.append(
-                            f"{pair['group1_name']} vs {pair['group2_name']} "
-                            f"(p={p_corr:.4f}, d={pair['cohens_d']:.2f})")
-                if sig_pairs:
-                    pairwise_blocks += (
-                        f"<p style='margin:2px 0; color:{Theme.TEXT_SECONDARY}; font-size:12px;'>"
-                        f"<b>{label}</b> — {' · '.join(sig_pairs)}</p>")
-
-        if not rows:
-            return ""
-        table = (
-            f"<table style='border-collapse:collapse; width:100%;'>"
-            f"<tr style='background-color:{Theme.BG_HOVER};'>"
-            f"<th style='padding:8px 10px; text-align:left;'>Metric</th>"
-            f"<th style='padding:8px 10px; text-align:left;'>Test</th>"
-            f"<th style='padding:8px 10px; text-align:right;'>p-value</th>"
-            f"<th style='padding:8px 10px; text-align:right;'>Effect size</th>"
-            f"<th style='padding:8px 10px; text-align:left;'>Result</th></tr>"
-            f"{rows}</table>")
-        footnote = (f"<p style='color:{Theme.TEXT_MUTED}; font-size:11px; margin-top:6px;'>"
-                    f"* p &lt; 0.05 &nbsp; ** p &lt; 0.01 &nbsp; *** p &lt; 0.001</p>")
-        pw = ((f"<p style='color:{Theme.TEXT_MUTED}; font-size:11px; margin-top:10px;'>"
-               f"Significant pairwise differences</p>{pairwise_blocks}") if pairwise_blocks else "")
-        return table + footnote + pw
-    
-    def _generate_spatial_stats(self, spatial_stats: dict) -> str:
-        """Generate spatial analysis statistics."""
-        text = "<table style='border-collapse: collapse;'>"
-        
-        if 'mean_nnd' in spatial_stats:
-            text += f"<tr><td style='padding: 6px;'><b>Mean Nearest Neighbor Distance:</b></td>"
-            text += f"<td style='padding: 6px;'>{spatial_stats['mean_nnd']:.1f} px</td></tr>"
-        
-        if 'mean_clark_evans' in spatial_stats:
-            r = spatial_stats['mean_clark_evans']
-            pattern = "clustered" if r < 1 else "regular" if r > 1 else "random"
-            text += f"<tr><td style='padding: 6px;'><b>Clark-Evans R:</b></td>"
-            text += f"<td style='padding: 6px;'>{r:.3f} ({pattern})</td></tr>"
-        
-        if 'density_per_mm2' in spatial_stats:
-            text += f"<tr><td style='padding: 6px;'><b>Deposit Density:</b></td>"
-            text += f"<td style='padding: 6px;'>{spatial_stats['density_per_mm2']:.2f} /mm²</td></tr>"
-        
-        text += "</table>"
-        text += f"<p style='color: {Theme.TEXT_MUTED}; font-size: 11px;'>Clark-Evans R: &lt;1 clustered, =1 random, &gt;1 regular</p>"
-        return text
-    
-    def _show_image_dialog(self, path: str, title: str):
-        dialog = ImageViewerDialog(path, title, self)
-        dialog.exec()
     
     def _on_table_double_click(self, index):
         if not self.results:
