@@ -1080,6 +1080,7 @@ class ReportGenerator:
             self._html_stats_appendix(statistical_results),
             self._html_spatial_section(spatial_stats),
             self._html_film_table(film_summary),
+            self._html_methods(),
             _REPORT_FOOTER,
         ])
 
@@ -1627,6 +1628,28 @@ class ReportGenerator:
     </div>
 '''
         return html
+
+    def _html_methods(self) -> str:
+        """Methods appendix — conditional, honest wording (no false blanket claims)."""
+        return '''
+    <div class="section">
+      <h2>Appendix — Methods</h2>
+      <p class="section-intro">How the numbers were produced.</p>
+      <p><b>Detection &amp; classification.</b> Deposits are detected, then a Random-Forest (or
+      rule-based) classifier labels each Normal, ROD, or Artifact. ROD Fraction = ROD / (Normal + ROD);
+      Artifacts are the reject class, excluded from deposit counts and metrics.</p>
+      <p><b>Confidence.</b> The per-deposit confidence is the classifier score (the RF class
+      probability, or a circularity-derived score in rule-based mode). It is <b>uncalibrated</b> — not
+      a calibrated probability of correctness — and covers classification only, not detection. The
+      "below the confidence-score threshold" counts are a review/workload signal, not a reliability
+      measure.</p>
+      <p><b>Statistics.</b> Group comparisons test <b>image-level</b> aggregates (the experimental unit
+      is the image, not the deposit — avoiding pseudoreplication). The omnibus test is chosen by
+      normality and group count (one-way ANOVA or Kruskal-Wallis for three or more groups; an
+      independent t-test or Mann-Whitney U for two), with Holm-corrected pairwise comparisons when
+      there are more than two groups; effect sizes are reported alongside.</p>
+    </div>
+'''
 
     def generate_pdf_report(
         self,

@@ -53,3 +53,13 @@ def test_lede_escapes_composed_fields(monkeypatch, synth_dir, tmp_path):
     html = _grouped_report(tmp_path, synth_dir, "rod_fraction")
     assert "&lt;script&gt;alert(&#x27;x&#x27;)&lt;/script&gt;" in html   # escaped in the lede
     assert "<script>alert('x')</script>" not in html                    # never rendered raw
+
+
+def test_methods_appendix_is_honest(synth_dir, tmp_path):
+    html = _grouped_report(tmp_path, synth_dir, "total_deposits").lower()
+    assert "methods" in html
+    assert "image-level" in html                                     # experimental unit
+    assert ("uncalibrated" in html) or ("not a calibrated probability" in html)  # confidence honesty
+    assert "reject class" in html                                    # artifacts = reject class
+    # conditional test wording — must NOT hard-claim one test always applies
+    assert "depending on" in html or "normality" in html
