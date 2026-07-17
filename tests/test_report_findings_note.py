@@ -1,0 +1,33 @@
+from pathlib import Path
+
+
+def _report(tmp_path, synth_dir, primary="total_deposits"):
+    from scat.pipeline import analyze_folder_service, generate_report_service, run_statistics_service
+    groups = {f"ctrl_{i}.tif": "Control" for i in range(3)}
+    groups.update({f"treat_{i}.tif": "Treatment" for i in range(3)})
+    res = analyze_folder_service(str(synth_dir), output_dir=str(tmp_path / "out"),
+                                 primary_metric=primary, groups=groups, annotate=False)
+    rd = Path(res.output_dir)
+    stats = run_statistics_service(str(rd))
+    generate_report_service(str(rd), statistical_results=stats, group_by="group")
+    return (rd / "report.html").read_text()
+
+
+def test_html_structure_is_balanced(synth_dir, tmp_path):
+    html = _report(tmp_path, synth_dir)
+    assert html.count("<body") == 1 and html.count("</body>") == 1
+    assert html.count("<html") == 1 and html.count("</html>") == 1
+    # no premature imbalance: every <div ...> is closed
+    assert html.count("<div") == html.count("</div>")
+
+
+def test_finding_leads_summary_demotes_to_population_overview(synth_dir, tmp_path):
+    html = _report(tmp_path, synth_dir)
+    i_finding = html.find('class="finding"')
+    i_group = html.find("Group Comparison")
+    i_pop = html.lower().find("population overview")
+    i_grid = html.find('class="stats-grid"')
+    assert -1 < i_finding < i_group < i_pop < i_grid       # finding → evidence → demoted pooled cards
+    # the Summary grid + Distributions live INSIDE the Population overview slice
+    pop_slice = html[i_pop:i_pop + 60000]
+    assert 'class="stats-grid"' in pop_slice and "Distributions" in pop_slice

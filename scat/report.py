@@ -290,7 +290,7 @@ _REPORT_CSS = """\
             .plot-container img:hover { box-shadow: 0 4px 14px rgba(26, 26, 26, 0.10); }
         }
 
-        /* ---- Scroll reveal — hidden ONLY when JS confirms it can reveal (.js-reveal on <html>) ---- */
+        /* ---- Scroll reveal — hidden ONLY when JS confirms it can reveal (.js-reveal on the root html element) ---- */
         .js-reveal .section, .js-reveal .plot-container {
             opacity: 0;
             transform: translateY(8px);
@@ -1073,10 +1073,10 @@ class ReportGenerator:
     ) -> str:
         """Build complete HTML document from per-section builders."""
         return "".join([
-            self._html_document_head(title, summary),
+            self._html_document_head(title, summary),                                  # masthead only
             self._html_finding_lede(film_summary, deposit_data, statistical_results, group_by, analysis),
-            self._html_distributions(inline_plots),
-            self._html_group_comparison(inline_plots, statistical_results, group_by),
+            self._html_group_comparison(inline_plots, statistical_results, group_by, analysis),  # analysis added (Task 2)
+            self._html_population_overview(summary, inline_plots),                      # demoted pooled context
             self._html_stats_appendix(statistical_results),
             self._html_spatial_section(spatial_stats),
             self._html_film_table(film_summary),
@@ -1116,7 +1116,12 @@ class ReportGenerator:
 '''
 
     def _html_document_head(self, title: str, summary: Dict) -> str:
-        """Document head, CSS, page header, and the Summary stat-card grid."""
+        """Document boilerplate, CSS, and the page masthead only.
+
+        The pooled Summary stat cards were demoted into ``_html_population_overview``;
+        this method now opens ``<html><body>`` and the header and closes neither the
+        body nor any section, so every downstream section is self-contained.
+        """
         html = f'''<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1132,10 +1137,22 @@ class ReportGenerator:
         <h1>{title}</h1>
         <div class="subtitle">Generated: {summary['generated_at']}</div>
     </div>
-    
-    <!-- Summary Section -->
+'''
+        return html
+
+    def _html_population_overview(self, summary: Dict, inline_plots: Dict) -> str:
+        """Demoted pooled context: the Summary stat-card grid + distribution histograms.
+
+        A single self-contained ``<div class="section">``. The stat cards moved here
+        verbatim from ``_html_document_head``; the histogram body comes from
+        ``_html_distributions`` (which no longer emits the closing ``</div>``), and this
+        method owns the section's opening and closing tags.
+        """
+        html = f'''
+    <!-- Population overview -->
     <div class="section">
-        <h2>Summary</h2>
+        <h2>Population overview</h2>
+        <p class="section-intro">Pooled characteristics across all images (context, not the headline).</p>
         <div class="stats-grid">
             <div class="stat-card rod">
                 <div class="value">{summary['mean_rod_fraction']*100:.1f}%</div>
@@ -1171,10 +1188,13 @@ class ReportGenerator:
             </div>
         </div>
 '''
+        html += self._html_distributions(inline_plots)
+        html += '    </div>\n'
         return html
 
     def _html_distributions(self, inline_plots: Dict) -> str:
-        """Deposit distribution histograms (closes the Summary section)."""
+        """Deposit distribution histograms (body only; the enclosing section is owned
+        by ``_html_population_overview``, which appends the closing ``</div>``)."""
         html = ""
         # Add distribution plots (2 columns x 3 rows)
         if 'count_distribution' in inline_plots:
@@ -1235,11 +1255,9 @@ class ReportGenerator:
             </div>
         </div>
 '''
-        
-        html += '    </div>\n'
         return html
 
-    def _html_group_comparison(self, inline_plots: Dict, statistical_results: Dict, group_by: str) -> str:
+    def _html_group_comparison(self, inline_plots: Dict, statistical_results: Dict, group_by: str, analysis: dict = None) -> str:
         """Per-metric group-comparison boxplots with omnibus test results."""
         html = ""
         # Group comparison - show metrics vertically with omnibus results
