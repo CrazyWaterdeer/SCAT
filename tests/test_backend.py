@@ -21,6 +21,11 @@ def test_api_requires_key(monkeypatch):
         backend.build_runner(backend="auto")
 
 
+def _resolved_key(runner):
+    """The API key the built runner's provider actually holds."""
+    return runner.provider._client.api_key
+
+
 def test_api_path_builds_with_key(monkeypatch):
     _no_subscription(monkeypatch)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
@@ -33,5 +38,21 @@ def test_api_path_falls_back_to_config_key(monkeypatch):
     _no_subscription(monkeypatch)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     _config_api_key(monkeypatch, "sk-cfg")
-    runner, desc = backend.build_runner(backend="api")
-    assert "billed" in desc and runner.__class__.__name__ == "AgentRunner"
+    runner, _ = backend.build_runner(backend="api")
+    assert _resolved_key(runner) == "sk-cfg"
+
+
+def test_env_key_wins_over_config_and_is_stripped(monkeypatch):
+    _no_subscription(monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "  sk-env  ")   # whitespace must be trimmed
+    _config_api_key(monkeypatch, "sk-cfg")
+    runner, _ = backend.build_runner(backend="api")
+    assert _resolved_key(runner) == "sk-env"               # non-empty env wins, stripped
+
+
+def test_empty_env_falls_back_to_config(monkeypatch):
+    _no_subscription(monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "   ")          # blank/whitespace env is not a key
+    _config_api_key(monkeypatch, "sk-cfg")
+    runner, _ = backend.build_runner(backend="api")
+    assert _resolved_key(runner) == "sk-cfg"

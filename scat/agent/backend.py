@@ -38,8 +38,9 @@ def build_runner(backend: str = "auto", model: str = "claude-opus-4-8", max_loop
 
     if want == "api":
         from scat.config import config
-        # The env var is authoritative; fall back to the key saved in Settings (config).
-        key = os.environ.get("ANTHROPIC_API_KEY") or config.get("agent.api_key", "").strip()
+        # A non-empty ANTHROPIC_API_KEY wins; otherwise use the key saved in Settings. Both are
+        # stripped so stray whitespace never reaches the SDK (which would send a broken header).
+        key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip() or (config.get("agent.api_key") or "").strip()
         if not key:
             raise RuntimeError(
                 "No backend available. Either log in to Claude (`claude` CLI) for the "

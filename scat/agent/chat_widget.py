@@ -39,6 +39,7 @@ from scat.config import config                   # core config (no agent deps)
 from scat.agent.backend import LATEST_MODELS     # plain model list (backend top-level = os + prompts)
 
 _PROVIDERS = [("Auto", "auto"), ("Subscription", "subscription"), ("API", "api")]
+_SUBSCRIPTION_IDX = next(i for i, (_n, v) in enumerate(_PROVIDERS) if v == "subscription")
 
 _EXAMPLE_PROMPTS = [
     "Analyze this folder and compare the groups",
@@ -896,11 +897,12 @@ class ChatDockWidget(QWidget):
             ok, reason = subscription_available()
         except Exception:
             return
-        # index 1 is the Subscription provider (see _PROVIDERS); UserRole (the backend value) is
-        # untouched — setItemText/ToolTipRole only change what is shown.
-        self.provider_combo.setItemText(1, "Subscription" if ok else "Subscription — not connected")
+        # Target the Subscription entry by value, not a hard-coded index; UserRole (the backend
+        # value) is untouched — setItemText/ToolTipRole only change what is shown.
+        i = _SUBSCRIPTION_IDX
+        self.provider_combo.setItemText(i, "Subscription" if ok else "Subscription — not connected")
         self.provider_combo.setItemData(
-            1, ("Claude subscription (no API charges)" if ok
+            i, ("Claude subscription (no API charges)" if ok
                 else f"Claude subscription not connected ({reason}). Log in with the `claude` CLI, "
                      "or pick the API provider with a key."),
             Qt.ToolTipRole)
