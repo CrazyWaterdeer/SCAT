@@ -1155,10 +1155,6 @@ class ReportGenerator:
         <h2>Population overview</h2>
         <p class="section-intro">Pooled characteristics across all images (context, not the headline).</p>
         <div class="stats-grid">
-            <div class="stat-card rod">
-                <div class="value">{summary['mean_rod_fraction']*100:.1f}%</div>
-                <div class="label">ROD Fraction (±{summary['std_rod_fraction']*100:.1f}%)</div>
-            </div>
             <div class="stat-card">
                 <div class="value">{summary['total_films']}</div>
                 <div class="label">Total Images</div>
@@ -1166,6 +1162,10 @@ class ReportGenerator:
             <div class="stat-card">
                 <div class="value">{summary['total_deposits']}</div>
                 <div class="label">Total Deposits</div>
+            </div>
+            <div class="stat-card rod">
+                <div class="value">{summary['mean_rod_fraction']*100:.1f}%</div>
+                <div class="label">ROD Fraction (±{summary['std_rod_fraction']*100:.1f}%)</div>
             </div>
             <div class="stat-card">
                 <div class="value">{summary['mean_circularity']:.3f}</div>
