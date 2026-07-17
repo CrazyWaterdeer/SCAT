@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QPushButton, QLabel, QTabWidget, QGroupBox, QSpinBox,
     QFormLayout, QComboBox, QCheckBox, QProgressBar, QTextEdit,
     QMessageBox, QScrollArea, QDialog, QDialogButtonBox,
-    QMenu, QDockWidget
+    QLineEdit, QMenu, QDockWidget
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import (
@@ -178,6 +178,33 @@ class SettingsDialog(QDialog):
         
         tabs.addTab(perf_widget, "Performance")
 
+        # Assistant tab — the Anthropic API key for the billed API backend. The subscription
+        # backend (a logged-in `claude` CLI) needs no key, so this is optional.
+        assistant_widget = QWidget()
+        assistant_layout = QVBoxLayout(assistant_widget)
+
+        key_group = QGroupBox("Anthropic API")
+        key_form = QFormLayout()
+        self.api_key_edit = QLineEdit()
+        self.api_key_edit.setEchoMode(QLineEdit.Password)
+        self.api_key_edit.setPlaceholderText("sk-ant-…  (leave blank to use your Claude subscription)")
+        self.api_key_edit.setText(config.get("agent.api_key", ""))
+        key_form.addRow("API key:", self.api_key_edit)
+        key_group.setLayout(key_form)
+        assistant_layout.addWidget(key_group)
+
+        key_note = QLabel(
+            "Only needed for the billed API backend. If you're logged in to Claude (the "
+            "`claude` CLI), the Assistant uses your subscription and no key is required.\n\n"
+            "The key is stored in this app's config file in plain text; the ANTHROPIC_API_KEY "
+            "environment variable, if set, takes precedence over it.")
+        key_note.setWordWrap(True)
+        key_note.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; font-size: 11px;")
+        assistant_layout.addWidget(key_note)
+        assistant_layout.addStretch()
+
+        tabs.addTab(assistant_widget, "Assistant")
+
         # (Detection parameters live on the Analysis tab — the single place they are edited
         #  and the values actually used by a run. No duplicate Settings-dialog copy.)
 
@@ -218,7 +245,10 @@ class SettingsDialog(QDialog):
             # Index 2+ corresponds to available_workers[1+]
             worker_count = self.available_workers[combo_idx - 1] if combo_idx - 1 < len(self.available_workers) else 0
         config.set("performance.worker_count", worker_count)
-        
+
+        # Save the assistant API key (stripped; blank clears it)
+        config.set("agent.api_key", self.api_key_edit.text().strip())
+
         self.accept()
 
 

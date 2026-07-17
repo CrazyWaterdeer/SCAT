@@ -37,12 +37,13 @@ def build_runner(backend: str = "auto", model: str = "claude-opus-4-8", max_loop
         return runner, f"Claude subscription (no API charges), model={model}"
 
     if want == "api":
-        key = os.environ.get("ANTHROPIC_API_KEY")
+        from scat.config import config
+        # The env var is authoritative; fall back to the key saved in Settings (config).
+        key = os.environ.get("ANTHROPIC_API_KEY") or config.get("agent.api_key", "").strip()
         if not key:
             raise RuntimeError(
                 "No backend available. Either log in to Claude (`claude` CLI) for the "
-                "subscription path, or set ANTHROPIC_API_KEY for the API path.")
-        from scat.config import config
+                "subscription path, or set an API key (Settings › Assistant, or ANTHROPIC_API_KEY).")
         provider = AnthropicProvider(api_key=key, model=model,
                                      max_tokens=config.get("agent.max_tokens", 4096),
                                      max_retries=config.get("agent.max_retries", 3))

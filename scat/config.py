@@ -71,6 +71,8 @@ DEFAULT_CONFIG = {
     "agent": {
         "backend": "auto",   # auto | subscription | api
         "model": "claude-opus-4-8",
+        "api_key": "",       # Anthropic API key for the billed API backend (blank = use the Claude
+                             # subscription). The ANTHROPIC_API_KEY env var, if set, overrides this.
         "max_loops": 40,
         "max_tokens": 4096,   # API backend: max output tokens per request
         "max_retries": 3,     # API backend: SDK retry count for 408/409/429/5xx (SDK does the backoff)
