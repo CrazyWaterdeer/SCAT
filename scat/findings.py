@@ -42,13 +42,14 @@ def compose_finding(*, stats, primary_metric, headline, n_images, n_groups, grou
         return {"sentence": f"Across {n_images} images, {label} averaged {headline}.",
                 "metric": label, "test": "no group comparison", "scope": f"{n_images} images"}
     gl = group_label or "group"
+    grp = "groups" if gl in ("group", "groups") else f"{gl} groups"   # avoid "across group groups"
     pstr = _fmt_p(comp["p"])
     if comp["significant"]:
-        verb = (f"showed a difference across {gl} groups" if comp["is_omnibus"]
-                else f"differed between the {gl} groups")
+        verb = (f"showed a difference across {grp}" if comp["is_omnibus"]
+                else f"differed between the {grp}")
     else:
         conn = "across" if comp["is_omnibus"] else "between"
-        verb = f"showed no statistically detected difference {conn} {gl} groups"
+        verb = f"showed no statistically detected difference {conn} {grp}"
     return {"sentence": f"{label} {verb} ({comp['test']}, {pstr}).",
             "metric": f"{label} · {headline}",
             "test": f"{comp['test']}, {pstr}" + (" (significant)" if comp["significant"] else " (n.s.)"),

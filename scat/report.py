@@ -162,6 +162,11 @@ _REPORT_CSS = """\
         .stat-card.normal .value { color: var(--normal); }
         .stat-card.rod .value { color: var(--rod); }
         .stat-card.artifact .value { color: var(--artifact); }
+        .lede{border-left:4px solid var(--rod);background:var(--surface);border:1px solid var(--hair);border-radius:8px;padding:22px 24px;margin:20px 0}
+        .finding{font-family:var(--serif);font-size:1.4rem;font-weight:600;line-height:1.35}
+        .lede-trio{display:flex;gap:32px;margin-top:14px;font-size:0.95rem}
+        .lede-trio b{color:var(--muted);font-weight:600;text-transform:uppercase;font-size:0.7rem;letter-spacing:var(--track-caps);display:block;margin-bottom:2px}
+        .lede-trust{color:var(--muted);font-size:0.8rem;margin-top:12px;border-top:1px solid var(--hair);padding-top:10px}
         table {
             width: 100%;
             border-collapse: collapse;
@@ -1069,6 +1074,7 @@ class ReportGenerator:
         """Build complete HTML document from per-section builders."""
         return "".join([
             self._html_document_head(title, summary),
+            self._html_finding_lede(film_summary, deposit_data, statistical_results, group_by, analysis),
             self._html_distributions(inline_plots),
             self._html_group_comparison(inline_plots, statistical_results, group_by),
             self._html_stats_appendix(statistical_results),
@@ -1076,6 +1082,37 @@ class ReportGenerator:
             self._html_film_table(film_summary),
             _REPORT_FOOTER,
         ])
+
+    def _html_finding_lede(self, film_summary, deposit_data, statistical_results, group_by, analysis):
+        from scat import metrics as _metrics, confidence as _confidence, findings as _findings
+        import html as _h
+        analysis = analysis or {}
+        pm = _metrics.resolve_metric(analysis.get("primary_metric"))
+        norm = analysis.get("normalization") or _metrics.DEFAULT_NORMALIZATION
+        thr = float(analysis.get("confidence_threshold", _metrics.DEFAULT_THRESHOLD))
+        headline = _metrics.format_headline(film_summary, pm, norm, meta={})
+        n_images = len(film_summary)
+        grouped = bool(group_by) and group_by in film_summary.columns
+        n_groups = int(film_summary[group_by].dropna().nunique()) if grouped else 0
+        group_label = self.get_metric_label(group_by) if grouped else None
+        if group_label and group_label.strip().lower() in ("group", "groups", "condition"):
+            group_label = group_label.lower()
+        f = _findings.compose_finding(stats=statistical_results, primary_metric=pm, headline=headline,
+                                      n_images=n_images, n_groups=n_groups, group_label=group_label)
+        trust = _confidence.run_trust(deposit_data, thr)
+        return f'''
+    <div class="section">
+      <div class="lede">
+        <div class="finding">{_h.escape(f["sentence"])}</div>
+        <div class="lede-trio">
+          <span><b>Primary metric</b>{_h.escape(f["metric"])}</span>
+          <span><b>Test</b>{_h.escape(f["test"])}</span>
+          <span><b>Scope</b>{_h.escape(f["scope"])}</span>
+        </div>
+        <div class="lede-trust">{_h.escape(trust["line"])}</div>
+      </div>
+    </div>
+'''
 
     def _html_document_head(self, title: str, summary: Dict) -> str:
         """Document head, CSS, page header, and the Summary stat-card grid."""
