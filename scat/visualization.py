@@ -541,56 +541,6 @@ class Visualizer:
         
         return str(filepath)
     
-    def hue_density_plot(
-        self,
-        deposits_data: Dict[str, pd.DataFrame],
-        title: str = "Hue Distribution by Condition",
-        filename: str = "hue_density.png",
-        bandwidth: float = 7
-    ) -> Optional[str]:
-        """
-        Generate hue (pH proxy) density plot.
-        
-        Args:
-            deposits_data: Dict mapping condition names to deposit DataFrames
-            title: Plot title
-            filename: Output filename
-            bandwidth: KDE bandwidth
-        """
-        if not HAS_MATPLOTLIB or not HAS_SEABORN:
-            return None
-        
-        fig, ax = _plt.subplots(figsize=(12, 6))
-        
-        colors = _plt.cm.Set1(np.linspace(0, 1, len(deposits_data)))
-        
-        for (name, df), color in zip(deposits_data.items(), colors):
-            if 'mean_hue' in df.columns:
-                hue_values = df['mean_hue'].dropna()
-                if len(hue_values) > 10:
-                    _sns.kdeplot(
-                        data=hue_values, ax=ax, label=f"{name} (n={len(hue_values)})",
-                        color=color, linewidth=2, bw_adjust=bandwidth/10
-                    )
-        
-        ax.set_xlabel('Hue (degrees)')
-        ax.set_ylabel('Density')
-        ax.set_title(title)
-        ax.legend()
-        ax.set_xlim(0, 360)
-        
-        # Add pH reference zones for Bromophenol Blue
-        ax.axvspan(0, 60, alpha=0.1, color='yellow', label='Acidic')
-        ax.axvspan(60, 150, alpha=0.1, color='green', label='Transitional')
-        ax.axvspan(150, 360, alpha=0.1, color='blue', label='Basic')
-        
-        _plt.tight_layout()
-        filepath = self.output_dir / filename
-        _plt.savefig(filepath)
-        _plt.close()
-        
-        return str(filepath)
-    
     def violin_comparison(
         self,
         film_summary: pd.DataFrame,

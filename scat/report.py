@@ -22,7 +22,7 @@ except ImportError:
 
 # Import color constants from visualization for consistency
 from .visualization import (
-    DEFAULT_GRAY, PASTEL_PALETTE, DEPOSIT_COLORS,
+    DEFAULT_GRAY, PASTEL_PALETTE,
     apply_publication_style, hue_to_rgb, order_groups
 )
 from . import __version__
@@ -464,93 +464,6 @@ class ReportGenerator:
         'correlation': 'Texture Correlation',
     }
     
-    # Proper display names for metrics (without biological interpretation)
-    # Used in significant findings, table headers, etc.
-    METRIC_DISPLAY_NAMES = {
-        # Count metrics
-        'n_total': 'Total Count',
-        'n_normal': 'Normal Count',
-        'n_rod': 'ROD Count',
-        'n_artifact': 'Artifact Count',
-        
-        # Fraction/ratio metrics
-        'rod_fraction': 'ROD Fraction',
-        'normal_fraction': 'Normal Fraction',
-        'artifact_fraction': 'Artifact Fraction',
-        
-        # Area metrics
-        'total_area': 'Total Area',
-        'mean_area': 'Mean Area',
-        'normal_mean_area': 'Mean Area of Normal Deposits',
-        'rod_mean_area': 'Mean Area of ROD Deposits',
-        'normal_std_area': 'Area Std Dev of Normal Deposits',
-        'rod_std_area': 'Area Std Dev of ROD Deposits',
-        'area_px': 'Area',
-        
-        # IOD metrics
-        'total_iod': 'Total IOD',
-        'mean_iod': 'Mean IOD',
-        'normal_total_iod': 'Total IOD of Normal Deposits',
-        'normal_mean_iod': 'Mean IOD of Normal Deposits',
-        'rod_total_iod': 'Total IOD of ROD Deposits',
-        'rod_mean_iod': 'Mean IOD of ROD Deposits',
-        'iod': 'IOD',
-        
-        # Color metrics - Hue
-        'mean_hue': 'Mean Hue',
-        'normal_mean_hue': 'Mean Hue of Normal Deposits',
-        'rod_mean_hue': 'Mean Hue of ROD Deposits',
-        'mean_saturation': 'Mean Saturation',
-        'hue_cv': 'Hue CV',
-        
-        # Lightness
-        'mean_lightness': 'Mean Lightness',
-        'normal_mean_lightness': 'Mean Lightness of Normal Deposits',
-        'rod_mean_lightness': 'Mean Lightness of ROD Deposits',
-        'mean_brightness': 'Mean Brightness',
-        'mean_red': 'Mean Red Channel',
-        'mean_green': 'Mean Green Channel',
-        'mean_blue': 'Mean Blue Channel',
-        
-        # Shape metrics
-        'mean_circularity': 'Mean Circularity',
-        'normal_mean_circularity': 'Mean Circularity of Normal Deposits',
-        'rod_mean_circularity': 'Mean Circularity of ROD Deposits',
-        'mean_eccentricity': 'Mean Eccentricity',
-        'mean_solidity': 'Mean Solidity',
-        'mean_compactness': 'Mean Compactness',
-        'mean_aspect_ratio': 'Mean Aspect Ratio',
-        'circularity': 'Circularity',
-        'eccentricity': 'Eccentricity',
-        'solidity': 'Solidity',
-        'aspect_ratio': 'Aspect Ratio',
-        
-        # Density metrics
-        'deposit_density': 'Deposit Density',
-        'coverage_ratio': 'Coverage Ratio',
-        'deposits_per_fly': 'Deposits per Fly',
-        
-        # pH metrics
-        'estimated_ph': 'Estimated pH',
-        'acidity_index': 'Acidity Index',
-        
-        # Spatial metrics
-        'mean_nnd': 'Mean NND',
-        'clark_evans_r': 'Clark-Evans R',
-        'edge_fraction': 'Edge Fraction',
-    }
-    
-    # Labels for correlation keys
-    CORRELATION_KEY_LABELS = {
-        'size_vs_iod': 'Size vs IOD',
-        'size_vs_hue': 'Size vs Hue',
-        'size_vs_circularity': 'Size vs Circularity',
-        'iod_vs_hue': 'IOD vs Hue',
-        'size_vs_lightness': 'Size vs Lightness',
-        'circularity_vs_aspect': 'Circularity vs Aspect Ratio',
-        'pigment_density_vs_hue': 'Pigment Density vs Hue',
-    }
-    
     @classmethod
     def get_metric_label(cls, metric_name: str) -> str:
         """Convert metric variable name to human-readable label."""
@@ -558,47 +471,6 @@ class ReportGenerator:
             return cls.METRIC_LABELS[metric_name]
         # Fallback: convert snake_case to Title Case
         return metric_name.replace('_', ' ').title()
-    
-    @classmethod
-    def get_metric_display_name(cls, metric_name: str) -> str:
-        """Get proper display name for metric (without biological interpretation)."""
-        if metric_name in cls.METRIC_DISPLAY_NAMES:
-            return cls.METRIC_DISPLAY_NAMES[metric_name]
-        # Fallback: convert snake_case to Title Case, preserving acronyms
-        parts = metric_name.split('_')
-        formatted = []
-        for part in parts:
-            # Preserve uppercase acronyms
-            if part.upper() in ('IOD', 'ROD', 'NND', 'CV', 'PH'):
-                formatted.append(part.upper())
-            else:
-                formatted.append(part.title())
-        return ' '.join(formatted)
-    
-    @classmethod
-    def get_correlation_label(cls, key: str) -> str:
-        """Get proper label for correlation key."""
-        if key in cls.CORRELATION_KEY_LABELS:
-            return cls.CORRELATION_KEY_LABELS[key]
-        # Fallback with proper formatting
-        parts = key.split('_')
-        formatted = []
-        for part in parts:
-            if part.upper() in ('IOD', 'ROD', 'NND', 'CV', 'PH'):
-                formatted.append(part.upper())
-            elif part == 'vs':
-                formatted.append('vs')
-            else:
-                formatted.append(part.title())
-        return ' '.join(formatted)
-    
-    @staticmethod
-    def format_correlation_interpretation(interpretation: str) -> str:
-        """Format correlation interpretation for display."""
-        if not interpretation:
-            return ''
-        # Replace underscores with spaces
-        return interpretation.replace('_', ' ')
     
     def __init__(self, output_dir: Union[str, Path]):
         self.output_dir = Path(output_dir)
@@ -687,18 +559,14 @@ class ReportGenerator:
             inline_plots['ph_distribution'] = self._generate_ph_distribution(deposit_data)
             inline_plots['rod_distribution'] = self._generate_rod_histogram(film_summary)
             inline_plots['circularity_distribution'] = self._generate_circularity_distribution(deposit_data)
-            
-            # Legacy: overview bar (deposit count by classification)
-            inline_plots['overview_bar'] = self._generate_overview_bar(film_summary)
-            
+
             if group_by and group_by in film_summary.columns:
                 # Generate all group comparison boxplots
                 group_plots = self._generate_all_group_comparisons(film_summary, group_by)
                 inline_plots.update(group_plots)
-                # Legacy: keep single group_comparison for backward compatibility
-                inline_plots['group_comparison'] = self._generate_group_comparison(
-                    film_summary, group_by
-                )
+                # Section-presence gate only — the value is never rendered; the real
+                # per-metric boxplots are the group_* keys from group_plots above.
+                inline_plots['group_comparison'] = True
         
         # Build HTML
         html_content = self._build_html(
@@ -776,37 +644,6 @@ class ReportGenerator:
             'mean_rod_area': safe_mean('rod_mean_area'),
             'generated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
-    
-    def _generate_overview_bar(self, film_summary: pd.DataFrame) -> str:
-        """Generate overview bar chart as base64."""
-        fig, ax = plt.subplots(figsize=(8, 4))
-        
-        def safe_sum(col):
-            return film_summary[col].sum() if col in film_summary.columns else 0
-        
-        # Only show Normal and ROD (exclude Artifact from deposit statistics)
-        totals = {
-            'Normal': safe_sum('n_normal'),
-            'ROD': safe_sum('n_rod')
-        }
-        
-        # Use DEPOSIT_COLORS for consistency with visualization module
-        colors = [DEPOSIT_COLORS['normal'], DEPOSIT_COLORS['rod']]
-        bars = ax.bar(totals.keys(), totals.values(), color=colors, width=0.4)
-        
-        ax.set_ylabel('Count')
-        ax.set_title('Total Deposits by Classification')
-        
-        # Add value labels
-        for bar, val in zip(bars, totals.values()):
-            ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 5,
-                   f'{int(val)}', ha='center', va='bottom', fontweight='bold')
-        
-        # Apply publication style
-        apply_publication_style(ax)
-        
-        plt.tight_layout()
-        return self._fig_to_base64(fig)
     
     @staticmethod
     def _deposit_values(deposit_data: pd.DataFrame, column: str):
@@ -955,44 +792,6 @@ class ReportGenerator:
             ax.set_xlim(0, 1)
         return self._histogram_figure(draw)
 
-    def _generate_group_comparison(
-        self, 
-        film_summary: pd.DataFrame, 
-        group_by: str
-    ) -> str:
-        """Generate group comparison box plot for ROD fraction (legacy)."""
-        return self._generate_metric_boxplot(film_summary, 'rod_fraction', group_by, 
-                                              'ROD Fraction (%)', scale=100)
-    
-    @staticmethod
-    def _natural_sort_key(value):
-        """Natural sort key that handles numbers correctly.
-        
-        Examples:
-            - "1", "2", "10" → sorted as 1, 2, 10 (not 1, 10, 2)
-            - "Group1", "Group10", "Group2" → Group1, Group2, Group10
-            - Mixed: numbers first, then strings
-        """
-        import re
-        value_str = str(value)
-        
-        # Check if it's a pure number
-        try:
-            return (0, float(value_str), value_str)
-        except ValueError:
-            pass
-        
-        # Split into numeric and non-numeric parts for natural sorting
-        parts = re.split(r'(\d+)', value_str)
-        converted = []
-        for part in parts:
-            if part.isdigit():
-                converted.append((0, int(part)))
-            elif part:
-                converted.append((1, part.lower()))
-        
-        return (1, converted, value_str)
-    
     def _generate_metric_boxplot(
         self,
         film_summary: pd.DataFrame,
