@@ -27,8 +27,10 @@ def build_runner(backend: str = "auto", model: str = "claude-opus-4-8", max_loop
 
     sub_ok, sub_reason = subscription_available()
     want = backend
+    auto_fell_back = False
     if want == "auto":
         want = "subscription" if sub_ok else "api"
+        auto_fell_back = want == "api"   # subscription wasn't available; Auto is billing the API
 
     if want == "subscription":
         if not sub_ok:
@@ -49,6 +51,11 @@ def build_runner(backend: str = "auto", model: str = "claude-opus-4-8", max_loop
                                      max_tokens=config.get("agent.max_tokens", 4096),
                                      max_retries=config.get("agent.max_retries", 3))
         runner = AgentRunner(provider, SYSTEM_PROMPT, max_loops=max_loops)
-        return runner, f"ANTHROPIC_API_KEY (requests are billed), model={model}"
+        if auto_fell_back:
+            # Auto silently landed on the billed API because the subscription isn't connected —
+            # warn loudly so a transient Claude-login failure never bills the user by surprise.
+            return runner, (f"⚠ Subscription not connected ({sub_reason}) — using the billed "
+                            f"API (requests cost money), model={model}")
+        return runner, f"API key set — requests are billed, model={model}"
 
     raise ValueError(f"unknown backend: {backend}")

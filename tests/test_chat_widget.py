@@ -135,6 +135,26 @@ def test_model_change_persists_and_invalidates_runner(app, monkeypatch):
     assert w.runner is None  # invalidated so the next send rebuilds with the new model
 
 
+def test_last_model_and_provider_persist_across_restart(app, monkeypatch):
+    """Picking a model/provider persists (config auto-save); a fresh dock — as after a restart —
+    restores both. Locks in the 'remember my last model + provider' behavior."""
+    from scat.agent.chat_widget import ChatDockWidget
+    from scat.config import config
+    store = {}
+    monkeypatch.setattr(config, "set", lambda k, v, **kw: store.__setitem__(k, v))
+    monkeypatch.setattr(config, "get", lambda k, d=None: store.get(k, d))
+    w = ChatDockWidget()
+    w.model_combo.setCurrentIndex(2)      # -> _on_model_changed   -> config.set(agent.model, …)
+    w.provider_combo.setCurrentIndex(2)   # -> _on_provider_changed -> config.set(agent.backend, …)
+    picked_model, picked_provider = w.model_combo.itemData(2), w.provider_combo.itemData(2)
+    assert store.get("agent.model") == picked_model
+    assert store.get("agent.backend") == picked_provider
+    # a brand-new dock (as after quit + relaunch) reads the persisted values back
+    w2 = ChatDockWidget()
+    assert w2.model_combo.currentData() == picked_model
+    assert w2.provider_combo.currentData() == picked_provider
+
+
 def test_slash_clear_command(app):
     from scat.agent.chat_widget import ChatDockWidget
     w = ChatDockWidget()

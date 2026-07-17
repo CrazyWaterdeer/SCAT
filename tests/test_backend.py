@@ -56,3 +56,20 @@ def test_empty_env_falls_back_to_config(monkeypatch):
     _config_api_key(monkeypatch, "sk-cfg")
     runner, _ = backend.build_runner(backend="api")
     assert _resolved_key(runner) == "sk-cfg"
+
+
+def test_auto_fallback_to_api_warns(monkeypatch):
+    """When Auto silently lands on the billed API (subscription down), the description warns."""
+    _no_subscription(monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-x")
+    runner, desc = backend.build_runner(backend="auto")
+    assert runner.__class__.__name__ == "AgentRunner"
+    assert "⚠" in desc and "not connected" in desc.lower() and "billed" in desc
+
+
+def test_explicit_api_does_not_warn(monkeypatch):
+    """Explicitly choosing the API provider is a deliberate billing choice — no ⚠ warning."""
+    _no_subscription(monkeypatch)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-x")
+    _, desc = backend.build_runner(backend="api")
+    assert "⚠" not in desc and "billed" in desc
