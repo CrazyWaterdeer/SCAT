@@ -129,6 +129,7 @@ _REPORT_CSS = """\
         }
         .section-intro { color: var(--muted); margin-bottom: 20px; }
         .appendix-ref { color: var(--muted); font-size: 0.82rem; margin-left: 10px; }
+        .exp-tag { color: var(--muted); font-size: 0.62rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; vertical-align: middle; margin-left: 8px; }
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
@@ -1604,7 +1605,7 @@ class ReportGenerator:
         if spatial_stats:
             html += f'''
     <div class="section">
-        <h2>Spatial Analysis</h2>
+        <h2>Spatial Analysis <span class="exp-tag">Exploratory</span></h2>
         <div class="stats-grid">
             <div class="stat-card">
                 <div class="value">{spatial_stats.get('mean_nnd', 0):.1f}</div>
@@ -1633,10 +1634,13 @@ class ReportGenerator:
     def _html_film_table(self, film_summary: pd.DataFrame) -> str:
         """Per-image summary table."""
         html = ""
-        # Film summary table
-        html += '''
+        n_images = len(film_summary)
+        # Film summary table — collapsed per-image ledger
+        html += f'''
     <div class="section">
         <h2>Image Summary</h2>
+        <details>
+        <summary>Per-image ledger ({n_images} images)</summary>
         <div style="overflow-x: auto;">
             <table>
                 <thead>
@@ -1668,6 +1672,7 @@ class ReportGenerator:
         html += '''                </tbody>
             </table>
         </div>
+        </details>
     </div>
 '''
         return html

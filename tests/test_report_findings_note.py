@@ -41,3 +41,12 @@ def test_primary_metric_is_figure_1(synth_dir, tmp_path):
     # the primary metric's plot (alt="ROD Fraction") sits in the Figure-1 slice, not Figure-2
     assert 'alt="ROD Fraction"' in html[i_f1:i_f2]
     assert 'alt="ROD Fraction"' not in html[i_f2:]
+
+
+def test_spatial_exploratory_and_film_table_collapsed(synth_dir, tmp_path):
+    html = _report(tmp_path, synth_dir)
+    assert "<details" in html.lower()                        # per-image ledger collapsible
+    assert "<details open" not in html.lower()               # collapsed by default (not open)
+    if "Spatial Analysis" in html:
+        i = html.find("Spatial Analysis")
+        assert "exploratory" in html[max(0, i - 40):i + 260].lower()
