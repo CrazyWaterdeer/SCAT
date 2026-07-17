@@ -1959,6 +1959,27 @@ class ResultsTab(QWidget):
         vals = _metrics.metric_values(film_summary, pm).dropna()
         sd = vals.std() if len(vals) > 1 else 0.0
         self.hero_sub.setText(f"±{sd:.1f}{m.unit}   ·   across {n} image{'s' if n != 1 else ''}")
+        # Grouped runs: the hero value is a grand mean across distinct conditions — flag it as pooled
+        # and (for non-circular metrics) give the honest per-group range so the pooled number isn't
+        # read as a single condition's effect.
+        gcol = results.get("group_by")
+        groups = []
+        if gcol and gcol in film_summary.columns:
+            for g in film_summary[gcol].dropna().unique():
+                s = str(g).strip()
+                if s and s != "ungrouped" and s not in groups:
+                    groups.append(s)
+        if len(groups) >= 2:
+            note = f"pooled across {len(groups)} groups"
+            if pm != "mean_hue":     # hue is circular — a min/max range is misleading
+                per_group = [_metrics.metric_values(
+                    film_summary[film_summary[gcol].astype(str).str.strip() == g], pm).dropna().mean()
+                    for g in groups]
+                per_group = [v for v in per_group if v == v]
+                if per_group:
+                    note += (f" (group image-means {m.fmt.format(min(per_group))}"
+                             f"–{m.fmt.format(max(per_group))}{m.unit})")
+            self.hero_sub.setText(self.hero_sub.text() + "  ·  " + note)
         # Factual trust line: count of deposits below the fixed confidence threshold (no verdict).
         self.trust_line.setText(
             _conf.run_trust(results.get("deposit_data"),
