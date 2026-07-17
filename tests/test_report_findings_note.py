@@ -28,9 +28,10 @@ def test_finding_leads_summary_demotes_to_population_overview(synth_dir, tmp_pat
     i_pop = html.lower().find("population overview")
     i_grid = html.find('class="stats-grid"')
     assert -1 < i_finding < i_group < i_pop < i_grid       # finding → evidence → demoted pooled cards
-    # the Summary grid + Distributions live INSIDE the Population overview slice
+    # grouped run: the scope-count grid + the per-group means table live INSIDE the
+    # Population overview slice (pooled distributions are demoted to that table).
     pop_slice = html[i_pop:i_pop + 60000]
-    assert 'class="stats-grid"' in pop_slice and "Distributions" in pop_slice
+    assert 'class="stats-grid"' in pop_slice and "Deposits / img" in pop_slice
 
 
 def test_primary_metric_is_figure_1(synth_dir, tmp_path):

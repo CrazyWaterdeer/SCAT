@@ -1128,7 +1128,7 @@ class ReportGenerator:
             self._html_document_head(title, summary),                                  # masthead only
             self._html_finding_lede(film_summary, deposit_data, statistical_results, group_by, analysis),
             self._html_group_comparison(inline_plots, statistical_results, group_by, analysis),  # analysis added (Task 2)
-            self._html_population_overview(summary, inline_plots),                      # demoted pooled context
+            self._html_population_overview(summary, inline_plots, film_summary, group_by),  # demoted pooled context (group-conditional)
             self._html_stats_appendix(statistical_results),
             self._html_spatial_section(spatial_stats),
             self._html_film_table(film_summary),
@@ -1192,14 +1192,23 @@ class ReportGenerator:
 '''
         return html
 
-    def _html_population_overview(self, summary: Dict, inline_plots: Dict) -> str:
-        """Demoted pooled context: the Summary stat-card grid + distribution histograms.
+    def _html_population_overview(self, summary: Dict, inline_plots: Dict,
+                                  film_summary=None, group_by=None) -> str:
+        """Demoted pooled context — group-conditional (Plan 5, Task 2).
 
-        A single self-contained ``<div class="section">``. The stat cards moved here
-        verbatim from ``_html_document_head``; the histogram body comes from
-        ``_html_distributions`` (which no longer emits the closing ``</div>``), and this
-        method owns the section's opening and closing tags.
+        A single self-contained ``<div class="section">`` either way. For a **grouped**
+        run (≥2 effective groups) the pooled biological grand mean describes no single
+        condition, so this renders only the dataset **scope counts** (Total Images/Deposits
+        + Normal/ROD/Artifact) plus the per-group means table, omitting the pooled
+        biological stat cards and the distribution histograms (which live in the group
+        figures + the per-group table instead). For an **ungrouped** run it keeps the
+        original pooled view: the Summary stat-card grid + ``_html_distributions``.
         """
+        grouped = (film_summary is not None
+                   and len(self._effective_groups(film_summary, group_by)) >= 2)
+        if grouped:
+            return self._html_population_overview_grouped(summary, film_summary, group_by)
+
         html = f'''
     <!-- Population overview -->
     <div class="section">
@@ -1243,6 +1252,51 @@ class ReportGenerator:
         html += self._html_distributions(inline_plots)
         html += '    </div>\n'
         return html
+
+    def _html_population_overview_grouped(self, summary: Dict, film_summary, group_by) -> str:
+        """Grouped Population overview: pooled **scope counts** + the per-group means table.
+
+        The pooled biological mean cards and the distribution histograms are omitted (they
+        describe no single condition); per-condition truth lives in the group figures above
+        and the per-group means table here. Scope counts stay pooled — they describe the
+        dataset, not a condition. Everything is kept inside the ONE ``<div class="section">``
+        so the balanced-tag structure guard stays green.
+        """
+        def _count(col):
+            return int(film_summary[col].sum()) if col in getattr(film_summary, "columns", []) else 0
+
+        n_normal, n_rod, n_artifact = _count("n_normal"), _count("n_rod"), _count("n_artifact")
+        table = self._html_per_group_table(film_summary, group_by)
+        return f'''
+    <!-- Population overview -->
+    <div class="section">
+        <h2>Population overview</h2>
+        <p class="section-intro">Dataset scope (pooled counts). Per-condition biology is in the table below and the group figures above — the pooled biological mean is omitted because it describes no single condition.</p>
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="value">{summary['total_films']}</div>
+                <div class="label">Total Images</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">{summary['total_deposits']}</div>
+                <div class="label">Total Deposits</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">{n_normal}</div>
+                <div class="label">Normal</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">{n_rod}</div>
+                <div class="label">ROD</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">{n_artifact}</div>
+                <div class="label">Artifact</div>
+            </div>
+        </div>
+        {table}
+    </div>
+'''
 
     def _html_distributions(self, inline_plots: Dict) -> str:
         """Deposit distribution histograms (body only; the enclosing section is owned

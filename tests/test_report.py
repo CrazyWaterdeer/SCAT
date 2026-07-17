@@ -78,9 +78,13 @@ def test_generate_html_report_with_deposits_and_groups(tmp_path):
                                statistical_results=metrics, group_by="group", format="html"))
     html = out.read_text(encoding="utf-8")
     assert out.exists() and out.stat().st_size > 5000
-    # distribution histograms + group comparison + appendix all rendered
-    assert "Distributions" in html
+    # grouped run: the pooled distribution histograms are demoted to a per-group means
+    # table (the pooled grand mean describes no single condition), so "Distributions" is
+    # gone from the overview and the per-group table renders instead.
+    assert "Distributions" not in html
+    assert "Deposits / img" in html          # per-group means table header (unique to it)
     assert "Group Comparison" in html
     assert "Appendix" in html
-    # one <img> per distribution (6) + overview + group boxplots — sanity lower bound
-    assert html.count("data:image/png;base64,") >= 7
+    # grouped mode embeds the group-comparison boxplots (the pooled distribution histograms
+    # are demoted to the per-group table) — sanity lower bound that figures still render
+    assert html.count("data:image/png;base64,") >= 2
