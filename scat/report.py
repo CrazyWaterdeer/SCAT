@@ -129,6 +129,7 @@ _REPORT_CSS = """\
         }
         .section-intro { color: var(--muted); margin-bottom: 20px; }
         .appendix-ref { color: var(--muted); font-size: 0.82rem; margin-left: 10px; }
+        .exp-tag { color: var(--muted); font-size: 0.62rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; vertical-align: middle; margin-left: 8px; }
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
@@ -162,6 +163,11 @@ _REPORT_CSS = """\
         .stat-card.normal .value { color: var(--normal); }
         .stat-card.rod .value { color: var(--rod); }
         .stat-card.artifact .value { color: var(--artifact); }
+        .lede{border-left:4px solid var(--rod);background:var(--surface);border:1px solid var(--hair);border-radius:8px;padding:22px 24px;margin:20px 0}
+        .finding{font-family:var(--serif);font-size:1.4rem;font-weight:600;line-height:1.35}
+        .lede-trio{display:flex;gap:32px;margin-top:14px;font-size:0.95rem}
+        .lede-trio b{color:var(--muted);font-weight:600;text-transform:uppercase;font-size:0.7rem;letter-spacing:var(--track-caps);display:block;margin-bottom:2px}
+        .lede-trust{color:var(--muted);font-size:0.8rem;margin-top:12px;border-top:1px solid var(--hair);padding-top:10px}
         table {
             width: 100%;
             border-collapse: collapse;
@@ -285,7 +291,7 @@ _REPORT_CSS = """\
             .plot-container img:hover { box-shadow: 0 4px 14px rgba(26, 26, 26, 0.10); }
         }
 
-        /* ---- Scroll reveal — hidden ONLY when JS confirms it can reveal (.js-reveal on <html>) ---- */
+        /* ---- Scroll reveal — hidden ONLY when JS confirms it can reveal (.js-reveal on the root html element) ---- */
         .js-reveal .section, .js-reveal .plot-container {
             opacity: 0;
             transform: translateY(8px);
@@ -607,7 +613,8 @@ class ReportGenerator:
         visualization_paths: Dict[str, str] = None,
         metadata: pd.DataFrame = None,
         group_by: str = None,
-        title: str = "SCAT Analysis Report"
+        title: str = "SCAT Analysis Report",
+        analysis: dict = None
     ) -> str:
         """
         Generate comprehensive HTML report.
@@ -652,9 +659,10 @@ class ReportGenerator:
             statistical_results=statistical_results,
             visualization_paths=visualization_paths,
             inline_plots=inline_plots,
-            group_by=group_by
+            group_by=group_by,
+            analysis=analysis
         )
-        
+
         # Save
         output_path = self.output_dir / 'report.html'
         with open(output_path, 'w', encoding='utf-8') as f:
@@ -1061,21 +1069,60 @@ class ReportGenerator:
         statistical_results: Dict,
         visualization_paths: Dict,
         inline_plots: Dict,
-        group_by: str
+        group_by: str,
+        analysis: dict = None
     ) -> str:
         """Build complete HTML document from per-section builders."""
         return "".join([
-            self._html_document_head(title, summary),
-            self._html_distributions(inline_plots),
-            self._html_group_comparison(inline_plots, statistical_results, group_by),
+            self._html_document_head(title, summary),                                  # masthead only
+            self._html_finding_lede(film_summary, deposit_data, statistical_results, group_by, analysis),
+            self._html_group_comparison(inline_plots, statistical_results, group_by, analysis),  # analysis added (Task 2)
+            self._html_population_overview(summary, inline_plots),                      # demoted pooled context
             self._html_stats_appendix(statistical_results),
             self._html_spatial_section(spatial_stats),
             self._html_film_table(film_summary),
+            self._html_methods(),
             _REPORT_FOOTER,
         ])
 
+    def _html_finding_lede(self, film_summary, deposit_data, statistical_results, group_by, analysis):
+        from scat import metrics as _metrics, confidence as _confidence, findings as _findings
+        import html as _h
+        analysis = analysis or {}
+        pm = _metrics.resolve_metric(analysis.get("primary_metric"))
+        norm = analysis.get("normalization") or _metrics.DEFAULT_NORMALIZATION
+        thr = float(analysis.get("confidence_threshold", _metrics.DEFAULT_THRESHOLD))
+        headline = _metrics.format_headline(film_summary, pm, norm, meta={})
+        n_images = len(film_summary)
+        grouped = bool(group_by) and group_by in film_summary.columns
+        n_groups = int(film_summary[group_by].dropna().nunique()) if grouped else 0
+        group_label = self.get_metric_label(group_by) if grouped else None
+        if group_label and group_label.strip().lower() in ("group", "groups", "condition"):
+            group_label = group_label.lower()
+        f = _findings.compose_finding(stats=statistical_results, primary_metric=pm, headline=headline,
+                                      n_images=n_images, n_groups=n_groups, group_label=group_label)
+        trust = _confidence.run_trust(deposit_data, thr)
+        return f'''
+    <div class="section">
+      <div class="lede">
+        <div class="finding">{_h.escape(f["sentence"])}</div>
+        <div class="lede-trio">
+          <span><b>Primary metric</b>{_h.escape(f["metric"])}</span>
+          <span><b>Test</b>{_h.escape(f["test"])}</span>
+          <span><b>Scope</b>{_h.escape(f["scope"])}</span>
+        </div>
+        <div class="lede-trust">{_h.escape(trust["line"])}</div>
+      </div>
+    </div>
+'''
+
     def _html_document_head(self, title: str, summary: Dict) -> str:
-        """Document head, CSS, page header, and the Summary stat-card grid."""
+        """Document boilerplate, CSS, and the page masthead only.
+
+        The pooled Summary stat cards were demoted into ``_html_population_overview``;
+        this method now opens ``<html><body>`` and the header and closes neither the
+        body nor any section, so every downstream section is self-contained.
+        """
         html = f'''<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1091,10 +1138,22 @@ class ReportGenerator:
         <h1>{title}</h1>
         <div class="subtitle">Generated: {summary['generated_at']}</div>
     </div>
-    
-    <!-- Summary Section -->
+'''
+        return html
+
+    def _html_population_overview(self, summary: Dict, inline_plots: Dict) -> str:
+        """Demoted pooled context: the Summary stat-card grid + distribution histograms.
+
+        A single self-contained ``<div class="section">``. The stat cards moved here
+        verbatim from ``_html_document_head``; the histogram body comes from
+        ``_html_distributions`` (which no longer emits the closing ``</div>``), and this
+        method owns the section's opening and closing tags.
+        """
+        html = f'''
+    <!-- Population overview -->
     <div class="section">
-        <h2>Summary</h2>
+        <h2>Population overview</h2>
+        <p class="section-intro">Pooled characteristics across all images (context, not the headline).</p>
         <div class="stats-grid">
             <div class="stat-card rod">
                 <div class="value">{summary['mean_rod_fraction']*100:.1f}%</div>
@@ -1130,10 +1189,13 @@ class ReportGenerator:
             </div>
         </div>
 '''
+        html += self._html_distributions(inline_plots)
+        html += '    </div>\n'
         return html
 
     def _html_distributions(self, inline_plots: Dict) -> str:
-        """Deposit distribution histograms (closes the Summary section)."""
+        """Deposit distribution histograms (body only; the enclosing section is owned
+        by ``_html_population_overview``, which appends the closing ``</div>``)."""
         html = ""
         # Add distribution plots (2 columns x 3 rows)
         if 'count_distribution' in inline_plots:
@@ -1194,11 +1256,9 @@ class ReportGenerator:
             </div>
         </div>
 '''
-        
-        html += '    </div>\n'
         return html
 
-    def _html_group_comparison(self, inline_plots: Dict, statistical_results: Dict, group_by: str) -> str:
+    def _html_group_comparison(self, inline_plots: Dict, statistical_results: Dict, group_by: str, analysis: dict = None) -> str:
         """Per-metric group-comparison boxplots with omnibus test results."""
         html = ""
         # Group comparison - show metrics vertically with omnibus results
@@ -1239,10 +1299,10 @@ class ReportGenerator:
                 cls = 'verdict--sig' if is_sig else 'verdict--ns'
                 return f'<span class="verdict {cls}">{label}</span>'
 
-            cells = []
-            for plot_key, stat_key, title, desc in group_metrics:
+            def _build_cell(plot_key, stat_key, title, desc):
+                """One boxplot cell, or None if this metric has no inline plot."""
                 if plot_key not in inline_plots:
-                    continue
+                    return None
                 cell = (
                     '            <div class="plot-container">\n'
                     f'                <img src="data:image/png;base64,{inline_plots[plot_key]}" alt="{title}">\n'
@@ -1268,13 +1328,38 @@ class ReportGenerator:
                             f'<span class="appendix-ref">→ Appendix {appendix_num}</span></p>\n'
                         )
                 cell += '            </div>\n'
-                cells.append(cell)
+                return cell
 
-            for i in range(0, len(cells), 2):
-                html += '        <div class="two-column">\n'
-                html += ''.join(cells[i:i + 2])
-                html += '        </div>\n'
-            
+            def _grid(metrics_subset):
+                """Render a subset of group_metrics as the existing two-column cell grid."""
+                cells = [c for c in (_build_cell(*m) for m in metrics_subset) if c]
+                out = ""
+                for i in range(0, len(cells), 2):
+                    out += '        <div class="two-column">\n'
+                    out += ''.join(cells[i:i + 2])
+                    out += '        </div>\n'
+                return out
+
+            # Predeclared primary endpoint → Figure 1; the rest → Figure 2 (exploratory).
+            primary_tuple = None
+            if analysis:
+                from scat import metrics as _metrics, findings as _findings
+                pm = _metrics.resolve_metric(analysis.get("primary_metric"))
+                stats_key = _findings._STATS_KEY.get(pm)
+                primary_plot_key = f"group_{stats_key}" if stats_key else None
+                if primary_plot_key and primary_plot_key in inline_plots:
+                    primary_tuple = next((m for m in group_metrics if m[0] == primary_plot_key), None)
+
+            if primary_tuple is not None:
+                rest = [m for m in group_metrics if m[0] != primary_tuple[0]]
+                html += f'        <h3>Figure 1 — {primary_tuple[2]} (primary endpoint)</h3>\n'
+                html += _grid([primary_tuple])
+                html += '        <h3>Figure 2 — Secondary metrics (exploratory)</h3>\n'
+                html += _grid(rest)
+            else:
+                # Fallback (no analysis, or primary metric has no group plot): single list, no Figure labels.
+                html += _grid(group_metrics)
+
             # Add summary of significant differences (without bullet points)
             if statistical_results and isinstance(statistical_results, dict):
                 significant_findings = []
@@ -1520,7 +1605,7 @@ class ReportGenerator:
         if spatial_stats:
             html += f'''
     <div class="section">
-        <h2>Spatial Analysis</h2>
+        <h2>Spatial Analysis <span class="exp-tag">Exploratory</span></h2>
         <div class="stats-grid">
             <div class="stat-card">
                 <div class="value">{spatial_stats.get('mean_nnd', 0):.1f}</div>
@@ -1549,10 +1634,13 @@ class ReportGenerator:
     def _html_film_table(self, film_summary: pd.DataFrame) -> str:
         """Per-image summary table."""
         html = ""
-        # Film summary table
-        html += '''
+        n_images = len(film_summary)
+        # Film summary table — collapsed per-image ledger
+        html += f'''
     <div class="section">
         <h2>Image Summary</h2>
+        <details>
+        <summary>Per-image ledger ({n_images} images)</summary>
         <div style="overflow-x: auto;">
             <table>
                 <thead>
@@ -1584,9 +1672,32 @@ class ReportGenerator:
         html += '''                </tbody>
             </table>
         </div>
+        </details>
     </div>
 '''
         return html
+
+    def _html_methods(self) -> str:
+        """Methods appendix — conditional, honest wording (no false blanket claims)."""
+        return '''
+    <div class="section">
+      <h2>Appendix — Methods</h2>
+      <p class="section-intro">How the numbers were produced.</p>
+      <p><b>Detection &amp; classification.</b> Deposits are detected, then a Random-Forest (or
+      rule-based) classifier labels each Normal, ROD, or Artifact. ROD Fraction = ROD / (Normal + ROD);
+      Artifacts are the reject class, excluded from deposit counts and metrics.</p>
+      <p><b>Confidence.</b> The per-deposit confidence is the classifier score (the RF class
+      probability, or a circularity-derived score in rule-based mode). It is <b>uncalibrated</b> — not
+      a calibrated probability of correctness — and covers classification only, not detection. The
+      "below the confidence-score threshold" counts are a review/workload signal, not a reliability
+      measure.</p>
+      <p><b>Statistics.</b> Group comparisons test <b>image-level</b> aggregates (the experimental unit
+      is the image, not the deposit — avoiding pseudoreplication). The omnibus test is chosen by
+      normality and group count (one-way ANOVA or Kruskal-Wallis for three or more groups; an
+      independent t-test or Mann-Whitney U for two), with Holm-corrected pairwise comparisons when
+      there are more than two groups; effect sizes are reported alongside.</p>
+    </div>
+'''
 
     def generate_pdf_report(
         self,
@@ -1629,7 +1740,8 @@ def generate_report(
     statistical_results: Dict = None,
     visualization_paths: Dict = None,
     group_by: str = None,
-    format: str = 'html'
+    format: str = 'html',
+    analysis: dict = None
 ) -> str:
     """
     Convenience function to generate report.
@@ -1651,7 +1763,8 @@ def generate_report(
             spatial_stats=spatial_stats,
             statistical_results=statistical_results,
             visualization_paths=visualization_paths,
-            group_by=group_by
+            group_by=group_by,
+            analysis=analysis
         )
     else:
         return generator.generate_html_report(
@@ -1660,5 +1773,6 @@ def generate_report(
             spatial_stats=spatial_stats,
             statistical_results=statistical_results,
             visualization_paths=visualization_paths,
-            group_by=group_by
+            group_by=group_by,
+            analysis=analysis
         )

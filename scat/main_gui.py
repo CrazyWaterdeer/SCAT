@@ -44,6 +44,8 @@ from PySide6.QtGui import (
 # Import SCAT modules
 from .config import config, get_timestamped_output_dir
 from .artifacts import IMAGE_SUMMARY, ALL_DEPOSITS
+from . import metrics as _metrics
+from . import confidence as _conf
 from .ui_common import (
     Theme, NoScrollSpinBox, NoScrollDoubleSpinBox, NoScrollComboBox,
     CollapsibleSection, CenteredCap, ToggleSwitch, setting_row,
@@ -735,6 +737,14 @@ def _results_dict_from_output(output_dir, group_by=None, image_paths=None, stats
     if stats and not stats.get("skipped"):
         stats_results = stats.get("basic", {}).get("metrics", {}) or {}
 
+    analysis = {}
+    mpath = out / "run_manifest.json"
+    if mpath.exists():
+        try:
+            analysis = (_json.loads(mpath.read_text()) or {}).get("analysis", {}) or {}
+        except Exception:
+            analysis = {}
+
     return {
         "output_dir": str(out),
         "film_summary": film_summary,   # holds image_summary; key kept for compatibility
@@ -744,6 +754,10 @@ def _results_dict_from_output(output_dir, group_by=None, image_paths=None, stats
         "stats_results": stats_results,
         "group_by": group_by,
         "image_paths": list(image_paths) if image_paths else [],
+        "primary_metric": _metrics.resolve_metric(analysis.get("primary_metric")),
+        "normalization": analysis.get("normalization") or _metrics.DEFAULT_NORMALIZATION,
+        "confidence_threshold": float(analysis.get("confidence_threshold", _metrics.DEFAULT_THRESHOLD)),
+        "run_meta": {},   # n_flies/roi_area/duration land here in the metadata-capture task
     }
 
 
@@ -1768,9 +1782,14 @@ class ResultsTab(QWidget):
             f" letter-spacing: {Theme.TRACK_DISPLAY};")
         self.hero_sub = QLabel("")
         self.hero_sub.setStyleSheet(f"color: {Theme.TEXT_SECONDARY}; font-size: {Theme.FS_BODY}px;")
+        # One factual trust line: a neutral count vs the fixed confidence threshold — muted, no
+        # colored verdict/dot (a reliability claim the uncalibrated score can't support).
+        self.trust_line = QLabel("")
+        self.trust_line.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FS_SM}px;")
         numcol.addWidget(self.hero_kicker)
         numcol.addWidget(self.hero_value)
         numcol.addWidget(self.hero_sub)
+        numcol.addWidget(self.trust_line)
         top.addLayout(numcol)
         top.addStretch(1)
 
@@ -1800,12 +1819,12 @@ class ResultsTab(QWidget):
         top.addLayout(act)
         hv.addLayout(top)
 
-        # KPI tiles (rebuilt on each load)
-        self.tiles_host = QWidget()
-        self.tiles_layout = QHBoxLayout(self.tiles_host)
-        self.tiles_layout.setContentsMargins(0, 0, 0, 0)
-        self.tiles_layout.setSpacing(10)
-        hv.addWidget(self.tiles_host)
+        # Composition strip (one thin semantic line — replaces the six KPI tiles).
+        self.composition_line = QLabel("")
+        self.composition_line.setStyleSheet(
+            f"color: {Theme.TEXT_SECONDARY}; font-size: {Theme.FS_BODY}px; padding-top: 4px;")
+        self.composition_line.setTextFormat(Qt.RichText)
+        hv.addWidget(self.composition_line)
 
         self.col.addWidget(self._hero_card)
 
@@ -1830,8 +1849,9 @@ class ResultsTab(QWidget):
         hint.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FS_SM}px;")
         self.col.addWidget(hint)
         self.summary_table = QTableWidget()
-        self.summary_table.setColumnCount(6)
-        self.summary_table.setHorizontalHeaderLabels(["Filename", "Normal", "ROD", "Artifact", "ROD %", "Total IOD"])
+        self.summary_table.setColumnCount(7)
+        self.summary_table.setHorizontalHeaderLabels(
+            ["Filename", "Review", "Normal", "ROD", "Artifact", "ROD %", "Total IOD"])
         self.summary_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.summary_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.summary_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -1929,26 +1949,35 @@ class ResultsTab(QWidget):
         std_rod_frac = film_summary['rod_fraction'].std()
         n = len(film_summary)
 
-        # Hero: lead with the headline answer.
-        self.hero_value.setText(f"{mean_rod_frac*100:.1f}%")
-        self.hero_sub.setText(f"±{std_rod_frac*100:.1f}%   ·   across {n} image{'s' if n != 1 else ''}")
+        # Hero: lead with the headline answer, driven by the predeclared primary metric.
+        pm = _metrics.resolve_metric(results.get("primary_metric"))
+        norm = results.get("normalization", _metrics.DEFAULT_NORMALIZATION)
+        meta = results.get("run_meta", {})
+        m = _metrics.METRICS[pm]
+        self.hero_kicker.setText(m.label.upper())
+        self.hero_value.setText(_metrics.format_headline(film_summary, pm, norm, meta))
+        vals = _metrics.metric_values(film_summary, pm).dropna()
+        sd = vals.std() if len(vals) > 1 else 0.0
+        self.hero_sub.setText(f"±{sd:.1f}{m.unit}   ·   across {n} image{'s' if n != 1 else ''}")
+        # Factual trust line: count of deposits below the fixed confidence threshold (no verdict).
+        self.trust_line.setText(
+            _conf.run_trust(results.get("deposit_data"),
+                            results.get("confidence_threshold", 0.60))["line"])
 
-        # KPI tiles (rebuilt each load).
-        while self.tiles_layout.count():
-            it = self.tiles_layout.takeAt(0)
-            if it.widget():
-                it.widget().deleteLater()
+        # Composition strip (one thin semantic line — replaces the six KPI tiles).
         # "Deposits" = Normal + ROD (artifacts are the reject class) — matches the report's
         # total_deposits so the app and the report it produces agree on the headline count.
-        # Equal stretch (factor 1, no trailing stretch) justifies the tiles edge-to-edge like
-        # the report's stat-card grid, instead of packing them left with a dead band on the right.
-        self.tiles_layout.addWidget(self._kpi_tile(n, "IMAGES"), 1)
-        self.tiles_layout.addWidget(self._kpi_tile(f"{(total_normal + total_rod):.0f}", "DEPOSITS"), 1)
-        self.tiles_layout.addWidget(self._kpi_tile(f"{total_normal:.0f}", "NORMAL", Theme.NORMAL), 1)
-        self.tiles_layout.addWidget(self._kpi_tile(f"{total_rod:.0f}", "ROD", Theme.ROD), 1)
-        self.tiles_layout.addWidget(self._kpi_tile(f"{total_artifact:.0f}", "ARTIFACT", Theme.TEXT_SECONDARY), 1)
-        if 'total_iod' in film_summary.columns:
-            self.tiles_layout.addWidget(self._kpi_tile(f"{film_summary['total_iod'].sum():.0f}", "TOTAL IOD"), 1)
+        sep = " &nbsp;·&nbsp; "
+        parts = [
+            f"Deposits <b>{total_normal + total_rod:.0f}</b>",
+            f"Normal <b style='color:{Theme.NORMAL}'>{total_normal:.0f}</b>",
+            f"ROD <b style='color:{Theme.ROD}'>{total_rod:.0f}</b>",
+            f"ROD fraction <b>{mean_rod_frac*100:.1f}%</b>",
+            f"Artifact <span style='color:{Theme.TEXT_MUTED}'>{total_artifact:.0f}</span>",
+        ]
+        if 'total_iod' in film_summary.columns:              # omit when absent — never show a fake "0"
+            parts.append(f"Total IOD <b>{film_summary['total_iod'].sum():.0f}</b>")
+        self.composition_line.setText(sep.join(parts))
 
         # Actions: state-driven hierarchy (Open report leads once one exists).
         output_dir = results.get('output_dir', '')
@@ -1957,72 +1986,54 @@ class ResultsTab(QWidget):
         self.open_folder_btn.setVisible(bool(output_dir))
         self._apply_action_state(report_exists)
 
+        # Per-image low-confidence counts (triage signal, not a reliability claim) — Review column.
+        flagged = _metrics.flagged_by_image(
+            results.get("deposit_data"), results.get("confidence_threshold", 0.60))
+
         # Per-image table — right-aligned tabular numbers, gentle semantic tint on the class counts.
         self.summary_table.setSortingEnabled(False)
         self.summary_table.setRowCount(n)
         for i, (_, row) in enumerate(film_summary.iterrows()):
             self.summary_table.setItem(i, 0, QTableWidgetItem(str(row['filename'])))
-            self._set_num(i, 1, row['n_normal'], "{:.0f}", Theme.NORMAL)
-            self._set_num(i, 2, row['n_rod'], "{:.0f}", Theme.ROD)
-            self._set_num(i, 3, row['n_artifact'], "{:.0f}", Theme.TEXT_MUTED)
-            self._set_num(i, 4, row['rod_fraction'] * 100, "{:.1f}%")
-            self._set_num(i, 5, row.get('total_iod', 0), "{:.0f}")
+            info = flagged.get(str(row['filename']))
+            rev = NumericTableWidgetItem(info["flagged"] if info else 0, "{:.0f}")
+            rev.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            if info and info["flagged"]:
+                rev.setForeground(QColor(Theme.PRIMARY_LIGHT))
+                frac = 100.0 * info["flagged"] / info["total"] if info["total"] else 0.0
+                rev.setToolTip(
+                    f"{info['flagged']} of {info['total']} deposits below the "
+                    f"confidence-score threshold ({frac:.0f}%)")
+            else:
+                rev.setText("—")
+            self.summary_table.setItem(i, 1, rev)
+            self._set_num(i, 2, row['n_normal'], "{:.0f}", Theme.NORMAL)
+            self._set_num(i, 3, row['n_rod'], "{:.0f}", Theme.ROD)
+            self._set_num(i, 4, row['n_artifact'], "{:.0f}", Theme.TEXT_MUTED)
+            self._set_num(i, 5, row['rod_fraction'] * 100, "{:.1f}%")
+            self._set_num(i, 6, row.get('total_iod', 0), "{:.0f}")
         self.summary_table.setSortingEnabled(True)
         self._fit_table_height()
 
         self._load_statistics_tab(results)
     
     def _load_statistics_tab(self, results: dict):
-        """Load combined statistics and visualizations."""
-        # Clear existing
+        """The working view is for triage; the report carries the full distributions, group comparisons
+        and statistics. Show ONE quiet, report-state-aware pointer instead of duplicating (and out-dumping)
+        the report. stats_layout is retained so re-loads (edit -> _reload_results -> load_results) work."""
         while self.stats_layout.count():
             item = self.stats_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        
-        film_summary = results['film_summary']
-        viz_results = results.get('viz_results', {})
-        stats_results = results.get('stats_results', {})
-        spatial_stats = results.get('spatial_stats', {})
-        
-        # ===== Visualizations — lead with a few overview charts, collapse the long tail =====
-        # (One calm scroll: the quick-look shouldn't out-dump the curated HTML report.)
-        if viz_results:
-            self.stats_layout.addWidget(self._section_label("VISUALIZATIONS"))
-            items = list(viz_results.items())
-            HERO = ['dashboard', 'area_iod', 'heatmap', 'scatter_matrix', 'pca']
-            hero = sorted((kp for kp in items if kp[0] in HERO), key=lambda kp: HERO.index(kp[0]))
-            rest = [kp for kp in items if kp[0] not in HERO]
-            if not hero:                        # no overview plots — lead with the first few
-                hero, rest = items[:4], items[4:]
-            self.stats_layout.addWidget(self._viz_grid(hero))
-            if rest:
-                more = CollapsibleSection(f"Show all {len(rest)} more charts", expanded=False)
-                more.add_widget(self._viz_grid(rest))
-                self.stats_layout.addWidget(more)
-
-        # ===== Descriptive statistics ===== (one section idiom: muted uppercase label, no card)
-        self.stats_layout.addWidget(self._section_label("DESCRIPTIVE STATISTICS"))
-        desc_label = QLabel(self._generate_descriptive_stats(film_summary))
-        desc_label.setWordWrap(True)
-        desc_label.setTextFormat(Qt.RichText)
-        self.stats_layout.addWidget(desc_label)
-
-        # ===== Group comparisons =====
-        if stats_results:
-            self.stats_layout.addWidget(self._section_label("GROUP COMPARISONS"))
-            comp_label = QLabel(self._generate_comparison_stats(stats_results))
-            comp_label.setWordWrap(True)
-            comp_label.setTextFormat(Qt.RichText)
-            self.stats_layout.addWidget(comp_label)
-
-        # ===== Spatial analysis =====
-        if spatial_stats:
-            self.stats_layout.addWidget(self._section_label("SPATIAL ANALYSIS"))
-            spatial_label = QLabel(self._generate_spatial_stats(spatial_stats))
-            spatial_label.setWordWrap(True)
-            spatial_label.setTextFormat(Qt.RichText)
-            self.stats_layout.addWidget(spatial_label)
+        out = results.get("output_dir", "")
+        report_exists = bool(out) and (Path(out) / "report.html").exists()
+        text = ("Full distributions, group comparisons and statistics are in the report."
+                if report_exists else
+                "Generate a report to see the full distributions, group comparisons and statistics.")
+        pointer = QLabel(text)
+        pointer.setStyleSheet(f"color: {Theme.TEXT_MUTED}; font-size: {Theme.FS_SM}px; padding-top: 8px;")
+        pointer.setWordWrap(True)
+        self.stats_layout.addWidget(pointer)
     
     def _format_viz_name(self, name: str) -> str:
         """Format visualization key names for display."""

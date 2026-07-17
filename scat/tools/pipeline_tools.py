@@ -6,12 +6,13 @@ from scat.agent.registry import tool
 from scat.pipeline import analyze_folder_service, run_statistics_service, generate_report_service
 
 
-@tool(description="Detect + classify deposits across a folder and write CSVs/JSON/annotations to a timestamped results dir. Pass groups={filename: group_label} — the mapping YOU inferred from the filenames — to enable group comparison. Errors on duplicate basenames (unsafe to group). Pass image_paths=[...] to analyze ONLY those images (e.g. the pending ones from scan_folder's already_analyzed) instead of the whole folder. Set visualize=True to also render comparison plots; significance_mode chooses which significance brackets to draw ('auto'|'vs_control'|'adjacent'|'pairwise'|'none') — YOU decide it from the design. For a FACTORIAL design (2+ crossed factors, e.g. Drug × Light), pass condition_matrix={factor_name: {group: true/false}} to also render bar charts with an open/closed-circle condition table beneath (● = factor present, ○ = absent).")
+@tool(description="Detect + classify deposits across a folder and write CSVs/JSON/annotations to a timestamped results dir. Pass groups={filename: group_label} — the mapping YOU inferred from the filenames — to enable group comparison. Errors on duplicate basenames (unsafe to group). Pass image_paths=[...] to analyze ONLY those images (e.g. the pending ones from scan_folder's already_analyzed) instead of the whole folder. Set visualize=True to also render comparison plots; significance_mode chooses which significance brackets to draw ('auto'|'vs_control'|'adjacent'|'pairwise'|'none') — YOU decide it from the design. For a FACTORIAL design (2+ crossed factors, e.g. Drug × Light), pass condition_matrix={factor_name: {group: true/false}} to also render bar charts with an open/closed-circle condition table beneath (● = factor present, ○ = absent). Pass primary_metric (total_deposits [DEFAULT], rod_fraction, mean_area, mean_hue, total_iod, mean_circularity) — the predeclared endpoint this experiment measures; CONFIRM it with the user before running, never silently guess.")
 def analyze_folder(path: str, groups: Optional[dict] = None, model_type: Optional[str] = None,
                    min_area: int = 20, max_area: int = 10000, circularity: float = 0.6,
                    annotate: bool = True, image_paths: Optional[list[str]] = None,
                    visualize: bool = False, significance_mode: str = "auto",
-                   show_ns: bool = False, condition_matrix: Optional[dict] = None) -> dict:
+                   show_ns: bool = False, condition_matrix: Optional[dict] = None,
+                   primary_metric: Optional[str] = None) -> dict:
     """Run detection + classification over a folder; returns counts + output dir."""
     return asdict(analyze_folder_service(path, groups=groups, model_type=model_type,
                                          min_area=min_area, max_area=max_area,
@@ -19,6 +20,7 @@ def analyze_folder(path: str, groups: Optional[dict] = None, model_type: Optiona
                                          image_paths=image_paths, visualize=visualize,
                                          significance_mode=significance_mode, show_ns=show_ns,
                                          condition_matrix=condition_matrix,
+                                         primary_metric=primary_metric,
                                          ambient_progress=True))  # stream progress + honor Stop
 
 

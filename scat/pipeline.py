@@ -87,7 +87,10 @@ def analyze_folder_service(path: str, groups: Optional[dict] = None, model_type:
                            parallel: bool = True, max_workers: int = 0, save_json: bool = True,
                            image_paths: Optional[list] = None, progress_callback=None,
                            ambient_progress: bool = False,
-                           output_dir: Optional[str] = None) -> AnalyzeResult:
+                           output_dir: Optional[str] = None,
+                           primary_metric: Optional[str] = None,
+                           normalization: Optional[str] = None,
+                           confidence_threshold: Optional[float] = None) -> AnalyzeResult:
     """Canonical folder analysis. Superset of every caller (CLI + GUI); every param
     beyond the original signature defaults to the value that reproduces the pre-slimdown
     CLI/parity behaviour, so tests/test_pipeline_parity.py (default kwargs) stays byte-identical.
@@ -222,7 +225,9 @@ def analyze_folder_service(path: str, groups: Optional[dict] = None, model_type:
         circularity=circularity, groups=groups, group_column=(group_by[0] if group_by else None),
         detection={"min_area": min_area, "max_area": max_area, "edge_margin": edge_margin,
                    "sensitive_mode": sensitive_mode, "unet_model_path": unet_model_path},
-        warnings=warnings)
+        warnings=warnings,
+        primary_metric=primary_metric, normalization=normalization,
+        confidence_threshold=confidence_threshold)
 
     summary = reports["film_summary"]
     return AnalyzeResult(
@@ -246,6 +251,18 @@ def generate_report_service(results_dir: str, statistical_results: Optional[dict
                             group_by: Optional[str] = None) -> str:
     from .report import generate_report
     rd = Path(results_dir)
+    # Reproducibility sidecar carries the run's analysis contract (predeclared primary metric,
+    # normalization, confidence threshold). Thread it into the report so the HTML reflects the
+    # run's own choices rather than global config. Best-effort — a missing/bad manifest degrades
+    # to an empty dict, never raises into the report path.
+    import json
+    analysis = {}
+    mpath = rd / "run_manifest.json"
+    if mpath.exists():
+        try:
+            analysis = (json.loads(mpath.read_text()).get("analysis") or {})
+        except Exception:
+            analysis = {}
     film = pd.read_csv(rd / IMAGE_SUMMARY)
     deposits = pd.read_csv(rd / ALL_DEPOSITS) if (rd / ALL_DEPOSITS).exists() else None
     # report expects the FLAT metrics mapping, not the whole run_comprehensive_analysis dict.
@@ -264,7 +281,7 @@ def generate_report_service(results_dir: str, statistical_results: Optional[dict
             spatial_stats = None
     return generate_report(film, output_dir=rd, deposit_data=deposits,
                            statistical_results=metrics, spatial_stats=spatial_stats,
-                           group_by=group_by, format="html")
+                           group_by=group_by, format="html", analysis=analysis)
 
 
 # --------------------------------------------------------------------------- clustering (labeling assist)

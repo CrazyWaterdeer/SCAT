@@ -48,7 +48,10 @@ DEFAULT_CONFIG = {
         "visualize": True,
         "spatial": True,
         "stats": True,
-        "report": True
+        "report": True,
+        "primary_metric": "total_deposits",   # predeclared endpoint (metrics.DEFAULT_METRIC)
+        "normalization": "per_image",          # per_image | per_fly | per_area | per_time
+        "confidence_threshold": 0.60,          # fixed classification threshold (metrics.DEFAULT_THRESHOLD)
     },
 
     # AI agent (non-secret selection only; ANTHROPIC_API_KEY comes from the env)

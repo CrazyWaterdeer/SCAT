@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from scat import manifest
+from scat.manifest import write_run_manifest
 from scat.pipeline import analyze_folder_service
 
 
@@ -73,3 +74,18 @@ def test_service_writes_run_manifest(synth_dir, tmp_path):
     m = json.loads((Path(res.output_dir) / "run_manifest.json").read_text())
     assert m["dataset"]["n_images"] == 6
     assert "scat_version" in m and "git_commit" in m
+
+
+def test_manifest_records_analysis(tmp_path):
+    write_run_manifest(tmp_path, image_paths=[], model_type="rf",
+                       primary_metric="rod_fraction", normalization="per_fly", confidence_threshold=0.6)
+    m = json.loads((tmp_path / "run_manifest.json").read_text())
+    assert m["analysis"] == {"primary_metric": "rod_fraction", "normalization": "per_fly",
+                             "confidence_threshold": 0.6}
+
+
+def test_manifest_analysis_defaults_and_survives_bad_threshold(tmp_path):
+    write_run_manifest(tmp_path, image_paths=[], model_type="rf", confidence_threshold="oops")
+    m = json.loads((tmp_path / "run_manifest.json").read_text())
+    assert m["analysis"]["primary_metric"] == "total_deposits"
+    assert m["analysis"]["confidence_threshold"] == 0.60  # bad value → default, never raises
