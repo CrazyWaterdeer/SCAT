@@ -491,6 +491,19 @@ class ReportGenerator:
             seen.append(s)
         return seen
 
+    @staticmethod
+    def _resolve_stat_key(stat_key, stats):
+        """The stats key actually present in `stats` for a report metric: the combined key when the
+        stats dict has it, else the per-class normal_* comparison. The stats module compares metrics
+        split by class, so mean_area/mean_hue/mean_circularity live under normal_* — without this
+        their omnibus p-values were silently dropped from the captions and appendix. Mirrors the
+        boxplot's own normal_* fallback and metrics.STATS_KEY_FALLBACK."""
+        if not isinstance(stats, dict) or stat_key in stats:
+            return stat_key
+        from scat import metrics as _metrics
+        fb = _metrics.STATS_KEY_FALLBACK.get(stat_key)
+        return fb if fb and fb in stats else stat_key
+
     # columns rendered in the per-group table — real image_summary columns, mirroring the report's
     # group-comparison metrics. (mean_hue/circularity use the normal_* columns that actually exist.)
     _PER_GROUP_COLS = [
@@ -804,9 +817,14 @@ class ReportGenerator:
         """Generate boxplot comparing groups for a specific metric."""
         fig, ax = plt.subplots(figsize=(10, 5))
         
-        # Logical group order (control first, then low<mid<high or numeric dose), not alphabetical
-        groups = order_groups(film_summary[group_by].dropna().unique())
-        
+        # Logical group order (control first, then low<mid<high or numeric dose), not alphabetical;
+        # exclude the 'ungrouped' sentinel so it is never drawn as an extra comparison box.
+        groups = order_groups([g for g in film_summary[group_by].dropna().unique()
+                               if str(g).strip() != "ungrouped"])
+        if not groups:
+            plt.close(fig)
+            return ""
+
         # Check if metric exists
         if metric not in film_summary.columns:
             plt.close(fig)
@@ -874,31 +892,25 @@ class ReportGenerator:
             ('mean_circularity', 'Mean Circularity', 1.0, False),
         ]
         
+        from scat import metrics as _metrics
         for metric, ylabel, scale, use_hue in comparison_metrics:
-            # Check if metric exists, try alternatives
+            # image_summary has per-class normal_*/rod_* columns, not combined mean_area/mean_hue/
+            # mean_circularity — fall back to the normal_* column (the single source of truth in
+            # metrics.STATS_KEY_FALLBACK) so area/hue/circularity all render, not just hue+circularity.
             actual_metric = metric
-            if metric == 'mean_hue':
-                # Try to use combined hue
-                if metric not in film_summary.columns:
-                    if 'normal_mean_hue' in film_summary.columns:
-                        actual_metric = 'normal_mean_hue'  # Fallback
-                    else:
-                        continue
-            if metric == 'mean_circularity':
-                # Try to use combined circularity
-                if metric not in film_summary.columns:
-                    if 'normal_mean_circularity' in film_summary.columns:
-                        actual_metric = 'normal_mean_circularity'  # Fallback
-                    else:
-                        continue
-            
-            if actual_metric in film_summary.columns:
-                plot = self._generate_metric_boxplot(
-                    film_summary, actual_metric, group_by, ylabel, scale, use_hue
-                )
-                if plot:
-                    plots[f'group_{metric}'] = plot
-        
+            if actual_metric not in film_summary.columns:
+                fb = _metrics.STATS_KEY_FALLBACK.get(metric)
+                if fb and fb in film_summary.columns:
+                    actual_metric = fb
+                else:
+                    continue
+
+            plot = self._generate_metric_boxplot(
+                film_summary, actual_metric, group_by, ylabel, scale, use_hue
+            )
+            if plot:
+                plots[f'group_{metric}'] = plot
+
         return plots
     
     def _fig_to_base64(self, fig) -> str:
@@ -945,7 +957,7 @@ class ReportGenerator:
         headline = _metrics.format_headline(film_summary, pm, norm, meta={})
         n_images = len(film_summary)
         grouped = bool(group_by) and group_by in film_summary.columns
-        n_groups = int(film_summary[group_by].dropna().nunique()) if grouped else 0
+        n_groups = len(self._effective_groups(film_summary, group_by))
         group_label = self.get_metric_label(group_by) if grouped else None
         if group_label and group_label.strip().lower() in ("group", "groups", "condition"):
             group_label = group_label.lower()
@@ -1193,7 +1205,8 @@ class ReportGenerator:
             appendix_index = {}
             idx = 1
             for _, stat_key, _, _ in group_metrics:
-                if statistical_results and stat_key in statistical_results:
+                rk = self._resolve_stat_key(stat_key, statistical_results)
+                if statistical_results and rk in statistical_results:
                     appendix_index[stat_key] = idx
                     idx += 1
             
@@ -1213,8 +1226,9 @@ class ReportGenerator:
                     f'                <p class="plot-description"><strong>{title}:</strong> {desc}</p>\n'
                 )
                 # Compact omnibus caption if available
-                if statistical_results and stat_key in statistical_results:
-                    result = statistical_results[stat_key]
+                rk = self._resolve_stat_key(stat_key, statistical_results)
+                if statistical_results and rk in statistical_results:
+                    result = statistical_results[rk]
                     if isinstance(result, dict) and 'error' not in result:
                         appendix_num = appendix_index.get(stat_key, '?')
                         if 'overall_test' in result:
@@ -1268,8 +1282,9 @@ class ReportGenerator:
             if statistical_results and isinstance(statistical_results, dict):
                 significant_findings = []
                 for _, stat_key, title, _ in group_metrics:
-                    if stat_key in statistical_results:
-                        result = statistical_results[stat_key]
+                    rk = self._resolve_stat_key(stat_key, statistical_results)
+                    if rk in statistical_results:
+                        result = statistical_results[rk]
                         if isinstance(result, dict) and 'error' not in result:
                             if result.get('overall_significant') or result.get('significant'):
                                 p_val = result.get('overall_p_value', result.get('p_value', 1.0))
@@ -1319,10 +1334,11 @@ class ReportGenerator:
             
             appendix_num = 0
             for metric_key, metric_title in ordered_metrics:
-                if metric_key not in statistical_results:
+                rk = self._resolve_stat_key(metric_key, statistical_results)
+                if rk not in statistical_results:
                     continue
-                    
-                result = statistical_results[metric_key]
+
+                result = statistical_results[rk]
                 
                 # Skip if result is not a dict or has error
                 if not isinstance(result, dict):
