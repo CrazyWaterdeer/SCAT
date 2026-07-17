@@ -1247,9 +1247,9 @@ class ReportGenerator:
             # Predeclared primary endpoint → Figure 1; the rest → Figure 2 (exploratory).
             primary_tuple = None
             if analysis:
-                from scat import metrics as _metrics, findings as _findings
+                from scat import metrics as _metrics
                 pm = _metrics.resolve_metric(analysis.get("primary_metric"))
-                stats_key = _findings._STATS_KEY.get(pm)
+                stats_key = _metrics.STATS_KEY.get(pm)
                 primary_plot_key = f"group_{stats_key}" if stats_key else None
                 if primary_plot_key and primary_plot_key in inline_plots:
                     primary_tuple = next((m for m in group_metrics if m[0] == primary_plot_key), None)

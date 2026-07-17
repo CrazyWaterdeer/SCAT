@@ -51,7 +51,20 @@ DEFAULT_CONFIG = {
         "report": True,
         "primary_metric": "total_deposits",   # predeclared endpoint (metrics.DEFAULT_METRIC)
         "normalization": "per_image",          # per_image | per_fly | per_area | per_time
-        "confidence_threshold": 0.60,          # fixed classification threshold (metrics.DEFAULT_THRESHOLD)
+        "confidence_threshold": 0.60,          # review/triage threshold on deposit confidence (display only; metrics.DEFAULT_THRESHOLD)
+        "use_groups": True,                    # GUI: default the grouping toggle on
+        "save_json": True,                     # GUI: also write results.json alongside the CSVs
+    },
+
+    # Performance / parallel engine
+    "performance": {
+        "parallel_enabled": True,   # fork process engine (falls back to sequential when unsafe)
+        "worker_count": 0,          # 0 = auto (cpu-based)
+    },
+
+    # Labeling tool
+    "labeling": {
+        "add_shape": 0,             # default add-deposit shape index in the labeling window
     },
 
     # AI agent (non-secret selection only; ANTHROPIC_API_KEY comes from the env)
@@ -100,7 +113,8 @@ DEFAULT_CONFIG = {
     "window": {
         "width": 1200,
         "height": 800,
-        "maximized": False
+        "maximized": False,
+        "chat_visible": True
     },
 
     # UI / motion preferences

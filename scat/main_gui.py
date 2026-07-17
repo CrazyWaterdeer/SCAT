@@ -1845,7 +1845,7 @@ class ResultsTab(QWidget):
                     groups.append(s)
         if len(groups) >= 2:
             note = f"pooled across {len(groups)} groups"
-            if pm != "mean_hue":     # hue is circular — a min/max range is misleading
+            if not m.is_circular:    # hue is circular — a min/max range is misleading
                 per_group = [_metrics.metric_values(
                     film_summary[film_summary[gcol].astype(str).str.strip() == g], pm).dropna().mean()
                     for g in groups]
@@ -1857,7 +1857,7 @@ class ResultsTab(QWidget):
         # Factual trust line: count of deposits below the fixed confidence threshold (no verdict).
         self.trust_line.setText(
             _conf.run_trust(results.get("deposit_data"),
-                            results.get("confidence_threshold", 0.60))["line"])
+                            results.get("confidence_threshold", _metrics.DEFAULT_THRESHOLD))["line"])
 
         # Composition strip (one thin semantic line — replaces the six KPI tiles).
         # "Deposits" = Normal + ROD (artifacts are the reject class) — matches the report's
@@ -1883,7 +1883,7 @@ class ResultsTab(QWidget):
 
         # Per-image low-confidence counts (triage signal, not a reliability claim) — Review column.
         flagged = _metrics.flagged_by_image(
-            results.get("deposit_data"), results.get("confidence_threshold", 0.60))
+            results.get("deposit_data"), results.get("confidence_threshold", _metrics.DEFAULT_THRESHOLD))
 
         # Per-image table — right-aligned tabular numbers, gentle semantic tint on the class counts.
         self.summary_table.setSortingEnabled(False)

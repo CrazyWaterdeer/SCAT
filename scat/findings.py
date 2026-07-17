@@ -6,20 +6,11 @@ from __future__ import annotations
 
 from scat import metrics as _metrics
 
-# primary-metric (registry) -> stats mapping key (verified against report.py group_metrics)
-_STATS_KEY = {
-    "total_deposits": "n_total", "rod_fraction": "rod_fraction", "mean_area": "mean_area",
-    "mean_hue": "mean_hue", "total_iod": "total_iod", "mean_circularity": "mean_circularity",
-}
-
-# The stats module compares split-by-class metrics: image_summary has no COMBINED mean_area/mean_hue/
-# mean_circularity comparison — only normal_*/rod_*. Fall back to the normal_* comparison (matching the
-# report boxplots + the metric value column) so these primary metrics get a real verdict, not the
-# descriptive fallback.
-_STATS_KEY_FALLBACK = {
-    "mean_area": "normal_mean_area", "mean_hue": "normal_mean_hue",
-    "mean_circularity": "normal_mean_circularity",
-}
+# primary-metric -> stats key mapping. Single source of truth in metrics.py (the report imports it
+# too); aliased here for this module's internal use. The FALLBACK covers area/hue/circularity, which
+# the stats module compares only per-class (normal_*/rod_*) — see metrics.STATS_KEY_FALLBACK.
+_STATS_KEY = _metrics.STATS_KEY
+_STATS_KEY_FALLBACK = _metrics.STATS_KEY_FALLBACK
 
 
 def _fmt_p(p: float) -> str:
