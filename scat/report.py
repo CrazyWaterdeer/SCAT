@@ -1298,10 +1298,10 @@ class ReportGenerator:
                 cls = 'verdict--sig' if is_sig else 'verdict--ns'
                 return f'<span class="verdict {cls}">{label}</span>'
 
-            cells = []
-            for plot_key, stat_key, title, desc in group_metrics:
+            def _build_cell(plot_key, stat_key, title, desc):
+                """One boxplot cell, or None if this metric has no inline plot."""
                 if plot_key not in inline_plots:
-                    continue
+                    return None
                 cell = (
                     '            <div class="plot-container">\n'
                     f'                <img src="data:image/png;base64,{inline_plots[plot_key]}" alt="{title}">\n'
@@ -1327,13 +1327,38 @@ class ReportGenerator:
                             f'<span class="appendix-ref">→ Appendix {appendix_num}</span></p>\n'
                         )
                 cell += '            </div>\n'
-                cells.append(cell)
+                return cell
 
-            for i in range(0, len(cells), 2):
-                html += '        <div class="two-column">\n'
-                html += ''.join(cells[i:i + 2])
-                html += '        </div>\n'
-            
+            def _grid(metrics_subset):
+                """Render a subset of group_metrics as the existing two-column cell grid."""
+                cells = [c for c in (_build_cell(*m) for m in metrics_subset) if c]
+                out = ""
+                for i in range(0, len(cells), 2):
+                    out += '        <div class="two-column">\n'
+                    out += ''.join(cells[i:i + 2])
+                    out += '        </div>\n'
+                return out
+
+            # Predeclared primary endpoint → Figure 1; the rest → Figure 2 (exploratory).
+            primary_tuple = None
+            if analysis:
+                from scat import metrics as _metrics, findings as _findings
+                pm = _metrics.resolve_metric(analysis.get("primary_metric"))
+                stats_key = _findings._STATS_KEY.get(pm)
+                primary_plot_key = f"group_{stats_key}" if stats_key else None
+                if primary_plot_key and primary_plot_key in inline_plots:
+                    primary_tuple = next((m for m in group_metrics if m[0] == primary_plot_key), None)
+
+            if primary_tuple is not None:
+                rest = [m for m in group_metrics if m[0] != primary_tuple[0]]
+                html += f'        <h3>Figure 1 — {primary_tuple[2]} (primary endpoint)</h3>\n'
+                html += _grid([primary_tuple])
+                html += '        <h3>Figure 2 — Secondary metrics (exploratory)</h3>\n'
+                html += _grid(rest)
+            else:
+                # Fallback (no analysis, or primary metric has no group plot): single list, no Figure labels.
+                html += _grid(group_metrics)
+
             # Add summary of significant differences (without bullet points)
             if statistical_results and isinstance(statistical_results, dict):
                 significant_findings = []

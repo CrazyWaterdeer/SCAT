@@ -31,3 +31,13 @@ def test_finding_leads_summary_demotes_to_population_overview(synth_dir, tmp_pat
     # the Summary grid + Distributions live INSIDE the Population overview slice
     pop_slice = html[i_pop:i_pop + 60000]
     assert 'class="stats-grid"' in pop_slice and "Distributions" in pop_slice
+
+
+def test_primary_metric_is_figure_1(synth_dir, tmp_path):
+    html = _report(tmp_path, synth_dir, primary="rod_fraction")
+    i_f1, i_f2 = html.find("Figure 1"), html.find("Figure 2")
+    assert -1 < i_f1 < i_f2
+    assert "exploratory" in html[i_f2:i_f2 + 400].lower()
+    # the primary metric's plot (alt="ROD Fraction") sits in the Figure-1 slice, not Figure-2
+    assert 'alt="ROD Fraction"' in html[i_f1:i_f2]
+    assert 'alt="ROD Fraction"' not in html[i_f2:]
