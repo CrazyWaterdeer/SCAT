@@ -242,7 +242,12 @@ def run_statistics_service(results_dir: str, group_col: str = "group") -> dict:
     rd = Path(results_dir)
     film = pd.read_csv(rd / IMAGE_SUMMARY)
     deposits = pd.read_csv(rd / ALL_DEPOSITS) if (rd / ALL_DEPOSITS).exists() else None
-    if group_col not in film.columns or film[group_col].dropna().nunique() < 2:
+    if group_col not in film.columns:
+        return {"skipped": True, "reason": f"column '{group_col}' not found"}
+    # Exclude the 'ungrouped' sentinel so a run with 1 real group (+ ungrouped images) is skipped
+    # instead of fabricating a comparison that treats 'ungrouped' as a second group.
+    n_real = film.loc[film[group_col] != "ungrouped", group_col].dropna().nunique()
+    if n_real < 2:
         return {"skipped": True, "reason": f"<2 groups in column '{group_col}'"}
     return run_comprehensive_analysis(film, deposits_df=deposits, group_column=group_col)
 

@@ -8,7 +8,7 @@ from typing import Callable
 
 import pandas as pd
 
-DEFAULT_THRESHOLD = 0.60          # fixed classification threshold (trust state/report; spec §2.1)
+DEFAULT_THRESHOLD = 0.60          # review/triage threshold on per-deposit confidence (display only; not a classification input) — spec §2.1
 
 
 @dataclass(frozen=True)
@@ -19,6 +19,7 @@ class Metric:
     is_rate: bool                 # True = a count normalization divides (deposits, IOD)
     unit: str = ""
     fmt: str = "{:.1f}"
+    is_circular: bool = False      # True = an angular metric (hue); a min/max range is misleading
 
 
 def _deposits(film: pd.DataFrame) -> pd.Series:
@@ -48,12 +49,25 @@ METRICS: dict[str, Metric] = {
     "total_deposits":   Metric("total_deposits", "Total deposits", _deposits, True, "", "{:.1f}"),
     "rod_fraction":     Metric("rod_fraction", "ROD fraction", lambda f: f["rod_fraction"].astype(float) * 100, False, "%", "{:.1f}"),
     "mean_area":        Metric("mean_area", "Mean deposit area", _col_or_normal("mean_area"), False, " px²", "{:.1f}"),
-    "mean_hue":         Metric("mean_hue", "pH indicator (hue)", _col_or_normal("mean_hue"), False, "°", "{:.1f}"),
+    "mean_hue":         Metric("mean_hue", "pH indicator (hue)", _col_or_normal("mean_hue"), False, "°", "{:.1f}", is_circular=True),
     "total_iod":        Metric("total_iod", "Total pigment (IOD)", _col("total_iod"), True, "", "{:.0f}"),
     "mean_circularity": Metric("mean_circularity", "Mean circularity", _col_or_normal("mean_circularity"), False, "", "{:.3f}"),
 }
 
 DEFAULT_METRIC = "total_deposits"
+
+# primary-metric (registry key) -> statistics results key. Single source of truth for the
+# report + findings (which import these). The stats module compares split-by-class metrics, so
+# area/hue/circularity have no COMBINED comparison key — fall back to the normal_* comparison
+# (matching the metric value column and the group-comparison boxplots).
+STATS_KEY = {
+    "total_deposits": "n_total", "rod_fraction": "rod_fraction", "mean_area": "mean_area",
+    "mean_hue": "mean_hue", "total_iod": "total_iod", "mean_circularity": "mean_circularity",
+}
+STATS_KEY_FALLBACK = {
+    "mean_area": "normal_mean_area", "mean_hue": "normal_mean_hue",
+    "mean_circularity": "normal_mean_circularity",
+}
 
 
 def resolve_metric(key: str | None) -> str:
