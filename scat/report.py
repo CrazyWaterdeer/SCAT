@@ -607,7 +607,8 @@ class ReportGenerator:
         visualization_paths: Dict[str, str] = None,
         metadata: pd.DataFrame = None,
         group_by: str = None,
-        title: str = "SCAT Analysis Report"
+        title: str = "SCAT Analysis Report",
+        analysis: dict = None
     ) -> str:
         """
         Generate comprehensive HTML report.
@@ -652,9 +653,10 @@ class ReportGenerator:
             statistical_results=statistical_results,
             visualization_paths=visualization_paths,
             inline_plots=inline_plots,
-            group_by=group_by
+            group_by=group_by,
+            analysis=analysis
         )
-        
+
         # Save
         output_path = self.output_dir / 'report.html'
         with open(output_path, 'w', encoding='utf-8') as f:
@@ -1061,7 +1063,8 @@ class ReportGenerator:
         statistical_results: Dict,
         visualization_paths: Dict,
         inline_plots: Dict,
-        group_by: str
+        group_by: str,
+        analysis: dict = None
     ) -> str:
         """Build complete HTML document from per-section builders."""
         return "".join([
@@ -1629,7 +1632,8 @@ def generate_report(
     statistical_results: Dict = None,
     visualization_paths: Dict = None,
     group_by: str = None,
-    format: str = 'html'
+    format: str = 'html',
+    analysis: dict = None
 ) -> str:
     """
     Convenience function to generate report.
@@ -1651,7 +1655,8 @@ def generate_report(
             spatial_stats=spatial_stats,
             statistical_results=statistical_results,
             visualization_paths=visualization_paths,
-            group_by=group_by
+            group_by=group_by,
+            analysis=analysis
         )
     else:
         return generator.generate_html_report(
@@ -1660,5 +1665,6 @@ def generate_report(
             spatial_stats=spatial_stats,
             statistical_results=statistical_results,
             visualization_paths=visualization_paths,
-            group_by=group_by
+            group_by=group_by,
+            analysis=analysis
         )

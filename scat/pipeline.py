@@ -251,6 +251,18 @@ def generate_report_service(results_dir: str, statistical_results: Optional[dict
                             group_by: Optional[str] = None) -> str:
     from .report import generate_report
     rd = Path(results_dir)
+    # Reproducibility sidecar carries the run's analysis contract (predeclared primary metric,
+    # normalization, confidence threshold). Thread it into the report so the HTML reflects the
+    # run's own choices rather than global config. Best-effort — a missing/bad manifest degrades
+    # to an empty dict, never raises into the report path.
+    import json
+    analysis = {}
+    mpath = rd / "run_manifest.json"
+    if mpath.exists():
+        try:
+            analysis = (json.loads(mpath.read_text()).get("analysis") or {})
+        except Exception:
+            analysis = {}
     film = pd.read_csv(rd / IMAGE_SUMMARY)
     deposits = pd.read_csv(rd / ALL_DEPOSITS) if (rd / ALL_DEPOSITS).exists() else None
     # report expects the FLAT metrics mapping, not the whole run_comprehensive_analysis dict.
@@ -269,7 +281,7 @@ def generate_report_service(results_dir: str, statistical_results: Optional[dict
             spatial_stats = None
     return generate_report(film, output_dir=rd, deposit_data=deposits,
                            statistical_results=metrics, spatial_stats=spatial_stats,
-                           group_by=group_by, format="html")
+                           group_by=group_by, format="html", analysis=analysis)
 
 
 # --------------------------------------------------------------------------- clustering (labeling assist)
