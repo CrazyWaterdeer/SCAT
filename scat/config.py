@@ -5,6 +5,7 @@ Saves and loads user settings to/from JSON file.
 
 import copy
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict
 from datetime import datetime
@@ -71,6 +72,8 @@ DEFAULT_CONFIG = {
     "agent": {
         "backend": "auto",   # auto | subscription | api
         "model": "claude-opus-4-8",
+        "api_key": "",       # Anthropic API key for the billed API backend (blank = use the Claude
+                             # subscription). The ANTHROPIC_API_KEY env var, if set, overrides this.
         "max_loops": 40,
         "max_tokens": 4096,   # API backend: max output tokens per request
         "max_retries": 3,     # API backend: SDK retry count for 408/409/429/5xx (SDK does the backoff)
@@ -175,10 +178,14 @@ class Config:
         return result
     
     def save(self):
-        """Save configuration to file."""
+        """Save configuration to file with owner-only permissions (it may hold agent.api_key)."""
         try:
             with open(self._config_path, 'w', encoding='utf-8') as f:
                 json.dump(self._data, f, indent=2, ensure_ascii=False)
+            try:
+                os.chmod(self._config_path, 0o600)   # best-effort; no-op/older FS may ignore
+            except OSError:
+                pass
         except IOError as e:
             print(f"Warning: Could not save config: {e}")
     

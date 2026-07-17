@@ -104,6 +104,24 @@ def test_model_and_provider_pickers(app):
     assert w.provider_combo.currentData() == config.get("agent.backend", "auto")
 
 
+def test_provider_picker_marks_subscription_not_connected(app, monkeypatch):
+    monkeypatch.setattr("scat.agent.claude_subscription.subscription_available",
+                        lambda: (False, "not logged in"))
+    from scat.agent.chat_widget import ChatDockWidget
+    w = ChatDockWidget()
+    assert w.provider_combo.itemText(1) == "Subscription — not connected"
+    assert w.provider_combo.itemData(1) == "subscription"   # backend value (UserRole) untouched
+
+
+def test_provider_picker_marks_subscription_connected(app, monkeypatch):
+    monkeypatch.setattr("scat.agent.claude_subscription.subscription_available",
+                        lambda: (True, None))
+    from scat.agent.chat_widget import ChatDockWidget
+    w = ChatDockWidget()
+    assert w.provider_combo.itemText(1) == "Subscription"
+    assert w.provider_combo.itemData(1) == "subscription"
+
+
 def test_model_change_persists_and_invalidates_runner(app, monkeypatch):
     from scat.agent.chat_widget import ChatDockWidget
     from scat.config import config

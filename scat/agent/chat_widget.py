@@ -39,6 +39,7 @@ from scat.config import config                   # core config (no agent deps)
 from scat.agent.backend import LATEST_MODELS     # plain model list (backend top-level = os + prompts)
 
 _PROVIDERS = [("Auto", "auto"), ("Subscription", "subscription"), ("API", "api")]
+_SUBSCRIPTION_IDX = next(i for i, (_n, v) in enumerate(_PROVIDERS) if v == "subscription")
 
 _EXAMPLE_PROMPTS = [
     "Analyze this folder and compare the groups",
@@ -700,6 +701,7 @@ class ChatDockWidget(QWidget):
         self.provider_combo.setToolTip(
             "Provider — Auto uses your Claude subscription if logged in (no API charges), else the billed API")
         self.provider_combo.currentIndexChanged.connect(self._on_provider_changed)
+        self._refresh_subscription_state()   # mark "not connected" if no Claude login is detected
         picker_row.addWidget(self.provider_combo)
 
         picker_row.addStretch(1)
@@ -886,6 +888,25 @@ class ChatDockWidget(QWidget):
             config.set("agent.backend", val)
             self._invalidate_runner(f"Provider set to {self.provider_combo.itemText(idx)}")
 
+    def _refresh_subscription_state(self):
+        """Annotate the provider picker's Subscription entry so an un-logged-in subscription reads
+        'not connected' without the user having to send a message first. Cheap probe (no CLI spawn),
+        and never fatal — if the check can't run, the entry keeps its plain label."""
+        try:
+            from scat.agent.claude_subscription import subscription_available
+            ok, reason = subscription_available()
+        except Exception:
+            return
+        # Target the Subscription entry by value, not a hard-coded index; UserRole (the backend
+        # value) is untouched — setItemText/ToolTipRole only change what is shown.
+        i = _SUBSCRIPTION_IDX
+        self.provider_combo.setItemText(i, "Subscription" if ok else "Subscription — not connected")
+        self.provider_combo.setItemData(
+            i, ("Claude subscription (no API charges)" if ok
+                else f"Claude subscription not connected ({reason}). Log in with the `claude` CLI, "
+                     "or pick the API provider with a key."),
+            Qt.ToolTipRole)
+
     def _invalidate_runner(self, note):
         """Drop the current runner so the next send rebuilds with the new model/provider.
         Ignored mid-turn (the pickers are disabled then, so this shouldn't fire)."""
@@ -901,6 +922,7 @@ class ChatDockWidget(QWidget):
                     pass
         self.input.setEnabled(True)   # re-enable if a prior build had disabled input
         self.send_btn.setEnabled(True)
+        self._refresh_subscription_state()   # a login may have changed since the dock opened
         self.status.setText(f"{note} — starts a new conversation on your next message.")
 
     def shutdown(self):
