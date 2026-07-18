@@ -87,13 +87,14 @@ def _compare_metric_between_groups(film_summary, group_column, metric_column, al
     group_stats = {}
     for group in groups:
         values = film_summary[film_summary[group_column] == group][metric_column].dropna().values
-        if len(values) >= 2:
-            group_data[group] = values
+        if len(values) >= 2:                     # descriptive: n>=2 still shown
             stats = {'n': len(values), 'mean': float(np.mean(values)), 'std': float(np.std(values))}
             if include_median:
                 stats['median'] = float(np.median(values))
             stats['cv'] = coefficient_of_variation(values)
             group_stats[group] = stats
+        if len(values) >= 3:                     # significance participation: n>=3 (matches the tests),
+            group_data[group] = values           # so omnibus and pairwise see the same group set
 
     valid_groups = list(group_data.keys())
 
@@ -150,49 +151,47 @@ class StatisticalAnalyzer:
         }
     
     def compare_two_groups(
-        self, 
-        group1: np.ndarray, 
+        self,
+        group1: np.ndarray,
         group2: np.ndarray,
         group1_name: str = 'Group1',
-        group2_name: str = 'Group2',
-        paired: bool = False
+        group2_name: str = 'Group2'
     ) -> Dict:
         """
-        Compare two groups with appropriate test.
-        
-        Automatically selects t-test or Mann-Whitney U based on normality.
+        Compare two groups with an appropriate UNPAIRED test.
+
+        Automatically selects Welch's t-test or Mann-Whitney U based on normality.
+        (The experimental unit is the image; SCAT never pairs images across groups.)
         """
         group1 = np.array(group1)
         group2 = np.array(group2)
         group1 = group1[~np.isnan(group1)]
         group2 = group2[~np.isnan(group2)]
-        
+
         if len(group1) < 3 or len(group2) < 3:
             return {'error': 'Insufficient samples', 'n1': len(group1), 'n2': len(group2)}
-        
+
         # Test normality
         norm1 = self.normality_test(group1)
         norm2 = self.normality_test(group2)
         both_normal = norm1['is_normal'] and norm2['is_normal']
-        
+
         # Select and run test
         if both_normal:
-            if paired and len(group1) == len(group2):
-                stat, p = self.stats.ttest_rel(group1, group2)
-                test_name = 'Paired t-test'
-            else:
-                stat, p = self.stats.ttest_ind(group1, group2)
-                test_name = 'Independent t-test'
+            # Welch's t-test (unequal variances) — the modern default. Excreta metrics
+            # (IOD, area) routinely have very different variances/n between groups, exactly
+            # the regime where Student's t is anticonservative.
+            stat, p = self.stats.ttest_ind(group1, group2, equal_var=False)
+            test_name = "Welch's t-test"
         else:
-            if paired and len(group1) == len(group2):
-                stat, p = self.stats.wilcoxon(group1, group2)
-                test_name = 'Wilcoxon signed-rank'
-            else:
-                stat, p = self.stats.mannwhitneyu(group1, group2, alternative='two-sided')
-                test_name = 'Mann-Whitney U'
-        
-        # Effect size (Cohen's d)
-        pooled_std = np.sqrt((np.var(group1) + np.var(group2)) / 2)
+            stat, p = self.stats.mannwhitneyu(group1, group2, alternative='two-sided')
+            test_name = 'Mann-Whitney U'
+
+        # Effect size (Cohen's d) — df-weighted pooled SAMPLE SD (ddof=1). The len<3 guard
+        # above guarantees n1+n2-2 >= 4, so the divisor is safe.
+        n1, n2 = len(group1), len(group2)
+        s1, s2 = np.var(group1, ddof=1), np.var(group2, ddof=1)
+        pooled_std = np.sqrt(((n1 - 1) * s1 + (n2 - 1) * s2) / (n1 + n2 - 2))
         cohens_d = (np.mean(group1) - np.mean(group2)) / pooled_std if pooled_std > 0 else 0
         
         # Interpret effect size
@@ -250,12 +249,12 @@ class StatisticalAnalyzer:
         valid_groups = {}
         for name, data in zip(group_names, group_data):
             clean_data = data[~np.isnan(data)] if len(data) > 0 else np.array([])
-            if len(clean_data) >= 2:  # Need at least 2 samples per group
+            if len(clean_data) >= 3:  # significance needs >=3 per group (omnibus == pairwise set)
                 valid_groups[name] = clean_data
-        
+
         if len(valid_groups) < 2:
             return {
-                'error': 'Insufficient valid groups (need at least 2 groups with 2+ samples each)',
+                'error': 'Insufficient valid groups (need at least 2 groups with 3+ samples each)',
                 'n_groups': len(valid_groups),
                 'group_names': list(valid_groups.keys())
             }
@@ -416,8 +415,8 @@ class StatisticalAnalyzer:
         """
         if metrics is None:
             metrics = [
-                # Count & fraction
-                'rod_fraction', 'n_total', 'n_rod', 'n_normal',
+                # Count & fraction ('n_deposits' = Normal+ROD, artifact-exclusive count)
+                'rod_fraction', 'n_deposits', 'n_total', 'n_rod', 'n_normal',
                 # IOD (Integrated Optical Density)
                 'total_iod', 'normal_total_iod', 'rod_total_iod',
                 'normal_mean_iod', 'rod_mean_iod',
@@ -530,12 +529,12 @@ class StatisticalAnalyzer:
                 for g in groups
             }
             
-            # Filter groups with insufficient data
-            group_data = {k: v for k, v in group_data.items() if len(v) >= 2}
-            
+            # Keep only groups a significance test can use (>=3 samples)
+            group_data = {k: v for k, v in group_data.items() if len(v) >= 3}
+
             if len(group_data) < 2:
                 continue
-            
+
             try:
                 # Multi-group comparison
                 results['metrics'][metric] = self.compare_multiple_groups(
@@ -607,7 +606,7 @@ def generate_statistics_report(
         Dict with statistical results
     """
     if metrics is None:
-        metrics = ['rod_fraction', 'n_total', 'n_rod', 'n_normal',
+        metrics = ['rod_fraction', 'n_deposits', 'n_total', 'n_rod', 'n_normal',
                    'total_iod', 'normal_mean_area', 'rod_mean_area']
     
     analyzer = StatisticalAnalyzer()
@@ -629,12 +628,12 @@ def generate_statistics_report(
             for g in groups
         }
         
-        # Filter groups with insufficient data
-        group_data = {k: v for k, v in group_data.items() if len(v) >= 2}
-        
+        # Keep only groups a significance test can use (>=3 samples)
+        group_data = {k: v for k, v in group_data.items() if len(v) >= 3}
+
         if len(group_data) < 2:
             continue
-        
+
         try:
             if len(group_data) == 2:
                 names = list(group_data.keys())

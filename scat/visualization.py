@@ -799,8 +799,8 @@ class Visualizer:
             
             data1 = data[data[group_by] == group1][metric].dropna()
             data2 = data[data[group_by] == group2][metric].dropna()
-            
-            if len(data1) < 2 or len(data2) < 2:
+
+            if len(data1) < 3 or len(data2) < 3:   # match the stats' n>=3 significance gate
                 continue
             
             # Mann-Whitney U test (non-parametric)

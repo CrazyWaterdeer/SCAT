@@ -699,8 +699,9 @@ class ReportGenerator:
     def _generate_count_distribution(self, film_summary: pd.DataFrame) -> str:
         """Generate deposit count distribution histogram."""
         def draw(ax):
-            counts = film_summary['n_total'] if 'n_total' in film_summary.columns else \
-                     film_summary['n_normal'] + film_summary['n_rod']
+            # Artifact-exclusive deposit count (Normal+ROD), consistent with the rest of the report.
+            counts = (film_summary['n_normal'] + film_summary['n_rod']) \
+                if {'n_normal', 'n_rod'} <= set(film_summary.columns) else film_summary['n_total']
             self._hist_with_mean(ax, counts, bins=15, mean=counts.mean(), mean_label='Mean')
             ax.set_xlabel('Deposit Count per Image')
             ax.set_ylabel('Number of Images')
@@ -877,11 +878,18 @@ class ReportGenerator:
     ) -> Dict[str, str]:
         """Generate boxplots for all comparison metrics."""
         plots = {}
-        
+
+        # Artifact-EXCLUSIVE deposit count (Normal+ROD), derived in memory for the Deposit Count
+        # boxplot so it matches the rest of the report + Methods (never written to CSV).
+        if ({'n_normal', 'n_rod'} <= set(film_summary.columns)
+                and 'n_deposits' not in film_summary.columns):
+            film_summary = film_summary.copy()
+            film_summary['n_deposits'] = film_summary['n_normal'] + film_summary['n_rod']
+
         # Metrics to compare in order matching Summary section:
         # Count, Area, IOD, pH(Hue), ROD, Circularity
         comparison_metrics = [
-            ('n_total', 'Deposit Count', 1.0, False),
+            ('n_deposits', 'Deposit Count', 1.0, False),
             ('mean_area', 'Mean Deposit Area (px²)', 1.0, False),
             ('total_iod', 'Total IOD', 1.0, False),
             ('mean_hue', 'pH Indicator (Hue °)', 1.0, True),  # Use hue colors
@@ -1189,7 +1197,7 @@ class ReportGenerator:
             # Define metrics in order matching Summary section
             # Order: Count, Area, IOD, pH(Hue), ROD, Circularity
             group_metrics = [
-                ('group_n_total', 'n_total', 'Deposit Count', 'Number of deposits detected per image.'),
+                ('group_n_deposits', 'n_deposits', 'Deposit Count', 'Number of deposits (Normal + ROD) detected per image.'),
                 ('group_mean_area', 'mean_area', 'Deposit Size', 'Mean area of deposits in pixels².'),
                 ('group_total_iod', 'total_iod', 'Pigment Amount (IOD)', 'Total Integrated Optical Density per image.'),
                 ('group_mean_hue', 'mean_hue', 'pH Indicator (Hue)', 'pH indicator hue. Bar colors reflect actual pH-indicator colors.'),
@@ -1320,7 +1328,7 @@ class ReportGenerator:
 '''
             # Define metrics in order matching Summary/Group Comparison sections
             ordered_metrics = [
-                ('n_total', 'Total Deposit Count'),
+                ('n_deposits', 'Total Deposit Count'),
                 ('mean_area', 'Mean Deposit Area'),
                 ('total_iod', 'Total IOD'),
                 ('mean_hue', 'pH Indicator (Hue)'),
@@ -1609,9 +1617,10 @@ class ReportGenerator:
       measure.</p>
       <p><b>Statistics.</b> Group comparisons test <b>image-level</b> aggregates (the experimental unit
       is the image, not the deposit — avoiding pseudoreplication). The omnibus test is chosen by
-      normality and group count (one-way ANOVA or Kruskal-Wallis for three or more groups; an
-      independent t-test or Mann-Whitney U for two), with Holm-corrected pairwise comparisons when
-      there are more than two groups; effect sizes are reported alongside.</p>
+      normality and group count (one-way ANOVA or Kruskal-Wallis for three or more groups;
+      Welch's t-test or Mann-Whitney U for two), with Holm-corrected pairwise comparisons when
+      there are more than two groups; groups need at least three images to enter a test.
+      Effect sizes (Cohen's <i>d</i>, pooled sample SD) are reported alongside.</p>
     </div>
 '''
 

@@ -133,9 +133,10 @@ def test_domain_analyzer_wrappers_delegate():
     import pandas as pd
     from scat.statistics import (PigmentationAnalyzer, SizeDistributionAnalyzer,
                                   DensityAnalyzer, MorphologyAnalyzer)
-    df = pd.DataFrame({"group": ["A", "A", "B", "B"], "total_iod": [1., 2, 3, 4],
-                       "normal_mean_area": [10., 11, 20, 21], "n_total": [5, 6, 7, 8],
-                       "normal_mean_circularity": [0.8, 0.82, 0.6, 0.62]})
+    # n>=3 per group so the significance test participates (2.0 raised the gate from n>=2)
+    df = pd.DataFrame({"group": ["A", "A", "A", "B", "B", "B"], "total_iod": [1., 2, 3, 4, 5, 6],
+                       "normal_mean_area": [10., 11, 12, 20, 21, 22], "n_total": [5, 6, 7, 8, 9, 10],
+                       "normal_mean_circularity": [0.8, 0.82, 0.79, 0.6, 0.62, 0.61]})
     assert PigmentationAnalyzer().compare_pigmentation_between_groups(df, "group")["n_groups"] == 2
     assert SizeDistributionAnalyzer().compare_size_between_groups(df, "group")["n_groups"] == 2
     assert DensityAnalyzer().compare_density_between_groups(df, "group")["n_groups"] == 2

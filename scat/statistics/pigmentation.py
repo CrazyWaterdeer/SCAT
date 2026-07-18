@@ -114,15 +114,18 @@ class PigmentationAnalyzer:
             'total_iod_cv': coefficient_of_variation(total_iod)
         }
         
-        # Per-fly normalization if n_flies available
+        # Per-fly normalization if n_flies available. Mask the FULL iod column jointly with
+        # n_flies (the earlier dropna() shortened total_iod, so masking it with the full-length
+        # n_flies>0 mask raised IndexError whenever total_iod contained any NaN).
         if n_flies_column and n_flies_column in film_summary.columns:
+            iod_full = film_summary['total_iod'].values
             n_flies = film_summary[n_flies_column].values
-            valid_mask = n_flies > 0
-            iod_per_fly = total_iod[valid_mask] / n_flies[valid_mask]
-            
-            result['mean_iod_per_fly'] = float(np.mean(iod_per_fly))
-            result['std_iod_per_fly'] = float(np.std(iod_per_fly))
-            result['iod_per_fly_cv'] = coefficient_of_variation(iod_per_fly)
+            valid_mask = (n_flies > 0) & pd.notna(iod_full)
+            if valid_mask.any():
+                iod_per_fly = iod_full[valid_mask] / n_flies[valid_mask]
+                result['mean_iod_per_fly'] = float(np.mean(iod_per_fly))
+                result['std_iod_per_fly'] = float(np.std(iod_per_fly))
+                result['iod_per_fly_cv'] = coefficient_of_variation(iod_per_fly)
         
         # Normal vs ROD IOD if available
         for col in ['normal_total_iod', 'rod_total_iod', 'normal_mean_iod', 'rod_mean_iod']:

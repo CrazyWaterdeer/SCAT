@@ -38,9 +38,17 @@ def run_comprehensive_analysis(
         Dict with all analysis results organized by category
     """
     if include_analyses is None:
-        include_analyses = ['basic', 'ph', 'pigmentation', 'size', 'density', 
+        include_analyses = ['basic', 'ph', 'pigmentation', 'size', 'density',
                            'correlation', 'morphology']
-    
+
+    # Derive an artifact-EXCLUSIVE per-image deposit count (Normal+ROD) IN MEMORY so the
+    # "Deposit Count" group comparison matches the rest of the report (Summary card, per-group
+    # table, Methods all exclude artifacts). Never written to CSV → pipeline parity untouched.
+    if ('n_normal' in film_summary.columns and 'n_rod' in film_summary.columns
+            and 'n_deposits' not in film_summary.columns):
+        film_summary = film_summary.copy()
+        film_summary['n_deposits'] = film_summary['n_normal'] + film_summary['n_rod']
+
     results = {
         'metadata': {
             'n_films': len(film_summary),
