@@ -23,7 +23,7 @@ except ImportError:
 # Import color constants from visualization for consistency
 from .visualization import (
     DEFAULT_GRAY, PASTEL_PALETTE,
-    apply_publication_style, hue_to_rgb, order_groups
+    apply_publication_style, hue_to_rgb, order_groups, set_group_xticklabels
 )
 from . import __version__
 
@@ -836,8 +836,8 @@ class ReportGenerator:
         # Set tick labels separately (the boxplot 'labels' kwarg was renamed to
         # 'tick_labels' in matplotlib 3.9; this form works across versions).
         bp = ax.boxplot(data, patch_artist=True)
-        ax.set_xticks(range(1, len(groups) + 1))
-        ax.set_xticklabels([str(g) for g in groups])
+        # Clean the printed labels (drop any agent-added "(…)" note) + rotate when long/many.
+        set_group_xticklabels(ax, groups, positions=range(1, len(groups) + 1))
         
         # Color boxes
         if use_hue_colors or 'hue' in metric.lower():

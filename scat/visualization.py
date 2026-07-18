@@ -282,6 +282,28 @@ def order_groups(values, control_group: str = None) -> List[str]:
     return ([lead] if lead else []) + controls + _ordered_within(rest)
 
 
+def _display_label(name) -> str:
+    """A clean axis/legend label: drop a trailing parenthetical note the agent may append to a group
+    for its OWN recognition (e.g. '21_+trpA1 (driverless ctrl)' -> '21_+trpA1'). The full label is
+    still used for grouping/ordering/detection; only what a graph prints is trimmed."""
+    cleaned = re.sub(r'\s*\([^)]*\)\s*$', '', str(name)).strip()
+    return cleaned or str(name)
+
+
+def set_group_xticklabels(ax, groups, positions=None) -> None:
+    """Label the x-axis with group names, cleaned for display (_display_label) and ROTATED ~30 deg
+    when the labels are many or long, so long condition names don't overflow / overlap horizontally."""
+    labels = [_display_label(g) for g in groups]
+    if positions is not None:
+        ax.set_xticks(list(positions))
+    longest = max((len(s) for s in labels), default=0)
+    crowded = len(labels) >= 6 or longest >= 12 or sum(len(s) for s in labels) >= 42
+    if crowded:
+        ax.set_xticklabels(labels, rotation=30, ha='right')
+    else:
+        ax.set_xticklabels(labels, rotation=0, ha='center')
+
+
 def draw_condition_matrix(ax, x_positions, matrix, groups, color: str = None) -> int:
     """Draw an open/closed-circle CONDITION MATRIX beneath a categorical plot's x-axis — the
     molecular-biology design table (as in Western-blot lane annotations). One row per experimental
@@ -706,8 +728,7 @@ class Visualizer:
                 ax.scatter(i + rng.uniform(-0.13, 0.13, len(vals)), vals, s=34, color='#333333',
                            alpha=0.6, edgecolors='white', linewidth=0.5, zorder=3)
 
-        ax.set_xticks(x)
-        ax.set_xticklabels([str(g) for g in groups])
+        set_group_xticklabels(ax, groups, positions=x)
         ax.set_xlim(-0.6, len(groups) - 0.4)
         metric_label = get_feature_label(metric)
         ax.set_title(title or f'{metric_label} by {group_by.replace("_", " ").title()}', fontweight='bold')
@@ -998,9 +1019,8 @@ class Visualizer:
                 c='#333333', alpha=0.5, s=45, zorder=1, edgecolors='white', linewidth=0.5
             )
         
-        ax.set_xticks(x_pos)
-        ax.set_xticklabels(unique_groups)
-        
+        set_group_xticklabels(ax, unique_groups, positions=x_pos)
+
         metric_label = get_feature_label(metric)
         ax.set_title(title or f'{metric_label} by {group_by.replace("_", " ").title()}')
         ax.set_ylabel(ylabel or f'{metric_label} (Mean ± {int(confidence*100)}% CI)')
