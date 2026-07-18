@@ -1,9 +1,6 @@
 """The result window (ResultsTab) — the "Verdict + Worklist" triage surface — plus the
 _results_dict_from_output helper that builds its data dict from an analysis output dir."""
-import os
-import sys
 import json
-import subprocess
 from pathlib import Path
 import pandas as pd
 import cv2
@@ -515,13 +512,11 @@ class ResultsTab(QWidget):
     def _open_folder(self):
         if self.results and 'output_dir' in self.results:
             path = self.results['output_dir']
-            # Cross-platform folder opening
-            if sys.platform == 'win32':
-                os.startfile(path)
-            elif sys.platform == 'darwin':  # macOS
-                subprocess.run(['open', path])
-            else:  # Linux
-                subprocess.run(['xdg-open', path])
+            from ..pathutils import open_in_os
+            if not open_in_os(path):
+                QMessageBox.information(
+                    self, "Open folder",
+                    f"Couldn't open the folder automatically. It is at:\n\n{path}")
     
     def _find_original_image(self, filename):
         """Locate an original image. Prefers an EXACT basename match among the paths captured
@@ -650,8 +645,11 @@ class ResultsTab(QWidget):
         if self.results and 'output_dir' in self.results:
             report_path = Path(self.results['output_dir']) / 'report.html'
             if report_path.exists():
-                import webbrowser
-                webbrowser.open(str(report_path))
+                from ..pathutils import open_in_os
+                if not open_in_os(report_path):
+                    QMessageBox.information(
+                        self, "Open report",
+                        f"Couldn't open the report automatically. Open it manually:\n\n{report_path}")
     
     def _load_previous_results(self):
         """Load results from a previous analysis session."""

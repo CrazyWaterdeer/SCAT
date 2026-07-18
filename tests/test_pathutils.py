@@ -41,3 +41,36 @@ def test_idempotent_and_edge_inputs():
     assert normalize_path(once, **WSL) == once                # idempotent
     assert normalize_path("") == ""
     assert normalize_path(None) is None
+
+
+# --- open_in_os: cross-platform, WSL-aware file/folder opening ---
+def test_open_in_os_wsl_hands_off_to_windows_explorer(monkeypatch):
+    import subprocess
+    import scat.pathutils as P
+    monkeypatch.setattr(P, "_is_wsl", lambda: True)
+    monkeypatch.setattr(subprocess, "run",
+                        lambda *a, **k: type("R", (), {"stdout": "C:\\x\\report.html"})())
+    launched = []
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **k: launched.append(cmd))
+    assert P.open_in_os("/mnt/c/x/report.html") is True
+    assert launched[0] == ["explorer.exe", "C:\\x\\report.html"]   # not xdg-open
+
+
+def test_open_in_os_plain_linux_uses_xdg_open(monkeypatch):
+    import subprocess
+    import scat.pathutils as P
+    monkeypatch.setattr(P, "_is_wsl", lambda: False)
+    launched = []
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **k: launched.append(cmd))
+    assert P.open_in_os("/home/x/out") is True
+    assert launched[0][0] == "xdg-open"
+
+
+def test_open_in_os_returns_false_when_no_opener(monkeypatch):
+    import subprocess
+    import scat.pathutils as P
+    monkeypatch.setattr(P, "_is_wsl", lambda: False)
+    def _boom(cmd, **k):
+        raise FileNotFoundError()
+    monkeypatch.setattr(subprocess, "Popen", _boom)
+    assert P.open_in_os("/x") is False   # never raises; reports failure so the caller can show the path
