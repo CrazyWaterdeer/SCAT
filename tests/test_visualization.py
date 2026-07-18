@@ -74,13 +74,17 @@ def test_order_groups_logical_not_alphabetical():
 
 def test_order_groups_controls_before_treated():
     from scat.visualization import order_groups
-    # the reported case: controls (driver < effector < untreated) lead, the treated group is last —
-    # NOT alphabetical, which would slot 'treated' before 'untreated'
-    assert order_groups(["treated", "untreated control", "effector control", "driver control"]) == \
-        ["driver control", "effector control", "untreated control", "treated"]
-    # several controls all lead; the treated/experimental group comes last
+    # ALL controls lead, in the order they were DEFINED (not alphabetical, not a hard-coded genetics
+    # order), and the treated/experimental group is last (alphabetical would put 'treated' first here)
+    assert order_groups(["treated", "effector control", "driver control", "untreated"]) == \
+        ["effector control", "driver control", "untreated", "treated"]
+    # several controls all lead; the treated group comes last
     r = order_groups(["treated", "untreated", "control"])
     assert r[-1] == "treated" and set(r[:2]) == {"untreated", "control"}
+    # arbitrary categorical conditions (genotypes/drugs, no level word or number) keep DEFINED order
+    assert order_groups(["mutantB", "control", "mutantA"]) == ["control", "mutantB", "mutantA"]
+    # quantitative conditions (temperature, dose, time) still auto-sort by value
+    assert order_groups(["29C", "18C", "25C"]) == ["18C", "25C", "29C"]
 
 
 def test_is_control_detection_is_safe():
