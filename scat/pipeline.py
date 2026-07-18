@@ -29,10 +29,15 @@ def list_images(path: str) -> list[Path]:
 
 
 def resolve_model_type(model_type: Optional[str], model_path: Optional[str]) -> tuple[str, Optional[str]]:
-    """Canonical default: rf if a model file is available, else threshold."""
-    if model_type:
-        return model_type, model_path
+    """Canonical default: rf if a model file is available, else threshold. RF chosen without a path
+    (e.g. GUI Method=Random Forest with the model-file field blank, or `scat analyze --model-type rf`)
+    falls back to the bundled models/model_rf.pkl — otherwise the classifier fails to load and every
+    image reports 0 deposits."""
     default_model = Path(__file__).parent.parent / "models" / "model_rf.pkl"
+    if model_type:
+        if model_type == "rf" and not model_path and default_model.exists():
+            return "rf", str(default_model)
+        return model_type, model_path
     if model_path:
         return "rf", model_path
     if default_model.exists():

@@ -44,6 +44,30 @@ def test_rf_pipeline_writes_reports(synth_dir, tmp_path):
     assert list((tmp_path / "deposits").glob("*.labels.json"))
 
 
+def test_resolve_model_type_rf_without_path_uses_bundled_model():
+    """Bug: selecting RF (GUI Method picker) but leaving the model-file field blank returned
+    ('rf', None), so the classifier never loaded and every image reported 0 deposits. RF with no
+    path must fall back to the bundled models/model_rf.pkl."""
+    from scat.pipeline import resolve_model_type
+    mt, mp = resolve_model_type("rf", None)
+    assert mt == "rf" and mp and mp.endswith("model_rf.pkl") and Path(mp).exists()
+    # other cases unchanged
+    assert resolve_model_type("rf", "custom.pkl") == ("rf", "custom.pkl")
+    assert resolve_model_type("cnn", None) == ("cnn", None)
+    assert resolve_model_type("threshold", None) == ("threshold", None)
+    assert resolve_model_type(None, None)[0] == "rf"
+
+
+def test_rf_blank_path_still_classifies(synth_dir, tmp_path):
+    """End-to-end regression for 'RF selected -> no results': analyze with model_type='rf' and no
+    model_path must classify deposits, not return an all-zero (empty) summary."""
+    from scat.pipeline import analyze_folder_service
+    res = analyze_folder_service(str(synth_dir), model_type="rf", model_path=None,
+                                 output_dir=str(tmp_path / "out"), annotate=False)
+    film = pd.read_csv(Path(res.output_dir) / "image_summary.csv")
+    assert film["n_total"].sum() > 0
+
+
 def test_parallel_matches_sequential(synth_dir):
     """Guards the analyze_batch thread-safety fix: concurrent per-image
     extraction must yield the same per-file counts as sequential."""
