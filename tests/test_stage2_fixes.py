@@ -32,6 +32,16 @@ def test_rgba_input_does_not_crash(tmp_path):
     assert res.failed is False
 
 
+def test_to_rgb_composites_alpha_over_white():
+    """Codex P2: transparent pixels must composite over WHITE (paper), not expose hidden black
+    RGB that adaptive thresholding would read as dark foreground / draw invisible annotations."""
+    from scat.analyzer import to_rgb
+    img = Image.new("RGBA", (16, 16), (0, 0, 0, 0))   # fully transparent, hidden black RGB
+    arr = np.asarray(to_rgb(img))
+    assert arr.shape == (16, 16, 3)
+    assert (arr == 255).all()                          # → white, not black
+
+
 def test_clean_image_is_not_a_failure(tmp_path):
     """[26] A blank (0-deposit) image is analyzed fine and must NOT be tagged failed;
     only the parallel placeholder (a real failure) carries failed=True."""

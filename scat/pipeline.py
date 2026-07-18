@@ -182,7 +182,8 @@ def analyze_folder_service(path: str, groups: Optional[dict] = None, model_type:
             # completed run (annotate is default-ON in the GUI). Return an error string instead.
             img_path, res = item
             try:
-                arr = np.array(Image.open(img_path))
+                from .analyzer import to_rgb
+                arr = np.array(to_rgb(Image.open(img_path)))   # composite alpha → visible annotations
                 annotated = analyzer.generate_annotated_image(
                     arr, res.deposits, show_labels=True, skip_artifacts=True)
                 Image.fromarray(annotated).save(ann_dir / f"{img_path.stem}_annotated.png")

@@ -85,6 +85,7 @@ def _register_fonts() -> None:
 FEATURE_LABELS = {
     # Counts
     'n_total': 'Total Deposit Count',
+    'n_deposits': 'Deposit Count',            # Normal + ROD (artifact-exclusive)
     'n_normal': 'Normal Deposit Count',
     'n_rod': 'ROD Deposit Count',
     'n_artifact': 'Artifact Count',
@@ -1195,7 +1196,14 @@ class Visualizer:
         """
         if not HAS_MATPLOTLIB or not HAS_SEABORN:
             return None
-        
+
+        # Deposit count = Normal + ROD (artifact-exclusive), matching the report/stats.
+        if ({'n_normal', 'n_rod'} <= set(film_summary.columns)
+                and 'n_deposits' not in film_summary.columns):
+            film_summary = film_summary.copy()
+            film_summary['n_deposits'] = film_summary['n_normal'] + film_summary['n_rod']
+        count_col = 'n_deposits' if 'n_deposits' in film_summary.columns else 'n_total'
+
         # Get unique groups and calculate optimal width
         if group_by and group_by in film_summary.columns:
             unique_groups = order_groups(film_summary[group_by].dropna().unique())
@@ -1238,14 +1246,14 @@ class Visualizer:
         ax = axes[0, 1]
         if group_by and group_by in film_summary.columns:
             _sns.barplot(
-                data=film_summary, x=group_by, y='n_total',
+                data=film_summary, x=group_by, y=count_col,
                 hue=group_by, order=unique_groups, hue_order=unique_groups,
-                ax=ax, palette=palette, 
+                ax=ax, palette=palette,
                 errorbar='sd', width=box_width, edgecolor='black', linewidth=0.5, legend=False
             )
         else:
-            _sns.histplot(film_summary['n_total'], ax=ax, kde=True, color=DEFAULT_GRAY)
-        ax.set_title('Total Deposits per Image', fontweight='bold')
+            _sns.histplot(film_summary[count_col], ax=ax, kde=True, color=DEFAULT_GRAY)
+        ax.set_title('Deposits per Image', fontweight='bold')
         ax.set_ylabel('Count')
         ax.set_xlabel('')
         apply_publication_style(ax)
@@ -1336,7 +1344,15 @@ def generate_all_visualizations(
     """
     viz = Visualizer(output_dir)
     results = {}
-    
+
+    # Artifact-exclusive deposit count (Normal+ROD) in memory so the standalone plots agree with
+    # the report/stats (which use n_deposits). Never written to disk.
+    if ({'n_normal', 'n_rod'} <= set(film_summary.columns)
+            and 'n_deposits' not in film_summary.columns):
+        film_summary = film_summary.copy()
+        film_summary['n_deposits'] = film_summary['n_normal'] + film_summary['n_rod']
+    _count_metric = 'n_deposits' if 'n_deposits' in film_summary.columns else 'n_total'
+
     # Dashboard
     path = viz.summary_dashboard(film_summary, group_by, control_group)
     if path:
@@ -1353,8 +1369,8 @@ def generate_all_visualizations(
         results['heatmap'] = path
     
     # Violin plots for key metrics
-    # Primary metrics (always generated)
-    primary_metrics = ['rod_fraction', 'total_iod', 'n_total']
+    # Primary metrics (always generated); deposit count is artifact-exclusive (Normal+ROD).
+    primary_metrics = ['rod_fraction', 'total_iod', _count_metric]
     # Secondary metrics (morphology, pH, pigment - important for biological interpretation)
     secondary_metrics = [
         'normal_mean_area', 'rod_mean_area',      # Size/morphology

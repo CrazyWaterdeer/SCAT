@@ -18,6 +18,19 @@ from .features import FeatureExtractor
 from .classifier import get_classifier, ClassifierConfig
 
 
+def to_rgb(img: Image.Image) -> Image.Image:
+    """A PIL image as 3-channel RGB, compositing any alpha over WHITE first. Excreta scans are
+    light paper, so transparent padding must become white — a plain ``convert('RGB')`` would drop
+    alpha and expose the hidden (usually black) RGB, which adaptive thresholding then reads as dark
+    foreground (false deposits) and which leaves OpenCV-drawn annotations invisible. A no-op
+    (identical pixels) for opaque 8-bit RGB, so pipeline CSV parity is preserved."""
+    if img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info):
+        img = img.convert('RGBA')
+        bg = Image.new('RGBA', img.size, (255, 255, 255, 255))
+        img = Image.alpha_composite(bg, img)
+    return img.convert('RGB')
+
+
 class AnalysisResult:
     """Container for analysis results of a single image."""
     
@@ -151,9 +164,9 @@ class Analyzer:
         image_path = Path(image_path)
         img = Image.open(image_path)
         dpi = img.info.get('dpi', (self.dpi, self.dpi))[0]
-        # Normalize to 3-channel RGB so grayscale/palette/RGBA/CMYK inputs don't crash
-        # detection/feature extraction. A no-op (identical pixels) for existing 8-bit RGB.
-        image = np.array(img.convert('RGB'))
+        # Normalize to 3-channel RGB (compositing alpha over white) so grayscale/palette/RGBA/CMYK
+        # inputs don't crash detection/feature extraction or misread transparency as deposits.
+        image = np.array(to_rgb(img))
         # Use a local extractor (not self.extractor): analyze_batch runs this
         # method concurrently in a thread pool, so a shared instance attribute
         # would let one image's DPI clobber another's mid-extraction.
