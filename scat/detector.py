@@ -319,11 +319,3 @@ class DepositDetector:
             deposits.append(deposit)
         
         return deposits
-    
-    def get_binary_mask(self, image: np.ndarray) -> np.ndarray:
-        """Return binary mask of detected regions."""
-        if len(image.shape) == 3:
-            gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-        else:
-            gray = image.copy()
-        return self._binary_threshold(gray)

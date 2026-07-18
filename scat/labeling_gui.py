@@ -1458,24 +1458,6 @@ class LabelingWindow(QMainWindow):
         self.viewer.selected_item.set_selected(True)
         self.viewer.centerOn(self.viewer.selected_item)
         self.deposit_table.selectRow(next_idx)
-    
-    def _select_prev(self):
-        if not self.viewer.deposit_items:
-            return
-        current_idx = 0
-        if self.viewer.selected_item:
-            try:
-                current_idx = self.viewer.deposit_items.index(self.viewer.selected_item)
-            except ValueError:
-                pass
-        prev_idx = (current_idx - 1) % len(self.viewer.deposit_items)
-        if self.viewer.selected_item:
-            self.viewer.selected_item.set_selected(False)
-        self.viewer.selected_item = self.viewer.deposit_items[prev_idx]
-        self.viewer.selected_item.set_selected(True)
-        self.viewer.centerOn(self.viewer.selected_item)
-        self.deposit_table.selectRow(prev_idx)
-    
     def _on_table_select(self):
         rows = self.deposit_table.selectionModel().selectedRows()
         if rows:

@@ -166,19 +166,6 @@ class CNNClassifier:
             deposit.confidence = float(prob[pred])
         
         return deposits
-    
-    @staticmethod
-    def create_model(num_classes: int = 3):
-        import torch.nn as nn
-        from torchvision import models
-        
-        model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
-        for param in list(model.parameters())[:-10]:
-            param.requires_grad = False
-        model.fc = nn.Sequential(nn.Dropout(0.3), nn.Linear(model.fc.in_features, num_classes))
-        return model
-
-
 def get_classifier(config: ClassifierConfig):
     if config.model_type == "threshold":
         return ThresholdClassifier(config.circularity_threshold)

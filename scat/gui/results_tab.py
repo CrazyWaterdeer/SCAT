@@ -622,7 +622,6 @@ class ResultsTab(QWidget):
 
             # Update results and refresh display (Results tab wants the flat metrics mapping)
             self.results['film_summary'] = image_summary  # Keep key for compatibility
-            self.results['comprehensive_stats'] = stats
             self.results['deposit_data'] = deposit_data
             self.results['viz_results'] = viz_results
             self.results['stats_results'] = (

@@ -3,7 +3,6 @@ Common UI components shared between main_gui and labeling_gui.
 Consolidates Theme, custom widgets, and utility functions.
 """
 
-import sys
 from pathlib import Path
 
 from PySide6.QtWidgets import (
@@ -386,15 +385,6 @@ class CollapsibleSection(QWidget):
 # =============================================================================
 # Utility Functions
 # =============================================================================
-def get_resource_path(relative_path: str) -> Path:
-    """Get absolute path to a bundled resource under scat/resources/.
-
-    Args:
-        relative_path: Path relative to scat/resources/ (e.g., 'fonts/NotoSans-Regular.ttf')
-    """
-    return Path(__file__).parent / 'resources' / relative_path
-
-
 _icon_cache = {}
 
 

@@ -546,8 +546,6 @@ class ReportGenerator:
         deposit_data: pd.DataFrame = None,
         spatial_stats: Dict = None,
         statistical_results: Dict = None,
-        visualization_paths: Dict[str, str] = None,
-        metadata: pd.DataFrame = None,
         group_by: str = None,
         title: str = "SCAT Analysis Report",
         analysis: dict = None
@@ -589,7 +587,6 @@ class ReportGenerator:
             deposit_data=deposit_data,
             spatial_stats=spatial_stats,
             statistical_results=statistical_results,
-            visualization_paths=visualization_paths,
             inline_plots=inline_plots,
             group_by=group_by,
             analysis=analysis
@@ -929,7 +926,6 @@ class ReportGenerator:
         deposit_data: pd.DataFrame,
         spatial_stats: Dict,
         statistical_results: Dict,
-        visualization_paths: Dict,
         inline_plots: Dict,
         group_by: str,
         analysis: dict = None
@@ -1658,7 +1654,6 @@ def generate_report(
     deposit_data: pd.DataFrame = None,
     spatial_stats: Dict = None,
     statistical_results: Dict = None,
-    visualization_paths: Dict = None,
     group_by: str = None,
     format: str = 'html',
     analysis: dict = None
@@ -1682,7 +1677,6 @@ def generate_report(
             deposit_data=deposit_data,
             spatial_stats=spatial_stats,
             statistical_results=statistical_results,
-            visualization_paths=visualization_paths,
             group_by=group_by,
             analysis=analysis
         )
@@ -1692,7 +1686,6 @@ def generate_report(
             deposit_data=deposit_data,
             spatial_stats=spatial_stats,
             statistical_results=statistical_results,
-            visualization_paths=visualization_paths,
             group_by=group_by,
             analysis=analysis
         )

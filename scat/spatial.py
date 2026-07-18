@@ -316,29 +316,6 @@ class SpatialAnalyzer:
             density_map=np.zeros((50, 50)),
             image_width=width, image_height=height
         )
-    
-    def get_summary_dict(self, result: SpatialResult) -> Dict:
-        """Convert SpatialResult to dictionary for reporting."""
-        return {
-            'nnd_mean': result.nnd_mean,
-            'nnd_std': result.nnd_std,
-            'nnd_min': result.nnd_min,
-            'nnd_max': result.nnd_max,
-            'clark_evans_r': result.clark_evans_r,
-            'clustering': result.clustering_interpretation,
-            'quadrant_Q1': result.quadrant_counts['Q1'],
-            'quadrant_Q2': result.quadrant_counts['Q2'],
-            'quadrant_Q3': result.quadrant_counts['Q3'],
-            'quadrant_Q4': result.quadrant_counts['Q4'],
-            'quadrant_chi2': result.quadrant_chi2,
-            'quadrant_p_value': result.quadrant_p_value,
-            'quadrant_uniform': result.quadrant_uniform,
-            'edge_count': result.edge_count,
-            'center_count': result.center_count,
-            'edge_fraction': result.edge_fraction
-        }
-
-
 def aggregate_spatial_stats(spatial_results: List[SpatialResult]) -> Dict:
     """
     Aggregate spatial statistics across multiple images.

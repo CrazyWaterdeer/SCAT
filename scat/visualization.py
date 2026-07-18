@@ -57,11 +57,6 @@ DEPOSIT_COLORS = {
     'unknown': '#DDA43A'
 }
 
-# Bromophenol-Blue pH axis (acidic -> basic), voiced in the Imajin palette's hues
-PH_ACIDIC = '#DDA43A'    # gold  (low pH / yellow end)
-PH_MID = '#1F9E77'       # teal green (transition)
-PH_BASIC = '#2F6B9E'     # steel blue (high pH / blue end)
-
 _fonts_registered = False
 
 
@@ -866,56 +861,6 @@ class Visualizer:
         if annotations:
             new_ylim = y_max + y_offset * (len(annotations) + 1)
             ax.set_ylim(top=new_ylim)
-    
-    def box_comparison(
-        self,
-        film_summary: pd.DataFrame,
-        metrics: List[str],
-        group_by: str,
-        title: str = "Metrics Comparison",
-        filename: str = "box_comparison.png"
-    ) -> Optional[str]:
-        """
-        Generate grouped box plots for multiple metrics.
-        """
-        if not HAS_MATPLOTLIB or not HAS_SEABORN:
-            return None
-        
-        metrics = [m for m in metrics if m in film_summary.columns]
-        if not metrics:
-            return None
-        
-        # Rename metrics for display
-        rename_map = {m: get_feature_label(m) for m in metrics}
-        plot_df = film_summary[[group_by] + metrics].copy()
-        plot_df = plot_df.rename(columns=rename_map)
-        
-        # Melt data for grouped plotting
-        df_melted = plot_df.melt(
-            id_vars=[group_by],
-            value_vars=[rename_map[m] for m in metrics],
-            var_name='Metric',
-            value_name='Value'
-        )
-        
-        fig, ax = _plt.subplots(figsize=(12, 6))
-        
-        _sns.boxplot(
-            data=df_melted, x='Metric', y='Value', hue=group_by,
-            ax=ax, palette='Set2'
-        )
-        
-        ax.set_title(title)
-        ax.set_ylabel('Value')
-        _plt.xticks(rotation=45, ha='right')
-        
-        _plt.tight_layout()
-        filepath = self.output_dir / filename
-        _plt.savefig(filepath)
-        _plt.close()
-        
-        return str(filepath)
-    
     def mean_ci_plot(
         self,
         film_summary: pd.DataFrame,
@@ -1572,52 +1517,6 @@ class SpatialVisualizer:
         _plt.close()
         
         return str(filepath)
-    
-    def spatial_scatter(
-        self,
-        centroids: np.ndarray,
-        labels: List[str] = None,
-        image_shape: Tuple[int, int] = None,
-        title: str = "Deposit Spatial Distribution",
-        filename: str = "spatial_scatter.png"
-    ) -> Optional[str]:
-        """Generate scatter plot of deposit locations."""
-        if not HAS_MATPLOTLIB or len(centroids) == 0:
-            return None
-        
-        fig, ax = _plt.subplots(figsize=(10, 10))
-        
-        if labels is not None:
-            colors = {'normal': 'green', 'rod': 'red', 'artifact': 'gray', 'unknown': 'yellow'}
-            for label in set(labels):
-                mask = np.array(labels) == label
-                if mask.any():
-                    ax.scatter(
-                        centroids[mask, 0], centroids[mask, 1],
-                        c=colors.get(label, 'blue'),
-                        label=label.capitalize(),
-                        alpha=0.6, s=50
-                    )
-            ax.legend()
-        else:
-            ax.scatter(centroids[:, 0], centroids[:, 1], alpha=0.6, s=50)
-        
-        if image_shape:
-            ax.set_xlim(0, image_shape[1])
-            ax.set_ylim(image_shape[0], 0)  # Invert Y for image coordinates
-        
-        ax.set_xlabel('X (pixels)')
-        ax.set_ylabel('Y (pixels)')
-        ax.set_title(title)
-        ax.set_aspect('equal')
-        
-        _plt.tight_layout()
-        filepath = self.output_dir / filename
-        _plt.savefig(filepath)
-        _plt.close()
-        
-        return str(filepath)
-    
     def clark_evans_summary(
         self,
         r_values: List[float],
