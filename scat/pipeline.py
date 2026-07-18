@@ -19,7 +19,8 @@ IMAGE_GLOBS = ("*.tif", "*.tiff", "*.png", "*.jpg", "*.jpeg")
 
 
 def list_images(path: str) -> list[Path]:
-    p = Path(path)
+    from .pathutils import normalize_path
+    p = Path(normalize_path(path))
     if p.is_file():
         return [p]
     imgs: list[Path] = []
@@ -104,7 +105,15 @@ def analyze_folder_service(path: str, groups: Optional[dict] = None, model_type:
     None, rglob the folder as before. progress_callback(current, total) drives the GUI bar.
     """
     from .grouping_util import build_group_metadata, duplicate_basenames
+    from .pathutils import normalize_path
+    # Accept Windows or WSL path forms interchangeably (SCAT may run in either environment while the
+    # images live in the other) — translate everything to what this OS can actually open.
+    path = normalize_path(path)
+    model_path = normalize_path(model_path) if model_path else model_path
+    unet_model_path = normalize_path(unet_model_path) if unet_model_path else unet_model_path
+    output_dir = normalize_path(output_dir) if output_dir else output_dir
     if image_paths is not None:
+        image_paths = [normalize_path(p) for p in image_paths]
         # Resolve entries that were passed as bare basenames / folder-relative (e.g. an agent
         # forwarding scan_folder's pending list): try them relative to `path` before giving up, so a
         # resume doesn't fail just because the process cwd differs from the dataset folder.
@@ -324,6 +333,9 @@ def cluster_folder_service(path: str, output_dir: Optional[str] = None, method: 
     cluster_id), the authoritative cluster_assignments.csv, representative thumbnails, a
     cluster_report.html, and a cluster_labels.csv template. Works from in-memory results so it
     keeps ALL deposits (including RF-called 'artifact')."""
+    from .pathutils import normalize_path
+    path = normalize_path(path)
+    output_dir = normalize_path(output_dir) if output_dir else output_dir
     import cv2
     from . import clustering as C
     from .features import FeatureExtractor

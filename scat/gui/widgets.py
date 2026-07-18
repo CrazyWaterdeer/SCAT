@@ -293,10 +293,12 @@ class DropZone(QWidget):
                 QMessageBox.information(self, "No images", "No supported images found in that folder.")
 
     def _collect(self, paths) -> list:
-        """Expand a mix of files and folders into a sorted, de-duplicated list of image paths."""
+        """Expand a mix of files and folders into a sorted, de-duplicated list of image paths.
+        Paths may arrive in Windows or WSL form (drops/pastes from either side) — normalize each."""
+        from ..pathutils import normalize_path
         out = []
         for pth in paths:
-            p = Path(pth)
+            p = Path(normalize_path(pth))
             if p.is_dir():
                 for f in p.rglob("*"):
                     if f.is_file() and f.suffix.lower() in self.IMAGE_EXTS:

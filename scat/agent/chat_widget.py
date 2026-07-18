@@ -297,6 +297,30 @@ class _SystemLine(QFrame):
         return self._plain
 
 
+class _ErrorBlock(QFrame):
+    """A left-aligned error card shown inline in the conversation (like Claude's error messages),
+    for failures around a turn — no backend connected, cancelled, etc."""
+
+    def __init__(self, message: str, parent=None):
+        super().__init__(parent)
+        self.setObjectName("errorBlock")
+        self._plain = message
+        h = QHBoxLayout(self)
+        h.setContentsMargins(12, 10, 12, 10)
+        h.setSpacing(8)
+        glyph = QLabel("⚠")            # ⚠
+        glyph.setObjectName("errorIcon")
+        h.addWidget(glyph, 0, Qt.AlignTop)
+        text = QLabel(message)
+        text.setObjectName("errorText")
+        text.setWordWrap(True)
+        text.setTextFormat(Qt.PlainText)
+        h.addWidget(text, 1)
+
+    def plain_text(self) -> str:
+        return self._plain
+
+
 class _AssistantBlock(QFrame):
     """One assistant turn: a spark avatar beside a column that interleaves markdown text runs and
     tool-call pills in arrival order, with a typing indicator until the first content lands."""
@@ -422,6 +446,14 @@ _TRANSCRIPT_QSS = f"""
         border-radius: 10px;
     }}
     #systemText {{ color: {Theme.TEXT_MUTED}; font-size: 11px; background: transparent; }}
+    #errorBlock {{
+        background: {Theme.BG_SURFACE};
+        border: 1px solid {Theme.PRIMARY};
+        border-left: 3px solid {Theme.PRIMARY};
+        border-radius: 12px;
+    }}
+    #errorIcon {{ color: {Theme.PRIMARY}; font-size: 14px; background: transparent; }}
+    #errorText {{ color: {Theme.TEXT_PRIMARY}; font-size: 12px; background: transparent; }}
     #welcomeTitle {{ color: {Theme.TEXT_PRIMARY}; font-size: 15px; font-weight: 600; background: transparent; }}
     #welcomeSub {{ color: {Theme.TEXT_SECONDARY}; font-size: 12px; background: transparent; }}
     #exampleChip {{
@@ -544,6 +576,15 @@ class _Transcript(QScrollArea):
         self._blocks.append(line)
         self._defer_scroll()
 
+    def add_error(self, message: str):
+        """Render an error inline in the conversation (not just the status line)."""
+        self.end_assistant()
+        self._clear_welcome()
+        block = _ErrorBlock(message)
+        self._insert(self._left_row(block))
+        self._blocks.append(block)
+        self._defer_scroll()
+
     def clear(self):
         self.end_assistant()
         while self._lay.count() > 1:          # keep the trailing stretch (always last)
@@ -628,6 +669,7 @@ class ChatDockWidget(QWidget):
         self.runner = None
         self.desc = None
         self.worker = None
+        self._unavailable_msg = "Assistant unavailable."
         self._build_ui()
 
     def sizeHint(self):
@@ -767,11 +809,13 @@ class ChatDockWidget(QWidget):
             self.status.setText(self.desc)
             return True
         except Exception as exc:
-            self.status.setText(
-                f"Assistant unavailable: {exc}\n"
-                "Install the agent extra (pip install 'scat[agent]') and log in to Claude "
-                "(`claude` CLI) or set ANTHROPIC_API_KEY."
+            self._unavailable_msg = (
+                f"Assistant unavailable — {exc}.\n"
+                "Install the agent extra (uv sync --extra agent), then either log in to Claude "
+                "(the `claude` CLI, inside WSL) for the subscription, or add an API key in "
+                "Settings › Assistant."
             )
+            self.status.setText(self._unavailable_msg.splitlines()[0])
             self.input.setEnabled(False)
             self.send_btn.setEnabled(False)
             return False
@@ -794,6 +838,10 @@ class ChatDockWidget(QWidget):
             self._handle_command(text)
             return
         if not self._ensure_runner():
+            # Surface the failure inside the conversation (like Claude), not just the status line.
+            self.input.clear()
+            self.view.add_user(text)
+            self.view.add_error(self._unavailable_msg)
             return
         self.input.clear()
         self.view.add_user(text)
