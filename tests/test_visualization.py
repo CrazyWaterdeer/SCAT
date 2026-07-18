@@ -72,6 +72,24 @@ def test_order_groups_logical_not_alphabetical():
     assert order_groups(["gamma", "alpha", "beta"]) == ["gamma", "alpha", "beta"]
 
 
+def test_order_groups_controls_before_treated():
+    from scat.visualization import order_groups
+    # the reported case: controls (driver < effector < untreated) lead, the treated group is last —
+    # NOT alphabetical, which would slot 'treated' before 'untreated'
+    assert order_groups(["treated", "untreated control", "effector control", "driver control"]) == \
+        ["driver control", "effector control", "untreated control", "treated"]
+    # several controls all lead; the treated/experimental group comes last
+    r = order_groups(["treated", "untreated", "control"])
+    assert r[-1] == "treated" and set(r[:2]) == {"untreated", "control"}
+
+
+def test_is_control_detection_is_safe():
+    from scat.visualization import _is_control
+    assert _is_control("driver control") and _is_control("untreated") and _is_control("WT") and _is_control("wt_1")
+    assert not _is_control("treated")     # experimental group
+    assert not _is_control("growth")      # 'wt' must be a word/prefix, not a substring match
+
+
 def test_get_palette_no_control_collision():
     from scat.visualization import get_palette, CONTROL_COLOR
     pal = get_palette(["Vehicle", "Drug", "Light"], control_group="Vehicle")
