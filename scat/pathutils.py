@@ -53,3 +53,47 @@ def normalize_path(path, *, is_wsl: bool | None = None, is_windows: bool | None 
             return f"{drive}:\\{rest}" if rest else f"{drive}:\\"
 
     return s
+
+
+def open_in_os(path) -> bool:
+    """Open a file or folder in the host's default app / file manager. Cross-platform and
+    **WSL-aware**: under WSL the path is handed to Windows via ``explorer.exe`` (with a Windows-form
+    path from ``wslpath -w``), because ``xdg-open``/``gio`` are usually absent or have no default
+    app there. Fire-and-forget; never raises. Returns True if an opener was launched.
+    """
+    import os as _os
+    import subprocess as _sp
+    import sys as _sys
+
+    p = str(path)
+    try:
+        if _os.name == "nt":
+            _os.startfile(p)   # type: ignore[attr-defined]  # Windows only
+            return True
+    except Exception:
+        return False
+
+    candidates = []
+    if _is_wsl():
+        win = ""
+        try:
+            win = _sp.run(["wslpath", "-w", p], capture_output=True, text=True, timeout=5).stdout.strip()
+        except Exception:
+            win = ""
+        if win:
+            candidates.append(["explorer.exe", win])   # opens folders, and files with their default app
+        candidates += [["wslview", p], ["xdg-open", p]]
+    elif _sys.platform == "darwin":
+        candidates.append(["open", p])
+    else:
+        candidates += [["xdg-open", p], ["gio", "open", p]]
+
+    for cmd in candidates:
+        try:
+            _sp.Popen(cmd, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)   # don't wait (explorer.exe exits 1)
+            return True
+        except FileNotFoundError:
+            continue
+        except Exception:
+            continue
+    return False
