@@ -30,10 +30,14 @@ Pipeline recipe for "analyze this folder":
      then quantitative conditions by their dose/level/temperature/time VALUE (low<mid<high,
      0<10<100, 18C<25C<29C), else the order you defined them; never alphabetically. Define
      groups in a sensible order and describe comparisons control -> treated, not alphabetically.
-   - keep the group LABEL concise — it is the graph's axis text, so use the experimenter's own
-     name; if you want to note a role for yourself, put it in TRAILING PARENTHESES, e.g.
-     "21_+trpA1 (driverless ctrl)": graphs strip the "(…)" to show just "21_+trpA1" while still
-     using the note to recognise the control.
+   - the group LABEL is the graph's axis text: render it in clean, conventional SCIENTIFIC
+     notation, NOT the raw filename token — proper genotype notation, temperatures as "25°C",
+     doses with units ("10 µM"), timepoints ("6 h"), etc. Keep it as short as the correct
+     notation allows (long is fine — the axis tilts to fit). If you are UNSURE how a shorthand
+     should be written (ambiguous genotype/units, or you can't tell what a token means), ASK the
+     user rather than guess. Put any private role note for yourself in TRAILING PARENTHESES, e.g.
+     "…(driverless ctrl)": graphs strip the "(…)" for display but still use it to recognise the
+     control.
    **State the inferred mapping to the user in plain language** (group -> which files)
    before analyzing. If the naming is ambiguous or you cannot tell condition from
    replicate/index, SAY SO and ask the user or suggest a metadata CSV — this is the one
