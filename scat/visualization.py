@@ -237,21 +237,48 @@ def _numeric_key(name: str):
     return float(m.group()) if m else None
 
 
+# Control detection for ordering. Distinctive substrings are safe to match anywhere; 'wt' is too
+# short (growth/network), so it is matched as a whole word / prefix. Any group carrying one of these
+# is a control and is ordered before the treated/experimental groups.
+_CONTROL_SUBSTR = ('control', 'ctrl', 'untreated', 'vehicle', 'baseline', 'mock', 'sham', 'wildtype')
+# Sub-order AMONG controls (Gal4/UAS genetics convention): driver-only, then effector-only, then the
+# plain/untreated control. Ties keep appearance order.
+_CONTROL_SUBRANK = (('driver', 0), ('gal4', 0), ('effector', 1), ('uas', 1))
+
+
+def _is_control(name) -> bool:
+    n = re.sub(r'[^a-z]', '', str(name).lower())
+    if any(t in n for t in _CONTROL_SUBSTR):
+        return True
+    return any(w == 'wt' or w.startswith('wt') for w in re.split(r'[^a-z0-9]+', str(name).lower()))
+
+
+def _control_subrank(name) -> int:
+    n = re.sub(r'[^a-z]', '', str(name).lower())
+    for token, rank in _CONTROL_SUBRANK:
+        if token in n:
+            return rank
+    return 2   # generic / untreated / vehicle control -> after the driver & effector controls
+
+
 def order_groups(values, control_group: str = None) -> List[str]:
     """Order groups by LOGICAL structure for display, never plain alphabetical (which scrambles
-    Low/Mid/High and 2/10/100): control/reference first, then by ordinal level word (low<mid<high)
-    if they all carry one, else by an embedded number (dose/time), else the order they first appear
-    in the data (i.e. the order the grouping was defined)."""
+    Low/Mid/High and 2/10/100 and puts 'treated' before 'untreated'). ALL control/reference groups
+    come first (an explicit control_group leads; among controls, driver < effector < untreated/other),
+    then the rest by ordinal level word (low<mid<high) if they all carry one, else by an embedded
+    number (dose/time), else the order they first appear in the data."""
     seen = list(dict.fromkeys(str(v) for v in values))          # appearance order, de-duped
-    ctrl = control_group if control_group in seen else guess_control_group(seen)
-    rest = [g for g in seen if g != ctrl]
+    lead = str(control_group) if control_group is not None and str(control_group) in seen else None
+    controls = [g for g in seen if g != lead and _is_control(g)]
+    rest = [g for g in seen if g != lead and g not in controls]
+    controls.sort(key=_control_subrank)                          # stable: ties keep appearance order
     if len(rest) > 1:
         if all(_ordinal_rank(g) is not None for g in rest):
             rest.sort(key=lambda g: (_ordinal_rank(g), g))
         elif all(_numeric_key(g) is not None for g in rest):
             rest.sort(key=_numeric_key)
         # else: keep appearance order
-    return ([ctrl] if ctrl else []) + rest
+    return ([lead] if lead else []) + controls + rest
 
 
 def draw_condition_matrix(ax, x_positions, matrix, groups, color: str = None) -> int:
