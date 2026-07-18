@@ -62,11 +62,13 @@ class SettingsDialog(QDialog):
         
         # Shortcuts tab
         shortcuts_widget = QWidget()
+        shortcuts_widget.setObjectName("scrollContent")   # dark themed pane (else default light bg)
         shortcuts_layout = QVBoxLayout(shortcuts_widget)
-        
+
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll_content = QWidget()
+        scroll_content.setObjectName("scrollContent")
         scroll_layout = QVBoxLayout(scroll_content)
         
         # Shortcut editors
@@ -118,6 +120,7 @@ class SettingsDialog(QDialog):
         
         # Performance tab
         perf_widget = QWidget()
+        perf_widget.setObjectName("scrollContent")
         perf_layout = QVBoxLayout(perf_widget)
         
         parallel_group = QGroupBox("Parallel Processing")
@@ -181,6 +184,7 @@ class SettingsDialog(QDialog):
         # Assistant tab — the Anthropic API key for the billed API backend. The subscription
         # backend (a logged-in `claude` CLI) needs no key, so this is optional.
         assistant_widget = QWidget()
+        assistant_widget.setObjectName("scrollContent")
         assistant_layout = QVBoxLayout(assistant_widget)
 
         key_group = QGroupBox("Anthropic API")

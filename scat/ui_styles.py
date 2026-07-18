@@ -102,7 +102,16 @@ def build_app_stylesheet(theme) -> str:
                 color: {theme.TEXT_DISABLED};
                 border-color: {theme.BORDER};
             }}
-            
+            /* A QPushButton with a dropdown menu (e.g. the top-bar "More") otherwise renders its
+               text with the native palette (black) instead of the QSS color — styling the
+               menu-indicator forces full-QSS rendering so `color` above applies. */
+            QPushButton::menu-indicator {{
+                subcontrol-origin: padding;
+                subcontrol-position: center right;
+                right: 8px;
+                width: 10px;
+            }}
+
             /* Input Fields - background matches surroundings */
             QLineEdit, QSpinBox, QDoubleSpinBox {{
                 background-color: {theme.BG_MEDIUM};

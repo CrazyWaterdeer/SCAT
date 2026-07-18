@@ -87,6 +87,22 @@ def test_graceful_degradation_when_backend_missing(app, monkeypatch):
     assert "unavailable" in w.status.text().lower()
 
 
+def test_backend_error_shows_in_conversation(app, monkeypatch):
+    """A backend/connection failure is rendered inline in the transcript (like Claude), with the
+    user's message and the underlying reason — not just the small gray status line."""
+    from scat.agent.chat_widget import ChatDockWidget
+    import scat.agent.backend as backend
+    monkeypatch.setattr(backend, "build_runner", lambda **k: (_ for _ in ()).throw(
+        RuntimeError("subscription backend requested but unavailable: not logged in")))
+    w = ChatDockWidget()
+    w.input.setPlainText("analyze it")
+    w._send()
+    text = w.view.toPlainText()
+    assert "analyze it" in text                 # the user's message is shown
+    assert "Assistant unavailable" in text      # the error is in the conversation, not just status
+    assert "not logged in" in text              # with the underlying reason
+
+
 def test_shutdown_is_safe_without_runner(app):
     from scat.agent.chat_widget import ChatDockWidget
     ChatDockWidget().shutdown()  # must not raise
