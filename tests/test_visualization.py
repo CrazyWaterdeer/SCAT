@@ -87,6 +87,33 @@ def test_order_groups_controls_before_treated():
     assert order_groups(["29C", "18C", "25C"]) == ["18C", "25C", "29C"]
 
 
+def test_display_label_strips_trailing_parenthetical():
+    from scat.visualization import _display_label
+    assert _display_label("21_+trpA1 (driverless ctrl)") == "21_+trpA1"   # agent note stripped
+    assert _display_label("Control") == "Control"
+    assert _display_label("a(b)c (note)") == "a(b)c"          # only the TRAILING parenthetical
+    assert _display_label("(only parens)") == "(only parens)"  # never blank the label
+
+
+def test_set_group_xticklabels_cleans_and_rotates_when_crowded():
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from scat.visualization import set_group_xticklabels
+    fig, ax = plt.subplots()
+    groups = ["21_+trpA1 (driverless ctrl)", "21_UAS>trpA1", "18_+trpA1", "18_UAS>trpA1"]
+    set_group_xticklabels(ax, groups, positions=range(len(groups)))
+    assert [t.get_text() for t in ax.get_xticklabels()] == \
+        ["21_+trpA1", "21_UAS>trpA1", "18_+trpA1", "18_UAS>trpA1"]     # cleaned for the axis
+    assert ax.get_xticklabels()[0].get_rotation() == 30               # long labels -> tilted
+    plt.close(fig)
+    # short, few labels: kept horizontal (unchanged from before)
+    fig, ax = plt.subplots()
+    set_group_xticklabels(ax, ["ctrl", "treat"], positions=range(2))
+    assert ax.get_xticklabels()[0].get_rotation() == 0
+    plt.close(fig)
+
+
 def test_is_control_detection_is_safe():
     from scat.visualization import _is_control
     assert _is_control("driver control") and _is_control("untreated") and _is_control("WT") and _is_control("wt_1")
