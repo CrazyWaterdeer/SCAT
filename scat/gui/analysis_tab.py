@@ -484,6 +484,25 @@ class AnalysisTab(QWidget):
             self._update_results_bar(self.results_view.results)
             self.stack.setCurrentWidget(self._results_page)
 
+    def load_results_from_dir(self, output_dir):
+        """Load an analysis output dir into the results surface and switch to it — used when the
+        Assistant (agent) finishes an analysis, so its results are reviewable in the workspace just
+        like a manual run (the agent produces the files but never entered this stateful workspace)."""
+        from .results_tab import _results_dict_from_output
+        try:
+            results = _results_dict_from_output(str(output_dir))
+        except Exception:
+            return
+        self.results_view.load_results(results)
+        fs = results.get("film_summary")
+        try:
+            n = len(fs)
+        except Exception:
+            n = 0
+        self.results_bar_label.setText(
+            f"✓  Assistant analyzed {n} image{'s' if n != 1 else ''}  ·  {Path(output_dir).name}")
+        self.stack.setCurrentWidget(self._results_page)
+
     def _save_settings(self):
         """Save current settings to config."""
         model_types = ['threshold', 'rf', 'cnn']

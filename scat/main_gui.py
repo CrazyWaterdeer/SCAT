@@ -593,6 +593,9 @@ class MainWindow(QMainWindow):
             from .agent.chat_widget import ChatDockWidget
             self.chat_widget = ChatDockWidget()
             self.chat_dock.setWidget(self.chat_widget)
+            # When the Assistant finishes an analysis, load its results into the workspace so they
+            # are reviewable there (the agent produced the files but never drove the results view).
+            self.chat_widget.analysis_ready.connect(self._on_agent_analysis_ready)
         except Exception as exc:  # PySide-only import should not fail, but degrade gracefully
             placeholder = QLabel(f"Assistant unavailable: {exc}")
             placeholder.setWordWrap(True)
@@ -606,6 +609,14 @@ class MainWindow(QMainWindow):
         self.chat_dock.setVisible(visible)
         self.assistant_btn.setChecked(visible)
         self.chat_dock.visibilityChanged.connect(self.assistant_btn.setChecked)
+
+    def _on_agent_analysis_ready(self, output_dir):
+        """The Assistant finished an analysis (or (re)built a report): load its results into the
+        workspace so they are reviewable there, exactly like a manual run."""
+        try:
+            self.analysis_tab.load_results_from_dir(output_dir)
+        except Exception:
+            pass
 
     def _toggle_chat_dock(self, checked):
         # Fade the dock content in/out (drawer curve) rather than popping it.
