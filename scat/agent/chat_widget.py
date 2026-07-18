@@ -23,7 +23,9 @@ Design constraints (see docs/superpowers/plans/2026-07-14-scat-gui-chat-dock.md)
 from __future__ import annotations
 
 import html
+import json
 import math
+from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread, Signal, QPoint, QSize, QTimer
 from PySide6.QtGui import (
@@ -40,6 +42,25 @@ from scat.agent.backend import LATEST_MODELS     # plain model list (backend top
 
 _PROVIDERS = [("Auto", "auto"), ("Subscription", "subscription"), ("API", "api")]
 _SUBSCRIPTION_IDX = next(i for i, (_n, v) in enumerate(_PROVIDERS) if v == "subscription")
+
+
+def _results_dir_from_tool(name: str, output):
+    """The reviewable results directory a completed tool produced, or None. `output` is a dict on
+    the API backend but a JSON string on the subscription backend (tool results are flattened to
+    text there) — handle both."""
+    data = output
+    if isinstance(output, str):
+        try:
+            data = json.loads(output)
+        except Exception:
+            return None
+    if not isinstance(data, dict):
+        return None
+    if name in ("analyze_folder", "combine_results") and data.get("output_dir"):
+        return str(data["output_dir"])
+    if name == "generate_report" and data.get("report_path"):
+        return str(Path(data["report_path"]).parent)
+    return None
 
 _EXAMPLE_PROMPTS = [
     "Analyze this folder and compare the groups",
@@ -664,6 +685,11 @@ class ChatDockWidget(QWidget):
     in-corner send/stop button (Send ↑ toggles to Stop ■ while a turn runs), and model + provider
     pickers below."""
 
+    # Emitted with a results directory when the agent finishes a tool that produces/refreshes a
+    # reviewable analysis (analyze_folder / combine_results / generate_report) — the main window
+    # loads it into the workspace so the agent's results are reviewable just like a manual run.
+    analysis_ready = Signal(str)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.runner = None
@@ -870,7 +896,12 @@ class ChatDockWidget(QWidget):
             self.view.add_tool_use(name, args)
         elif kind == "ToolResult":
             name = str(getattr(ev, "name", "tool"))
-            self.view.add_tool_result(name, not getattr(ev, "is_error", False))
+            ok = not getattr(ev, "is_error", False)
+            self.view.add_tool_result(name, ok)
+            if ok:
+                rdir = _results_dir_from_tool(name, getattr(ev, "output", None))
+                if rdir:
+                    self.analysis_ready.emit(rdir)   # -> workspace loads it for review
         elif kind == "TurnDone":
             stop = str(getattr(ev, "stop_reason", ""))
             if stop and stop not in ("end_turn", "tool_use"):
