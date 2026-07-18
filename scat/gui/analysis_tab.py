@@ -854,4 +854,14 @@ class AnalysisTab(QWidget):
     def _on_error(self, error_msg):
         self.run_btn.setEnabled(True)
         self.progress_label.setText("Error!")
-        QMessageBox.critical(self, "Error", f"Analysis failed:\n{error_msg}")
+        # Friendly one-line summary up front; keep the full payload (incl. traceback) in the
+        # collapsible details pane so a bench scientist isn't shown a raw Python exception.
+        text = str(error_msg).strip()
+        summary = text.splitlines()[0] if text else "Unknown error"
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Critical)
+        box.setWindowTitle("Analysis failed")
+        box.setText("The analysis could not be completed.")
+        box.setInformativeText(summary)
+        box.setDetailedText(text)
+        box.exec()
