@@ -97,8 +97,10 @@ class SpatialAnalyzer:
         # Nearest Neighbor Distance
         nnd_result = self._calculate_nnd(centroids)
         
-        # Clark-Evans clustering index
-        ce_result = self._clark_evans_index(centroids, width, height)
+        # Clark-Evans clustering index (reuse the NND mean already computed above — the O(n^2)
+        # distance matrix would otherwise be built a second time per image).
+        ce_result = self._clark_evans_index(centroids, width, height,
+                                            observed_mean=nnd_result['mean'])
         
         # Quadrant analysis
         quad_result = self._quadrant_analysis(centroids, width, height)
@@ -152,14 +154,15 @@ class SpatialAnalyzer:
         }
     
     def _clark_evans_index(
-        self, 
-        centroids: np.ndarray, 
-        width: int, 
-        height: int
+        self,
+        centroids: np.ndarray,
+        width: int,
+        height: int,
+        observed_mean: float = None
     ) -> Dict:
         """
         Calculate Clark-Evans R index for clustering.
-        
+
         R < 1: Clustered
         R = 1: Random (Poisson)
         R > 1: Dispersed (regular)
@@ -167,12 +170,13 @@ class SpatialAnalyzer:
         n = len(centroids)
         if n < 2:
             return {'r': 1.0, 'interpretation': 'insufficient_data'}
-        
+
         area = width * height
-        
-        # Observed mean NND
-        nnd = self._calculate_nnd(centroids)
-        observed_mean = nnd['mean']
+
+        # Observed mean NND — reuse a precomputed value when the caller has one (analyze()),
+        # else compute it here so the method stays independently correct.
+        if observed_mean is None:
+            observed_mean = self._calculate_nnd(centroids)['mean']
         
         # Expected mean NND for random distribution
         density = n / area

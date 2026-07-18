@@ -139,18 +139,9 @@ class DepositDetector:
         h, w = gray.shape[:2]
         
         # ===== STAGE 1: Standard detection (precise boundaries for solid deposits) =====
-        thresh_standard = cv2.adaptiveThreshold(
-            gray, 255,
-            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY_INV,
-            self.block_size,
-            self.c_value
-        )
-        
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-        thresh_standard = cv2.morphologyEx(thresh_standard, cv2.MORPH_OPEN, kernel)
-        thresh_standard = cv2.morphologyEx(thresh_standard, cv2.MORPH_CLOSE, kernel)
-        
+        # Reuse the single source of truth for the standard threshold (identical math).
+        thresh_standard = self._binary_threshold(gray)
+
         # Find contours from standard detection
         contours_standard, _ = cv2.findContours(
             thresh_standard, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE

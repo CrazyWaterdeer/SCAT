@@ -52,10 +52,10 @@ def _load(d):
     return _resolve(d), m, summary, deposits
 
 
-def _rows_for(df, fn):
+def _rows_for(df, col, fn):
     if df is None:
         return None
-    sub = df[df["filename"].astype(str) == fn]
+    sub = df[col == fn]                       # col = precomputed str filename column (no re-cast)
     return sub.sort_index(axis=1).sort_values(list(sub.columns)).reset_index(drop=True)
 
 
@@ -88,14 +88,21 @@ def combine_results_service(results_dirs, output_dir: Optional[str] = None) -> d
     gcol = next(iter(gcols))
 
     # --- overlap check: a shared basename must be byte-identical across every source that has it ---
+    # Precompute each source's str filename column + set ONCE (the per-duplicate loop below would
+    # otherwise rebuild them repeatedly → O(dupes × sources × rows)).
+    summ_fn = [s["filename"].astype(str) for s in summaries]
+    summ_sets = [set(f) for f in summ_fn]
+    dep_fn = [d["filename"].astype(str) if d is not None else None for d in deposits]
+    dep_sets = [set(f) if f is not None else set() for f in dep_fn]
+
     counts = Counter()
-    for s in summaries:
-        counts.update(set(s["filename"].astype(str)))
+    for fset in summ_sets:
+        counts.update(fset)
     for fn in [f for f, c in counts.items() if c > 1]:
-        srows = [_rows_for(s, fn) for s in summaries if fn in set(s["filename"].astype(str))]
+        srows = [_rows_for(s, sf, fn) for s, sf, fset in zip(summaries, summ_fn, summ_sets) if fn in fset]
         if any(not srows[0].equals(o) for o in srows[1:]):
             raise ValueError(f"cannot combine: image '{fn}' has differing image_summary rows between sources")
-        drows = [_rows_for(d, fn) for d in deposits if d is not None and fn in set(d["filename"].astype(str))]
+        drows = [_rows_for(d, df, fn) for d, df, dset in zip(deposits, dep_fn, dep_sets) if d is not None and fn in dset]
         if any(not drows[0].equals(o) for o in drows[1:]):
             raise ValueError(f"cannot combine: image '{fn}' has differing deposit rows between sources")
 

@@ -178,15 +178,17 @@ def get_palette(groups: List[str], control_group: str = None) -> Dict[str, str]:
         Dict mapping group names to colors
     """
     palette = {}
-    # When a control is flagged it takes the slate grey (= PASTEL_PALETTE[0]), so start the
-    # conditions at index 1 to avoid a second slate bar colliding with it.
-    color_idx = 1 if (control_group and control_group in groups) else 0
+    has_control = bool(control_group and control_group in groups)
+    # When a control takes the slate grey (PASTEL_PALETTE[0]), cycle the conditions over the REST
+    # of the palette so a large group set never wraps back onto the control's own colour.
+    pool = PASTEL_PALETTE[1:] if has_control else PASTEL_PALETTE
+    color_idx = 0
 
     for group in groups:
-        if control_group and group == control_group:
+        if has_control and group == control_group:
             palette[group] = CONTROL_COLOR
         else:
-            palette[group] = PASTEL_PALETTE[color_idx % len(PASTEL_PALETTE)]
+            palette[group] = pool[color_idx % len(pool)]
             color_idx += 1
 
     return palette
@@ -225,8 +227,10 @@ def _ordinal_rank(name: str):
 
 
 def _numeric_key(name: str):
-    """First signed number embedded in `name` (e.g. '10uM'->10, '6h'->6, '0.5'->0.5), else None."""
-    m = re.search(r'-?\d+\.?\d*', str(name))
+    """First number embedded in `name` (e.g. '10uM'->10, '6h'->6, '0.5'->0.5), else None. A leading
+    '-' counts as a sign only when NOT preceded by an alnum, so a hyphen SEPARATOR ('Day-1','sample-10')
+    is not read as a minus (which had reversed hyphen-numbered group order)."""
+    m = re.search(r'(?:(?<![A-Za-z0-9])-)?\d+\.?\d*', str(name))
     return float(m.group()) if m else None
 
 
@@ -953,10 +957,12 @@ class Visualizer:
                 markeredgecolor='black', markeredgewidth=1
             )
         
-        # Add individual data points (jittered)
+        # Add individual data points (jittered). Seed a LOCAL RNG so the saved mean_ci_* PNGs are
+        # reproducible run-to-run (mirrors condition_comparison) without perturbing global RNG state.
+        rng = np.random.RandomState(0)
         for i, group in enumerate(unique_groups):
             data = film_summary[film_summary[group_by] == group][metric].dropna()
-            jitter = np.random.uniform(-0.15, 0.15, len(data))
+            jitter = rng.uniform(-0.15, 0.15, len(data))
             ax.scatter(
                 i + jitter, data, 
                 c='#333333', alpha=0.5, s=45, zorder=1, edgecolors='white', linewidth=0.5
