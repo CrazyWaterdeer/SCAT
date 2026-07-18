@@ -27,7 +27,7 @@ def analyze_command(args):
         args.input, groups=groups, model_type=args.model_type, model_path=args.model_path,
         min_area=args.min_area, max_area=args.max_area, edge_margin=args.edge_margin,
         circularity=args.threshold, annotate=args.annotate, visualize=args.visualize,
-        output_dir=args.output)
+        spatial=getattr(args, 'spatial', False), output_dir=args.output)
 
     print(f"Analyzed {res.n_images} images -> {res.output_dir}")
     print(f"  Normal={res.n_normal} ROD={res.n_rod} Artifact={res.n_artifact} failed={res.n_failed}")
@@ -143,7 +143,9 @@ def propagate_command(args):
 
 
 def main():
+    from . import __version__
     parser = argparse.ArgumentParser(description="SCAT - Spot Classification and Analysis Tool")
+    parser.add_argument('--version', action='version', version=f'SCAT {__version__}')
     subparsers = parser.add_subparsers(dest='command')
 
     # gui
@@ -171,6 +173,8 @@ def main():
     ap.add_argument('--group-by', help='Column(s) for grouping, comma-separated')
     ap.add_argument('--annotate', action='store_true', help='Generate annotated images')
     ap.add_argument('--visualize', action='store_true', help='Generate visualization plots')
+    ap.add_argument('--spatial', action='store_true',
+                    help='Compute spatial dispersion metrics (writes spatial_stats.json)')
     ap.add_argument('--stats', action='store_true', help='Perform statistical analysis')
     ap.add_argument('--report', dest='report', action='store_true', default=None, help='Generate HTML report')
     ap.add_argument('--no-report', dest='report', action='store_false', help='Skip the HTML report')
