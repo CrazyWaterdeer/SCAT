@@ -30,28 +30,72 @@ assistant.
 - **Conversational assistant** — an optional Claude agent that runs the whole pipeline from a
   request like *"analyze this folder and compare the groups."*
 
-## Installation
+## Getting started
 
-SCAT is developed with **[uv](https://docs.astral.sh/uv/)** and a project lockfile (`uv.lock`),
-so a reproducible environment is one command. It ships a pre-trained Random Forest model
-(`models/model_rf.pkl`) — no training required to start.
+First-time setup, top to bottom — **copy-paste each block in order.** SCAT uses
+**[uv](https://docs.astral.sh/uv/)**, and ships a pre-trained Random Forest model
+(`models/model_rf.pkl`), so you can analyze images right after step 3.
+
+**1 — Install uv** (Python/venv manager; once per machine):
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Then restart your shell (or `source $HOME/.local/bin/env`) so `uv` is on your PATH.
+
+**2 — Get SCAT and install it** (creates a `.venv` and installs core + GUI + the assistant):
 
 ```bash
 git clone https://github.com/CrazyWaterdeer/SCAT.git
 cd SCAT
-
-uv sync --extra agent      # reproducible env from uv.lock: core + GUI + Claude assistant
-uv run scat gui            # launch the GUI
+uv sync --extra agent
 ```
 
-Prefer a plain editable install (no lockfile pinning)? Use:
+`uv sync` builds a reproducible environment from the committed `uv.lock`. `--extra agent`
+installs the assistant's Python SDK (`claude-agent-sdk`) — **required for the chat even if the
+`claude` CLI is already installed.** Omit it (`uv sync`) if you don't want the assistant; add
+`--extra deep` for the U-Net/CNN (torch) or `--extra pdf` for PDF export.
+
+**3 — Launch the GUI:**
 
 ```bash
-uv venv                       # create .venv (uv picks a Python ≥3.10; the repo is tested on 3.14)
-uv pip install -e ".[agent]"  # core + GUI + assistant  (drop [agent] for analysis + GUI only)
+uv run scat gui
 ```
 
-**Optional extras** (compose them, e.g. `uv sync --extra agent --extra deep`):
+That's all you need to analyze images with the bundled model. Steps 4–5 are optional.
+
+**4 — (Optional) Connect the AI Assistant.** Choose one backend:
+
+- **Subscription — no API charges** (uses your Claude Pro/Max login). On **WSL2, install and log
+  in inside the WSL distro** — a native-Windows login is not visible to SCAT:
+
+  ```bash
+  curl -fsSL https://claude.ai/install.sh | bash   # installs the `claude` CLI to ~/.local/bin
+  claude                                            # opens a browser to log in, then quit with Ctrl+C
+  ```
+
+  Confirm SCAT sees the login:
+
+  ```bash
+  uv run python -c "from scat.agent.claude_subscription import subscription_available; print(subscription_available())"
+  # (True, None) = connected.  (False, 'SDK missing') = re-run step 2 with --extra agent.
+  # (False, 'claude not found' / 'not logged in') = install/log in the claude CLI *inside WSL*.
+  ```
+
+- **API — billed.** Skip the CLI; paste a key into **Settings › Assistant** in the GUI, or export
+  `ANTHROPIC_API_KEY=sk-ant-…` before launching.
+
+**5 — (Optional) One-click desktop icon** (Windows 11 + WSL2/WSLg):
+
+```bash
+bash scripts/install_desktop_shortcut.sh
+```
+
+Puts an **SCAT** icon on your Windows desktop (launches `.venv/bin/python -m scat.cli gui`, no
+console window). Run it after step 2 — it needs the `.venv` and `powershell.exe` on PATH.
+
+### Extras & ways to run
 
 | Extra    | Adds                                   | Enables                                   |
 | -------- | -------------------------------------- | ----------------------------------------- |
@@ -60,22 +104,9 @@ uv pip install -e ".[agent]"  # core + GUI + assistant  (drop [agent] for analys
 | `pdf`    | weasyprint                             | PDF export of the report                  |
 | `dev`    | pytest                                 | running the test suite                    |
 
-Once installed, the `scat` command is available (`scat gui`, `scat chat`, `scat analyze`, …).
-Run it via `uv run scat <cmd>`, an activated venv (`source .venv/bin/activate` then `scat <cmd>`),
-or directly as `.venv/bin/python -m scat.cli <cmd>`.
-
-### One-click desktop icon (WSL2 + WSLg)
-
-On Windows 11 with WSL2, create a desktop shortcut that launches the GUI (assistant included)
-through WSLg with no console window:
-
-```bash
-bash scripts/install_desktop_shortcut.sh
-```
-
-This puts an **SCAT** icon on your Windows desktop. It requires Windows interop (`powershell.exe`
-on PATH) and expects the `.venv` to already exist — so **run the uv install first**. The shortcut
-launches `.venv/bin/python -m scat.cli gui`; re-run the script any time to refresh it.
+Compose extras (`uv sync --extra agent --extra deep`). Once installed, run `scat` via
+`uv run scat <cmd>`, an activated venv (`source .venv/bin/activate` then `scat <cmd>`), or
+`.venv/bin/python -m scat.cli <cmd>` — all equivalent.
 
 ## Quick Start (GUI)
 
