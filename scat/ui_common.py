@@ -318,6 +318,7 @@ class CollapsibleSection(QWidget):
         super().__init__(parent)
         self._title = title
         self._expanded = expanded
+        self._anim = None   # running height animation, stopped on re-toggle
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -366,20 +367,29 @@ class CollapsibleSection(QWidget):
 
     def _toggle(self):
         from scat import ui_motion
+        # Stop any in-flight animation first: ui_motion.animate does NOT retarget a prior
+        # animation, so a fast collapse-then-expand could otherwise let the collapse's
+        # finished handler hide the body AFTER the expand ran (expanded-but-hidden).
+        if self._anim is not None:
+            try:
+                self._anim.stop()   # a manual stop does NOT emit finished, so no stale handler
+            except RuntimeError:
+                pass                # DeleteWhenStopped may have already freed the C++ object
+            self._anim = None
         self._expanded = self.header.isChecked()
         self._update_header()
         if self._expanded:
             self.body.setVisible(True)
             target = self.body.sizeHint().height()
-            anim = ui_motion.animate(self.body, b"maximumHeight", target,
-                                     ui_motion.DUR_TAB, ui_motion.CURVE_OUT, start=0)
+            self._anim = ui_motion.animate(self.body, b"maximumHeight", target,
+                                           ui_motion.DUR_TAB, ui_motion.CURVE_OUT, start=0)
             # After opening, lift the cap so the body can grow with its content.
-            anim.finished.connect(lambda: self.body.setMaximumHeight(self._MAX))
+            self._anim.finished.connect(lambda: self.body.setMaximumHeight(self._MAX))
         else:
             start = self.body.height()
-            anim = ui_motion.animate(self.body, b"maximumHeight", 0,
-                                     ui_motion.DUR_TAB, ui_motion.CURVE_OUT, start=start)
-            anim.finished.connect(lambda: self.body.setVisible(False))
+            self._anim = ui_motion.animate(self.body, b"maximumHeight", 0,
+                                           ui_motion.DUR_TAB, ui_motion.CURVE_OUT, start=start)
+            self._anim.finished.connect(lambda: self.body.setVisible(False))
 
 
 # =============================================================================

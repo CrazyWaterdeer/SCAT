@@ -428,9 +428,13 @@ class TrainingTab(QWidget):
             # U-Net segmentation training
             from .segmentation import train_segmentation_model
             
+            # This callback fires on the WorkerThread; emit through the worker's queued
+            # `status` signal instead of touching the QTextEdit directly (a QWidget must
+            # only be mutated on the GUI thread). self.worker is assigned just below, before
+            # the callback can run (it fires during run(), after .start()).
             def progress_callback(epoch, train_loss, val_loss, val_iou):
-                self.log.append(f"Epoch {epoch}: train_loss={train_loss:.4f}, val_loss={val_loss:.4f}, IoU={val_iou:.3f}")
-            
+                self.worker.status.emit(f"Epoch {epoch}: train_loss={train_loss:.4f}, val_loss={val_loss:.4f}, IoU={val_iou:.3f}")
+
             self.worker = WorkerThread(
                 train_segmentation_model,
                 image_dir=image_dir,
@@ -460,6 +464,7 @@ class TrainingTab(QWidget):
                 **kwargs
             )
         
+        self.worker.status.connect(self.log.append)   # queued → GUI thread
         self.worker.finished.connect(self._on_train_finished)
         self.worker.error.connect(self._on_train_error)
         self.worker.start()
@@ -670,6 +675,14 @@ class MainWindow(QMainWindow):
             config.set("window.chat_visible", self.chat_dock.isVisible())
 
     def closeEvent(self, event):
+        # Block until any in-flight analysis/training worker finishes before tearing the
+        # window down, or Qt aborts with "QThread: Destroyed while thread is still running"
+        # (and a hard terminate() could truncate the CSV/report being written). wait() lets
+        # the current run complete; the worker writes to a timestamped dir either way.
+        for tab in (getattr(self, "analysis_tab", None), getattr(self, "training_tab", None)):
+            w = getattr(tab, "worker", None)
+            if w is not None and w.isRunning():
+                w.wait()
         # Tear down the agent runner (subscription backend owns a daemon asyncio loop)
         if getattr(self, "chat_widget", None) is not None:
             self.chat_widget.shutdown()

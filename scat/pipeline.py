@@ -169,7 +169,7 @@ def analyze_folder_service(path: str, groups: Optional[dict] = None, model_type:
     out = Path(output_dir) if output_dir else get_timestamped_output_dir(Path(path).parent, "results")
     reporter = ReportGenerator(out)
     reports = reporter.save_all(results, metadata, group_by, save_json=save_json)
-    n_failed = sum(1 for r in results if r.n_total == 0)
+    n_failed = sum(1 for r in results if getattr(r, "failed", False))
 
     if annotate:
         from PIL import Image

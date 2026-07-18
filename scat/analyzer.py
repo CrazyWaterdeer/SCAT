@@ -26,6 +26,9 @@ class AnalysisResult:
         self.deposits = deposits
         self.dpi = dpi
         self.timestamp = datetime.now().isoformat()
+        # True only for a placeholder produced by a real analysis failure (unreadable
+        # image / worker give-up), NOT for a legitimately clean 0-deposit image.
+        self.failed = False
     
     @property
     def n_total(self) -> int:
@@ -147,9 +150,10 @@ class Analyzer:
     def analyze_image(self, image_path: Union[str, Path]) -> AnalysisResult:
         image_path = Path(image_path)
         img = Image.open(image_path)
-        image = np.array(img)
-        
         dpi = img.info.get('dpi', (self.dpi, self.dpi))[0]
+        # Normalize to 3-channel RGB so grayscale/palette/RGBA/CMYK inputs don't crash
+        # detection/feature extraction. A no-op (identical pixels) for existing 8-bit RGB.
+        image = np.array(img.convert('RGB'))
         # Use a local extractor (not self.extractor): analyze_batch runs this
         # method concurrently in a thread pool, so a shared instance attribute
         # would let one image's DPI clobber another's mid-extraction.
@@ -440,7 +444,8 @@ class ReportGenerator:
             if group_col in deposit_data.columns:
                 groups_dir = self.output_dir / 'groups'
                 groups_dir.mkdir(exist_ok=True)
-                
+
+                seen_stems = {}   # disambiguate distinct group names that sanitize alike
                 for group_name in deposit_data[group_col].dropna().unique():
                     group_df = deposit_data[deposit_data[group_col] == group_name].copy()
                     # Re-assign IDs within group
@@ -457,6 +462,14 @@ class ReportGenerator:
                     for char in [':', '*', '?', '"']:
                         safe_name = safe_name.replace(char, '_')
                     safe_name = safe_name.replace(' ', '_')
+                    # Two distinct group names can sanitize to the same stem (e.g. 'A/B' and
+                    # 'A|B' → 'A-B'); disambiguate so the second no longer overwrites the first.
+                    if safe_name in seen_stems:
+                        stem = safe_name
+                        while safe_name in seen_stems:
+                            seen_stems[stem] += 1
+                            safe_name = f'{stem}_{seen_stems[stem]}'
+                    seen_stems[safe_name] = seen_stems.get(safe_name, 0)
                     group_df.to_csv(groups_dir / f'{safe_name}_deposits.csv', index=False)
         
         return {

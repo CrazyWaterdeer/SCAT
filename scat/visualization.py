@@ -192,15 +192,13 @@ def get_palette(groups: List[str], control_group: str = None) -> Dict[str, str]:
     return palette
 
 
-_CONTROL_TOKENS = ('control', 'ctrl', 'untreated', 'vehicle', 'baseline', 'mock', 'wildtype', 'wt')
-
-
 def guess_control_group(groups: List[str]) -> Optional[str]:
     """Best-effort: identify a control/reference group by name (control, ctrl, vehicle, WT, ...).
-    Returns the matching group or None — the agent can always pass one explicitly instead."""
+    Delegates to _is_control so significance-bracket control detection and group ORDERING can
+    never disagree (previously two token sets had drifted — 'sham' matched one but not the other).
+    Returns the first matching group or None — pass one explicitly to override."""
     for g in groups:
-        gl = str(g).strip().lower()
-        if gl in _CONTROL_TOKENS or any(gl.startswith(t) for t in _CONTROL_TOKENS):
+        if _is_control(g):
             return g
     return None
 

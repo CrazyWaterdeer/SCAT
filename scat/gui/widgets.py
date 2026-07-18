@@ -118,7 +118,9 @@ class PathSelector(QWidget):
                 self.path_edit.setText(default_path)
     
     def _browse(self):
-        start_dir = self.path_edit.text().replace('/', '\\') or ""  # Convert back for dialog
+        # Reuse the platform-guarded path() (backslashes only on win32) — the old
+        # unconditional '/'→'\' corrupted the start dir on Linux/WSL.
+        start_dir = self.path() or ""
         
         if self.is_folder:
             path = QFileDialog.getExistingDirectory(self, f"Select {self.label.text()}", start_dir)

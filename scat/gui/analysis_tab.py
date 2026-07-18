@@ -465,11 +465,16 @@ class AnalysisTab(QWidget):
         except Exception:
             n = len(self._selected_files)
         method = self.model_type.currentText()
-        if self.use_groups.isChecked() and self._group_data:
-            g = len(self._group_data)
-            grp = f"{g} group{'s' if g != 1 else ''}"
-        else:
-            grp = "single group"
+        # Derive grouping from the LOADED results (not the configure-page _group_data),
+        # so a loaded previous grouped run labels correctly too.
+        gcol = results.get("group_by") if isinstance(results, dict) else None
+        groups = []
+        if gcol and fs is not None and gcol in getattr(fs, "columns", []):
+            for g in fs[gcol].dropna().unique():
+                s = str(g).strip()
+                if s and s != "ungrouped" and s not in groups:
+                    groups.append(s)
+        grp = f"{len(groups)} groups" if len(groups) >= 2 else "single group"
         self.results_bar_label.setText(
             f"✓  Analyzed {n} image{'s' if n != 1 else ''}   ·   {method}   ·   {grp}")
 
@@ -723,6 +728,10 @@ class AnalysisTab(QWidget):
         self.groups_hint.setText(f"{len(data)} group(s). Right-click a group to rename.")
     
     def _run_analysis(self):
+        # Re-entrancy guard: the Run keyboard shortcut bypasses the disabled button, and
+        # _rerun also calls in — never start a second concurrent worker over a second dir.
+        if getattr(self, 'worker', None) is not None and self.worker.isRunning():
+            return
         image_files = self._get_image_files()
         output_base = self.output_dir.path()
         

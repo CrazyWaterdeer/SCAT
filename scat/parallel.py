@@ -146,7 +146,9 @@ def _fork_worker(path):
 def _placeholder(analyzer, path):
     """The empty result used when an image fails (matches the pre-existing thread path)."""
     from .analyzer import AnalysisResult
-    return AnalysisResult(filename=Path(path).name, deposits=[], dpi=analyzer.dpi)
+    res = AnalysisResult(filename=Path(path).name, deposits=[], dpi=analyzer.dpi)
+    res.failed = True   # true analysis failure, vs. a legitimately clean 0-deposit image
+    return res
 
 
 def _run_sequential(analyzer, image_paths, progress_callback):

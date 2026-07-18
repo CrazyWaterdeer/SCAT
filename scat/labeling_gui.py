@@ -903,7 +903,7 @@ class LabelingWindow(QMainWindow):
             export_action.triggered.connect(self._export_training_data)
             toolbar.addAction(export_action)
             
-            self.statusBar().showMessage("S: Select, A: Add, Ctrl+Click: Multi-select, M: Merge, D: Delete")
+            self.statusBar().showMessage("S: Select, A: Add, Ctrl+Click: Multi-select, R: Merge, Del: Delete")
         else:
             # Edit mode: Save Changes only
             save_action = QAction("Save Changes", self)
@@ -972,6 +972,7 @@ class LabelingWindow(QMainWindow):
                 'mean_g': d.mean_g,
                 'mean_b': d.mean_b,
                 'iod': d.iod,
+                'pigment_density': d.pigment_density,
                 'label': d.label,
                 'confidence': d.confidence,
                 'merged': d.merged,
@@ -1024,6 +1025,7 @@ class LabelingWindow(QMainWindow):
                 mean_g=saved['mean_g'],
                 mean_b=saved['mean_b'],
                 iod=saved['iod'],
+                pigment_density=saved['pigment_density'],
                 label=saved['label'],
                 confidence=saved['confidence'],
                 merged=saved['merged'],
@@ -1430,6 +1432,9 @@ class LabelingWindow(QMainWindow):
                 self._select_next()
     
     def _auto_label_threshold(self):
+        if not self.viewer.deposit_items:
+            return
+        self._save_state()   # undo snapshot + mark dirty, like every other label mutator
         threshold = self.threshold_spin.value()
         for item in self.viewer.deposit_items:
             d = item.deposit
@@ -1458,9 +1463,15 @@ class LabelingWindow(QMainWindow):
         self.viewer.selected_item.set_selected(True)
         self.viewer.centerOn(self.viewer.selected_item)
         self.deposit_table.selectRow(next_idx)
+
     def _on_table_select(self):
         rows = self.deposit_table.selectionModel().selectedRows()
         if rows:
+            # Clear any stale image box-selection so the table click wins in
+            # _set_selected_label (mirrors the image single-click path).
+            for sel_item in self.viewer.selected_items:
+                sel_item.set_selected(False)
+            self.viewer.selected_items.clear()
             row_idx = rows[0].row()
             # Get ID from the table (column 0) - sorted may differ from list order
             id_item = self.deposit_table.item(row_idx, 0)
@@ -1572,10 +1583,10 @@ class LabelingWindow(QMainWindow):
             )
             
             if reply == QMessageBox.Save:
-                if self._last_saved_path:
-                    self._save_to_path(self._last_saved_path)
-                else:
-                    self._save_labels()
+                # Route through the mode-aware saver: EDIT mode must run
+                # _save_edit_changes (rewrites the analysis CSVs + emits data_saved),
+                # NOT the labeling Save-As, or the user's edits are silently lost.
+                self._save_current()
                 event.accept()
             elif reply == QMessageBox.Discard:
                 event.accept()
@@ -1643,6 +1654,10 @@ class LabelingWindow(QMainWindow):
             self._update_table()
             self._update_stats()
             self.statusBar().showMessage(f"Loaded from {path}")
+            # Remember the loaded file so Save overwrites it (and auto-save works),
+            # and clear the stale unsaved flag so closeEvent doesn't falsely warn.
+            self._last_saved_path = Path(path)
+            self._has_unsaved_changes = False
     
     def _export_training_data(self):
         if not self.deposits:
