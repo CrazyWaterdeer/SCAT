@@ -123,8 +123,10 @@ class Theme:
     def get_app_stylesheet(cls) -> str:
         """Return the complete application stylesheet for main_gui."""
         from . import ui_styles  # deferred: avoids a ui_common <-> ui_styles import cycle
-        # Always regenerate (kept from the original; caching effectively disabled for live edits).
-        cls._cached_app_stylesheet = ui_styles.build_app_stylesheet(cls)
+        # Memoize (Theme tokens are not mutated at runtime) — mirrors get_labeling_stylesheet;
+        # avoids rebuilding the ~430-line stylesheet on every call.
+        if cls._cached_app_stylesheet is None:
+            cls._cached_app_stylesheet = ui_styles.build_app_stylesheet(cls)
         return cls._cached_app_stylesheet
 
     @classmethod
@@ -134,6 +136,11 @@ class Theme:
         if cls._cached_labeling_stylesheet is None:
             cls._cached_labeling_stylesheet = ui_styles.build_labeling_stylesheet(cls)
         return cls._cached_labeling_stylesheet
+
+    @classmethod
+    def primary_button_style(cls) -> str:
+        """The app's canonical primary/CTA button skin (coral fill, white text)."""
+        return cls.button_style(cls.PRIMARY, "#FFFFFF", cls.PRIMARY_LIGHT, cls.PRIMARY_DARK)
 
 
 # =============================================================================

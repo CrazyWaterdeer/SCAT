@@ -162,7 +162,7 @@ class ResultsTab(QWidget):
         self.open_report_btn.setIcon(icon("open_in_new", "#FFFFFF"))
         self.open_report_btn.setMinimumHeight(38)
         self.open_report_btn.setStyleSheet(
-            Theme.button_style(Theme.PRIMARY, "#FFFFFF", Theme.PRIMARY_LIGHT, Theme.PRIMARY_DARK))
+            Theme.primary_button_style())
         ui_motion.attach_button_motion(self.open_report_btn, primary=True)
         self.open_report_btn.clicked.connect(self._open_report)
         # Generate/rebuild is a utility → quiet secondary.
@@ -255,7 +255,7 @@ class ResultsTab(QWidget):
         else:
             self.generate_report_btn.setText("Generate report")
             self.generate_report_btn.setStyleSheet(
-                Theme.button_style(Theme.PRIMARY, "#FFFFFF", Theme.PRIMARY_LIGHT, Theme.PRIMARY_DARK))
+                Theme.primary_button_style())
 
     def _set_num(self, row: int, col: int, value, fmt: str, color: str = None):
         """A right-aligned, sort-correct numeric cell (magnitudes line up like a ledger)."""

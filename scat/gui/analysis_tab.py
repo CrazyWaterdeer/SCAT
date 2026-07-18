@@ -269,7 +269,7 @@ class AnalysisTab(QWidget):
         self.run_btn.setMinimumHeight(48)
         self.run_btn.setMinimumWidth(240)
         self.run_btn.setStyleSheet(
-            Theme.button_style(Theme.PRIMARY, "#FFFFFF", Theme.PRIMARY_LIGHT, Theme.PRIMARY_DARK))
+            Theme.primary_button_style())
         # Responsive depth on the primary action: a coral-tinted shadow lifts on hover and
         # depresses on press (coral reads on the near-black theme where a neutral shadow can't).
         ui_motion.attach_button_motion(self.run_btn, primary=True)

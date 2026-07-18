@@ -347,7 +347,7 @@ class TrainingTab(QWidget):
         self.train_btn.setMinimumHeight(44)
         self.train_btn.setMinimumWidth(200)
         self.train_btn.setStyleSheet(
-            Theme.button_style(Theme.PRIMARY, "#FFFFFF", Theme.PRIMARY_LIGHT, Theme.PRIMARY_DARK))
+            Theme.primary_button_style())
         ui_motion.attach_button_motion(self.train_btn, primary=True)
         self.train_btn.clicked.connect(self._train)
         _train_row = QHBoxLayout()
