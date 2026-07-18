@@ -25,11 +25,11 @@ Pipeline recipe for "analyze this folder":
      6h_1/6h_2 -> "6h"); condition names are ARBITRARY (genotypes, doses, timepoints,
      drugs) and there can be ANY number of groups — do not force a control/treated split;
    - build a mapping {filename: group_label} covering every image;
-   - if there is a control/reference condition, NAME it clearly (e.g. "driver control",
-     "effector control", "untreated control", "vehicle", "WT") so it is recognised — the
-     report orders groups logically (all controls first, driver<effector<untreated, then
-     by dose/level, else appearance order; never alphabetically), and your narrative should
-     read in that same control -> treated direction, not alphabetically.
+   - if a condition is a control/reference, NAME it so it is recognisable (e.g. "…control",
+     "untreated", "vehicle", "WT"); the report then orders groups logically — controls first,
+     then quantitative conditions by their dose/level/temperature/time VALUE (low<mid<high,
+     0<10<100, 18C<25C<29C), else the order you defined them; never alphabetically. Define
+     groups in a sensible order and describe comparisons control -> treated, not alphabetically.
    **State the inferred mapping to the user in plain language** (group -> which files)
    before analyzing. If the naming is ambiguous or you cannot tell condition from
    replicate/index, SAY SO and ask the user or suggest a metadata CSV — this is the one

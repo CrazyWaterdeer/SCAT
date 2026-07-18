@@ -239,11 +239,9 @@ def _numeric_key(name: str):
 
 # Control detection for ordering. Distinctive substrings are safe to match anywhere; 'wt' is too
 # short (growth/network), so it is matched as a whole word / prefix. Any group carrying one of these
-# is a control and is ordered before the treated/experimental groups.
+# is treated as a control/reference and ordered before the non-control (treated/experimental) groups.
+# These are generic biology control terms — nothing about specific genotypes/drugs/conditions is here.
 _CONTROL_SUBSTR = ('control', 'ctrl', 'untreated', 'vehicle', 'baseline', 'mock', 'sham', 'wildtype')
-# Sub-order AMONG controls (Gal4/UAS genetics convention): driver-only, then effector-only, then the
-# plain/untreated control. Ties keep appearance order.
-_CONTROL_SUBRANK = (('driver', 0), ('gal4', 0), ('effector', 1), ('uas', 1))
 
 
 def _is_control(name) -> bool:
@@ -253,32 +251,35 @@ def _is_control(name) -> bool:
     return any(w == 'wt' or w.startswith('wt') for w in re.split(r'[^a-z0-9]+', str(name).lower()))
 
 
-def _control_subrank(name) -> int:
-    n = re.sub(r'[^a-z]', '', str(name).lower())
-    for token, rank in _CONTROL_SUBRANK:
-        if token in n:
-            return rank
-    return 2   # generic / untreated / vehicle control -> after the driver & effector controls
+def _ordered_within(groups) -> List[str]:
+    """Order same-kind groups by ordinal level word (low<mid<high) if they ALL carry one, else by an
+    embedded number (dose/temperature/time) if they ALL carry one, else keep the order they were
+    defined (appearance). No experiment-specific assumptions."""
+    gs = list(groups)
+    if len(gs) > 1:
+        if all(_ordinal_rank(g) is not None for g in gs):
+            gs = sorted(gs, key=lambda g: (_ordinal_rank(g), g))
+        elif all(_numeric_key(g) is not None for g in gs):
+            gs = sorted(gs, key=_numeric_key)
+    return gs
 
 
 def order_groups(values, control_group: str = None) -> List[str]:
-    """Order groups by LOGICAL structure for display, never plain alphabetical (which scrambles
-    Low/Mid/High and 2/10/100 and puts 'treated' before 'untreated'). ALL control/reference groups
-    come first (an explicit control_group leads; among controls, driver < effector < untreated/other),
-    then the rest by ordinal level word (low<mid<high) if they all carry one, else by an embedded
-    number (dose/time), else the order they first appear in the data."""
-    seen = list(dict.fromkeys(str(v) for v in values))          # appearance order, de-duped
+    """Order groups for display by LOGICAL structure, never plain alphabetical (which scrambles
+    Low/Mid/High and 2/10/100 and puts 'treated' before 'untreated'). Control/reference groups come
+    first (an explicit control_group leads; the remaining controls keep the order they were defined),
+    then the non-control groups by ordinal level word (low<mid<high), else an embedded number
+    (dose/temperature/time), else the order they were defined.
+
+    Group names are arbitrary: NOTHING about specific genotypes, drugs, temperatures or conditions is
+    hard-coded — only two generic signals are inferred, 'looks like a control' and 'carries a level
+    word or a number'. Everything else keeps the experimenter's defined order. Pass control_group to
+    pin a reference explicitly."""
+    seen = list(dict.fromkeys(str(v) for v in values))          # appearance (defined) order, de-duped
     lead = str(control_group) if control_group is not None and str(control_group) in seen else None
-    controls = [g for g in seen if g != lead and _is_control(g)]
+    controls = [g for g in seen if g != lead and _is_control(g)]     # kept in defined order
     rest = [g for g in seen if g != lead and g not in controls]
-    controls.sort(key=_control_subrank)                          # stable: ties keep appearance order
-    if len(rest) > 1:
-        if all(_ordinal_rank(g) is not None for g in rest):
-            rest.sort(key=lambda g: (_ordinal_rank(g), g))
-        elif all(_numeric_key(g) is not None for g in rest):
-            rest.sort(key=_numeric_key)
-        # else: keep appearance order
-    return ([lead] if lead else []) + controls + rest
+    return ([lead] if lead else []) + controls + _ordered_within(rest)
 
 
 def draw_condition_matrix(ax, x_positions, matrix, groups, color: str = None) -> int:
