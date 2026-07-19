@@ -3,7 +3,7 @@ SCAT - Spot Classification and Analysis Tool
 ML-based Drosophila excreta analysis.
 """
 
-__version__ = "2.2.0"
+__version__ = "2.2.1"
 
 from .detector import DepositDetector, Deposit
 from .features import FeatureExtractor

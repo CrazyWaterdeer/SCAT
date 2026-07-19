@@ -197,6 +197,53 @@ def normalize_palette_override(override, groups) -> Dict[str, str]:
     return {}
 
 
+def _resolve_bar_colors(bar_colors, flat, pos_in_cluster, default_palette):
+    """Per-bar colors for the clustered bar chart, letting the SAME color repeat across clusters.
+    Returns (colors, legend) where colors is one color per bar in ``flat`` and legend is a list of
+    (label, color) pairs to show (empty for the list form).
+
+    - dict {token-or-group: color}: a bar is colored by the FIRST key that equals its group or is a
+      case-insensitive substring of it — so {"24h": blue, "48h": orange} paints every "…24h" group
+      blue in every cluster, with a legend. Exact-group keys win over substring keys.
+    - list/tuple [color, …]: colored by within-cluster POSITION (pos_in_cluster), cycled — so the 1st
+      bar of every cluster shares a color, the 2nd shares another, etc.
+    Unparseable colors are dropped (with a warning); unmatched bars keep the default per-group palette."""
+    try:
+        from matplotlib.colors import is_color_like
+    except Exception:
+        is_color_like = lambda c: True
+    if isinstance(bar_colors, (list, tuple)) and bar_colors:
+        valid = [c for c in bar_colors if is_color_like(c)]
+        bad = [c for c in bar_colors if not is_color_like(c)]
+        if bad:
+            warnings.warn(f"ignored unparseable bar color(s): {bad}")
+        if valid:
+            return [valid[p % len(valid)] for p in pos_in_cluster], []
+    if isinstance(bar_colors, dict) and bar_colors:
+        keyed = {}
+        for k, c in bar_colors.items():
+            if is_color_like(c):
+                keyed[str(k)] = c
+            else:
+                warnings.warn(f"ignored unparseable bar color for '{k}': {c!r}")
+        colors, used = [], []
+        for g in flat:
+            col = keyed.get(str(g))                                   # exact group match wins
+            key_used = str(g) if col is not None else None
+            if col is None:
+                gl = str(g).lower()
+                for k, c in keyed.items():
+                    if k.lower() in gl:                              # substring/token match
+                        col, key_used = c, k
+                        break
+            colors.append(col if col is not None else default_palette[g])
+            if key_used is not None and key_used not in used:
+                used.append(key_used)
+        legend = [(k, keyed[k]) for k in used]
+        return colors, legend
+    return [default_palette[g] for g in flat], []
+
+
 def get_palette(groups: List[str], control_group: str = None, override=None) -> Dict[str, str]:
     """
     Get color palette for groups.
@@ -832,7 +879,8 @@ class Visualizer:
         control_group: str = None,
         title: str = None,
         filename: str = None,
-        ylabel: str = None
+        ylabel: str = None,
+        bar_colors=None
     ) -> Optional[str]:
         """Clustered bar chart (mean ± SEM + points): the bars of RELATED groups sit adjacent, and a
         gap separates one cluster from the next, with a cluster label beneath. The caller defines the
@@ -866,17 +914,26 @@ class Visualizer:
             palette = get_palette(flat, control_group or guess_control_group(flat), override=self.palette)
 
         # x positions: within a cluster the bars step by 1.0 (adjacent); between clusters add a gap.
+        # pos_in_cluster is each bar's index within its cluster (0,1,… restarting per cluster) — the
+        # "series" a repeating bar_colors list keys off.
         GAP = 1.1
-        positions, centers, spans, x = [], [], [], 0.0
+        positions, centers, spans, pos_in_cluster, x = [], [], [], [], 0.0
         for _, gs in clusters:
             start = x
-            for _g in gs:
+            for i, _g in enumerate(gs):
                 positions.append(x)
+                pos_in_cluster.append(i)
                 x += 1.0
             end = x - 1.0
             centers.append((start + end) / 2.0)
             spans.append((start - 0.45, end + 0.45))
             x += GAP
+
+        # Resolve the per-bar colors. bar_colors lets the SAME color repeat across clusters: a dict
+        # {token-or-group: color} colors any bar whose group matches (so "24h" paints every "…24h"
+        # group the same, with a legend), a list colors by within-cluster position (cycled). Unmatched
+        # bars keep the default per-group palette.
+        bar_color_list, color_legend = _resolve_bar_colors(bar_colors, flat, pos_in_cluster, palette)
 
         means, sems, per_group = [], [], []
         for g in flat:
@@ -887,7 +944,7 @@ class Visualizer:
 
         n_clusters = len(clusters)
         fig, ax = _plt.subplots(figsize=(max(6, len(flat) * 0.95 + n_clusters * 0.5), 6))
-        ax.bar(positions, means, yerr=sems, color=[palette[g] for g in flat], alpha=0.9,
+        ax.bar(positions, means, yerr=sems, color=bar_color_list, alpha=0.9,
                edgecolor='#333333', linewidth=0.8, width=0.92, capsize=4,
                error_kw={'elinewidth': 1.0, 'ecolor': '#333333'}, zorder=2)
         rng = np.random.RandomState(0)
@@ -902,6 +959,12 @@ class Visualizer:
         ax.set_title(title or f'{metric_label} by {group_by.replace("_", " ").title()}', fontweight='bold')
         ax.set_ylabel(ylabel or metric_label)
         apply_publication_style(ax)
+
+        # Legend for the repeating colors (e.g. 24h / 48h) so a reader knows what each color means.
+        if color_legend:
+            import matplotlib.patches as _mpatches
+            handles = [_mpatches.Patch(facecolor=c, edgecolor='#333333', label=k) for k, c in color_legend]
+            ax.legend(handles=handles, frameon=False, fontsize=9, loc='best')
 
         # Cluster label + underline beneath the per-bar labels (a second grouping level).
         if any(lbl for lbl, _ in clusters):
@@ -1503,7 +1566,8 @@ def generate_all_visualizations(
     condition_matrix: dict = None,
     group_order=None,
     palette=None,
-    bar_groups=None
+    bar_groups=None,
+    bar_colors=None
 ) -> Dict[str, str]:
     """
     Generate all available visualizations.
@@ -1595,7 +1659,7 @@ def generate_all_visualizations(
             if metric in film_summary.columns:
                 _safe(f'grouped_bar_{metric}', lambda m=metric: viz.grouped_bar(
                     film_summary, m, group_by, bar_groups,
-                    control_group=control_group, ylabel=_ylabel(m)))
+                    control_group=control_group, ylabel=_ylabel(m), bar_colors=bar_colors))
 
     # Mean + CI plots for publication-standard visualization
     # Include area and hue for biological significance

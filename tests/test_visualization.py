@@ -191,3 +191,20 @@ def test_grouped_bar_clusters_render_and_skip_missing(tmp_path):
     assert out and (tmp_path / "g.png").exists()
     # empty / no-match clusters -> None, never raises
     assert Visualizer(tmp_path).grouped_bar(df, "n_total", "group", {"x": ["nope"]}) is None
+
+
+def test_resolve_bar_colors_repeats_by_token_and_position():
+    from scat.visualization import _resolve_bar_colors
+    flat = ["mF 24h", "mF 48h", "saline 24h", "saline 48h"]
+    pos = [0, 1, 0, 1]
+    default = {g: "#000000" for g in flat}
+    # dict by token: every "…24h" blue, every "…48h" orange — color REPEATS across clusters + legend
+    colors, legend = _resolve_bar_colors({"24h": "#4C72B0", "48h": "#DD8452"}, flat, pos, default)
+    assert colors == ["#4C72B0", "#DD8452", "#4C72B0", "#DD8452"]
+    assert legend == [("24h", "#4C72B0"), ("48h", "#DD8452")]
+    # list by within-cluster position, cycled
+    colors2, legend2 = _resolve_bar_colors(["#111111", "#222222"], flat, pos, default)
+    assert colors2 == ["#111111", "#222222", "#111111", "#222222"] and legend2 == []
+    # exact group key wins over the default; unparseable colors are dropped
+    colors3, _ = _resolve_bar_colors({"mF 24h": "#ABCDEF", "48h": "notacolor"}, flat, pos, default)
+    assert colors3[0] == "#ABCDEF" and colors3[1] == "#000000"   # bad "48h" color dropped -> default
