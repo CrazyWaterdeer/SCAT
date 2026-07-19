@@ -823,6 +823,104 @@ class Visualizer:
         _plt.close()
         return str(filepath)
 
+    def grouped_bar(
+        self,
+        film_summary: pd.DataFrame,
+        metric: str,
+        group_by: str,
+        bar_groups,
+        control_group: str = None,
+        title: str = None,
+        filename: str = None,
+        ylabel: str = None
+    ) -> Optional[str]:
+        """Clustered bar chart (mean ± SEM + points): the bars of RELATED groups sit adjacent, and a
+        gap separates one cluster from the next, with a cluster label beneath. The caller defines the
+        clusters and the within-cluster order.
+
+        bar_groups: a dict {cluster_label: [group, ...]} (order preserved, label shown under the
+        cluster) OR a list of lists [[group, ...], ...] (unlabeled). Groups not present in the data are
+        skipped; the within-cluster order is the caller's (not re-sorted)."""
+        if not HAS_MATPLOTLIB or not bar_groups:
+            return None
+        if metric not in film_summary.columns or group_by not in film_summary.columns:
+            return None
+
+        present = {str(g) for g in film_summary[group_by].dropna().unique()}
+        items = bar_groups.items() if isinstance(bar_groups, dict) else [(None, gl) for gl in bar_groups]
+        clusters = []
+        for label, glist in items:
+            gs = [str(g) for g in (glist or []) if str(g) in present]
+            if gs:
+                clusters.append((label, gs))
+        if not clusters:
+            return None
+        flat = [g for _, gs in clusters for g in gs]
+
+        if is_hue_metric(metric):
+            palette = {}
+            for g in flat:
+                mh = film_summary[film_summary[group_by] == g][metric].mean()
+                palette[g] = hue_to_rgb(mh) if not np.isnan(mh) else DEFAULT_GRAY
+        else:
+            palette = get_palette(flat, control_group or guess_control_group(flat), override=self.palette)
+
+        # x positions: within a cluster the bars step by 1.0 (adjacent); between clusters add a gap.
+        GAP = 1.1
+        positions, centers, spans, x = [], [], [], 0.0
+        for _, gs in clusters:
+            start = x
+            for _g in gs:
+                positions.append(x)
+                x += 1.0
+            end = x - 1.0
+            centers.append((start + end) / 2.0)
+            spans.append((start - 0.45, end + 0.45))
+            x += GAP
+
+        means, sems, per_group = [], [], []
+        for g in flat:
+            vals = film_summary[film_summary[group_by] == g][metric].dropna()
+            per_group.append(vals.values)
+            means.append(float(vals.mean()) if len(vals) else 0.0)
+            sems.append(float(vals.sem()) if len(vals) > 1 else 0.0)
+
+        n_clusters = len(clusters)
+        fig, ax = _plt.subplots(figsize=(max(6, len(flat) * 0.95 + n_clusters * 0.5), 6))
+        ax.bar(positions, means, yerr=sems, color=[palette[g] for g in flat], alpha=0.9,
+               edgecolor='#333333', linewidth=0.8, width=0.92, capsize=4,
+               error_kw={'elinewidth': 1.0, 'ecolor': '#333333'}, zorder=2)
+        rng = np.random.RandomState(0)
+        for pos, vals in zip(positions, per_group):
+            if len(vals):
+                ax.scatter(pos + rng.uniform(-0.16, 0.16, len(vals)), vals, s=30, color='#333333',
+                           alpha=0.55, edgecolors='white', linewidth=0.5, zorder=3)
+
+        set_group_xticklabels(ax, flat, positions=positions)
+        ax.set_xlim(positions[0] - 0.7, positions[-1] + 0.7)
+        metric_label = get_feature_label(metric)
+        ax.set_title(title or f'{metric_label} by {group_by.replace("_", " ").title()}', fontweight='bold')
+        ax.set_ylabel(ylabel or metric_label)
+        apply_publication_style(ax)
+
+        # Cluster label + underline beneath the per-bar labels (a second grouping level).
+        if any(lbl for lbl, _ in clusters):
+            import matplotlib.transforms as mtransforms
+            trans = mtransforms.blended_transform_factory(ax.transData, ax.transAxes)
+            y_line, y_text = -0.155, -0.185
+            for (label, _), (x0, x1), cx in zip(clusters, spans, centers):
+                ax.plot([x0, x1], [y_line, y_line], transform=trans, color=MUTED, lw=1.1,
+                        clip_on=False, zorder=1)
+                if label:
+                    ax.text(cx, y_text, str(label), transform=trans, ha='center', va='top',
+                            fontsize=10.5, fontweight='bold', color=INK, clip_on=False)
+
+        _plt.tight_layout()
+        filepath = self.output_dir / (filename or f'grouped_bar_{metric}_by_{group_by}.png')
+        _plt.savefig(filepath, dpi=300, bbox_inches='tight')
+        _plt.close()
+        return str(filepath)
+
     def _add_significance_annotations(
         self, ax, data: pd.DataFrame, metric: str, group_by: str,
         groups: List[str], mode: str = 'auto', control_group: str = None,
@@ -1404,7 +1502,8 @@ def generate_all_visualizations(
     show_ns: bool = False,
     condition_matrix: dict = None,
     group_order=None,
-    palette=None
+    palette=None,
+    bar_groups=None
 ) -> Dict[str, str]:
     """
     Generate all available visualizations.
@@ -1488,6 +1587,15 @@ def generate_all_visualizations(
                     film_summary, m, group_by, condition_matrix,
                     control_group=control_group, show_significance=show_significance,
                     significance_mode=significance_mode, show_ns=show_ns, ylabel=_ylabel(m)))
+
+    # Clustered ("grouped") bar charts when the caller defines clusters of related groups: bars within
+    # a cluster sit adjacent, clusters are separated by a gap + a label. One per primary metric.
+    if bar_groups and group_by:
+        for metric in primary_metrics:
+            if metric in film_summary.columns:
+                _safe(f'grouped_bar_{metric}', lambda m=metric: viz.grouped_bar(
+                    film_summary, m, group_by, bar_groups,
+                    control_group=control_group, ylabel=_ylabel(m)))
 
     # Mean + CI plots for publication-standard visualization
     # Include area and hue for biological significance

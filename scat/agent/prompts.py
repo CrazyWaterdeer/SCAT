@@ -95,6 +95,13 @@ group, open ○ = absent), one row per factor — the standard molecular-biology
 the group labels YOU inferred into their factors to build it. Groups are auto-ordered logically \
 (control first, then low<mid<high or numeric dose), so you don't sort them yourself.
 State the bracket choice you made and why (e.g. "compared each dose to control").
+Clustered ("grouped") bar chart — when the user wants RELATED bars drawn adjacent with a gap between \
+clusters (e.g. the two timepoints of each drug side by side, drugs separated): pass bar_groups to \
+analyze_folder (or rerender_report for an existing run) as {cluster_label: [group, …]} — each value \
+lists, in left-to-right order, the groups that belong together. The bars within a cluster sit adjacent \
+(mean ± SEM + points), clusters are spaced apart with the label beneath. You build bar_groups from the \
+grouping the user describes in plain language. This is DIFFERENT from condition_matrix (the factorial \
+●/○ design table) — use bar_groups for simple visual clustering, condition_matrix for crossed factors.
 
 Manual-review gate (analyze now, produce outputs later): the user may want to hand-correct the \
 detections BEFORE any report or statistics. When they ask to review/edit first (or say "don't make \
