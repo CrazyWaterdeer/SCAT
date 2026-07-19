@@ -56,9 +56,9 @@ def _results_dir_from_tool(name: str, output):
             return None
     if not isinstance(data, dict):
         return None
-    if name in ("analyze_folder", "combine_results") and data.get("output_dir"):
+    if name in ("analyze_folder", "combine_results", "rerender_report") and data.get("output_dir"):
         return str(data["output_dir"])
-    if name == "generate_report" and data.get("report_path"):
+    if name in ("generate_report", "rerender_report") and data.get("report_path"):
         return str(Path(data["report_path"]).parent)
     return None
 
@@ -686,8 +686,8 @@ class ChatDockWidget(QWidget):
     pickers below."""
 
     # Emitted with a results directory when the agent finishes a tool that produces/refreshes a
-    # reviewable analysis (analyze_folder / combine_results / generate_report) — the main window
-    # loads it into the workspace so the agent's results are reviewable just like a manual run.
+    # reviewable analysis (analyze_folder / combine_results / generate_report / rerender_report) —
+    # the main window loads it into the workspace so the agent's results are reviewable like a run.
     analysis_ready = Signal(str)
 
     def __init__(self, parent=None):
