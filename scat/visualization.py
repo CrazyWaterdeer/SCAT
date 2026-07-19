@@ -167,17 +167,50 @@ def is_hue_metric(metric: str) -> bool:
     return 'hue' in metric.lower()
 
 
-def get_palette(groups: List[str], control_group: str = None) -> Dict[str, str]:
+def normalize_palette_override(override, groups) -> Dict[str, str]:
+    """Turn a caller color override into a {group_value: color} dict for `groups`.
+
+    `override` may be a dict {group -> color} (keys matched to the raw group value OR its display
+    label, so a caller may pass "WT" for "WT (driverless ctrl)"), or a LIST/tuple of colors applied
+    in the given group order. Unknown keys / extra colors are ignored; empty/falsy colors skip.
+    Colors are whatever matplotlib accepts (hex, name, rgb tuple) — validate upstream if you want to
+    warn on typos."""
+    if not override:
+        return {}
+    # Only keep colors matplotlib can actually paint, so a bad value persisted in a manifest or typed
+    # by hand can never raise inside set_facecolor / seaborn — the group falls back to the default.
+    try:
+        from matplotlib.colors import is_color_like as _ok
+    except Exception:
+        _ok = lambda c: True
+    if isinstance(override, (list, tuple)):
+        return {g: c for g, c in zip(groups, override) if c and _ok(c)}
+    if isinstance(override, dict):
+        keyed = {str(k): c for k, c in override.items() if c and _ok(c)}
+        out = {}
+        for g in groups:
+            if str(g) in keyed:
+                out[g] = keyed[str(g)]
+            elif _display_label(str(g)) in keyed:
+                out[g] = keyed[_display_label(str(g))]
+        return out
+    return {}
+
+
+def get_palette(groups: List[str], control_group: str = None, override=None) -> Dict[str, str]:
     """
     Get color palette for groups.
-    
+
     Args:
         groups: List of group names
         control_group: Name of control group (will be gray)
-    
+        override: Optional caller color override (dict {group->color} or list in group order);
+            an overridden group takes the given color, everything else keeps the default cycle.
+
     Returns:
         Dict mapping group names to colors
     """
+    ov = normalize_palette_override(override, groups)
     palette = {}
     has_control = bool(control_group and control_group in groups)
     # When a control takes the slate grey (PASTEL_PALETTE[0]), cycle the conditions over the REST
@@ -186,7 +219,9 @@ def get_palette(groups: List[str], control_group: str = None) -> Dict[str, str]:
     color_idx = 0
 
     for group in groups:
-        if has_control and group == control_group:
+        if group in ov:
+            palette[group] = ov[group]                      # explicit caller color wins
+        elif has_control and group == control_group:
             palette[group] = CONTROL_COLOR
         else:
             palette[group] = pool[color_idx % len(pool)]
@@ -262,7 +297,7 @@ def _ordered_within(groups) -> List[str]:
     return gs
 
 
-def order_groups(values, control_group: str = None) -> List[str]:
+def order_groups(values, control_group: str = None, explicit_order=None) -> List[str]:
     """Order groups for display by LOGICAL structure, never plain alphabetical (which scrambles
     Low/Mid/High and 2/10/100 and puts 'treated' before 'untreated'). Control/reference groups come
     first (an explicit control_group leads; the remaining controls keep the order they were defined),
@@ -272,8 +307,29 @@ def order_groups(values, control_group: str = None) -> List[str]:
     Group names are arbitrary: NOTHING about specific genotypes, drugs, temperatures or conditions is
     hard-coded — only two generic signals are inferred, 'looks like a control' and 'carries a level
     word or a number'. Everything else keeps the experimenter's defined order. Pass control_group to
-    pin a reference explicitly."""
+    pin a reference explicitly.
+
+    ``explicit_order`` fully overrides the logic: the caller-supplied order wins for every name it
+    lists (in that exact order), and any present value it omits is appended afterwards via the normal
+    logical ordering. It is matched leniently — a caller may pass the display label WITHOUT the
+    trailing '(…)' note (see _display_label), and it still matches the full group value. Unknown names
+    in the list are ignored, so a stale/typo'd order never drops real groups."""
     seen = list(dict.fromkeys(str(v) for v in values))          # appearance (defined) order, de-duped
+    if explicit_order:
+        # Map both the raw value and its display-stripped form to the actual group value, so the
+        # caller can order by either. First match wins; later duplicates are ignored.
+        lookup = {}
+        for g in seen:
+            lookup.setdefault(g, g)
+            lookup.setdefault(_display_label(g), g)
+        lead_list, used = [], set()
+        for name in explicit_order:
+            g = lookup.get(str(name)) or lookup.get(_display_label(str(name)))
+            if g is not None and g not in used:
+                lead_list.append(g)
+                used.add(g)
+        rest = [g for g in seen if g not in used]
+        return lead_list + order_groups(rest, control_group)     # leftovers keep logical order
     lead = str(control_group) if control_group is not None and str(control_group) in seen else None
     controls = [g for g in seen if g != lead and _is_control(g)]     # kept in defined order
     rest = [g for g in seen if g != lead and g not in controls]
@@ -417,11 +473,17 @@ def _load_viz_libs():
 class Visualizer:
     """Generate publication-ready visualizations for excreta analysis."""
     
-    def __init__(self, output_dir: Path, style: str = 'whitegrid'):
+    def __init__(self, output_dir: Path, style: str = 'whitegrid', group_order=None, palette=None):
         _load_viz_libs()  # Lazy load visualization libraries
-        
+
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        # Optional caller-supplied group display order (overrides the logical order_groups()
+        # heuristic); None keeps the automatic control-first / low<mid<high ordering.
+        self.group_order = list(group_order) if group_order else None
+        # Optional caller color override (dict {group->color} or list in group order); None keeps
+        # the default Imajin categorical palette. Normalized per-plot against the actual groups.
+        self.palette = palette
         
         if HAS_MATPLOTLIB and HAS_SEABORN:
             _register_fonts()                  # bundled Noto Sans/Serif (fallback: DejaVu)
@@ -538,10 +600,10 @@ class Visualizer:
             # Get matching indices
             valid_idx = df.index
             groups = film_summary.loc[valid_idx, color_by]
-            unique_groups = order_groups(groups.unique())
+            unique_groups = order_groups(groups.unique(), explicit_order=self.group_order)
             
             # Get palette with control group support
-            palette = get_palette(unique_groups, control_group)
+            palette = get_palette(unique_groups, control_group, override=self.palette)
             
             for group in unique_groups:
                 mask = groups == group
@@ -622,7 +684,7 @@ class Visualizer:
             return None
         
         # Get unique groups and create palette
-        unique_groups = order_groups(film_summary[group_by].dropna().unique())
+        unique_groups = order_groups(film_summary[group_by].dropna().unique(), explicit_order=self.group_order)
         
         # For hue metrics, use actual hue values as colors
         if is_hue_metric(metric):
@@ -634,7 +696,7 @@ class Visualizer:
                 else:
                     palette[group] = DEFAULT_GRAY
         else:
-            palette = get_palette(unique_groups, control_group)
+            palette = get_palette(unique_groups, control_group, override=self.palette)
         
         fig, ax = _plt.subplots(figsize=(max(8, len(unique_groups) * 1.5), 6))
         
@@ -694,7 +756,7 @@ class Visualizer:
         if metric not in film_summary.columns or group_by not in film_summary.columns:
             return None
 
-        groups = order_groups(film_summary[group_by].dropna().unique(), control_group)
+        groups = order_groups(film_summary[group_by].dropna().unique(), control_group, explicit_order=self.group_order)
         if not groups:
             return None
         ctrl = control_group if control_group in groups else guess_control_group(groups)
@@ -705,7 +767,7 @@ class Visualizer:
                 mh = film_summary[film_summary[group_by] == g][metric].mean()
                 palette[g] = hue_to_rgb(mh) if not np.isnan(mh) else DEFAULT_GRAY
         else:
-            palette = get_palette(groups, ctrl)
+            palette = get_palette(groups, ctrl, override=self.palette)
 
         x = np.arange(len(groups))
         means, sems, per_group = [], [], []
@@ -899,7 +961,7 @@ class Visualizer:
         
         from scipy import stats
         
-        unique_groups = order_groups(film_summary[group_by].dropna().unique())
+        unique_groups = order_groups(film_summary[group_by].dropna().unique(), explicit_order=self.group_order)
         
         # Calculate mean and CI for each group
         means = []
@@ -936,7 +998,7 @@ class Visualizer:
                 else:
                     colors.append(DEFAULT_GRAY)
         else:
-            palette = get_palette(unique_groups, control_group)
+            palette = get_palette(unique_groups, control_group, override=self.palette)
             colors = [palette[g] for g in unique_groups]
         
         fig, ax = _plt.subplots(figsize=(max(8, len(unique_groups) * 1.5), 6))
@@ -1107,8 +1169,8 @@ class Visualizer:
         
         if color_by and color_by in film_summary.columns:
             plot_df[color_by] = film_summary[color_by]
-            unique_groups = order_groups(plot_df[color_by].dropna().unique())
-            palette = get_palette(unique_groups, control_group)
+            unique_groups = order_groups(plot_df[color_by].dropna().unique(), explicit_order=self.group_order)
+            palette = get_palette(unique_groups, control_group, override=self.palette)
             g = _sns.pairplot(
                 plot_df, hue=color_by, palette=palette, 
                 diag_kind='kde', plot_kws={'alpha': 0.7, 'edgecolor': 'white', 's': 50}
@@ -1206,9 +1268,9 @@ class Visualizer:
 
         # Get unique groups and calculate optimal width
         if group_by and group_by in film_summary.columns:
-            unique_groups = order_groups(film_summary[group_by].dropna().unique())
+            unique_groups = order_groups(film_summary[group_by].dropna().unique(), explicit_order=self.group_order)
             n_groups = len(unique_groups)
-            palette = get_palette(unique_groups, control_group)
+            palette = get_palette(unique_groups, control_group, override=self.palette)
             
             # Box width: max 0.6, scales down with more groups
             box_width = min(0.6, 0.8 / max(1, n_groups / 4))
@@ -1323,7 +1385,9 @@ def generate_all_visualizations(
     show_significance: bool = True,
     significance_mode: str = 'auto',
     show_ns: bool = False,
-    condition_matrix: dict = None
+    condition_matrix: dict = None,
+    group_order=None,
+    palette=None
 ) -> Dict[str, str]:
     """
     Generate all available visualizations.
@@ -1338,12 +1402,27 @@ def generate_all_visualizations(
         significance_mode: Which comparisons to bracket — 'auto'|'vs_control'|'adjacent'|'pairwise'|'none'
             (see the agent guidance in prompts.py; 'auto' avoids all-pairwise clutter)
         show_ns: Also draw non-significant brackets (default False)
+        group_order: Optional explicit group display order (overrides the logical auto-order)
+        palette: Optional caller color override (dict {group->color} or list in group order)
 
     Returns:
         Dict mapping visualization name to filepath
+
+    Each plot is generated under its own guard: a single plot that fails (e.g. a seaborn/matplotlib
+    quirk on one metric) is skipped with a warning and never aborts the rest of the figures.
     """
-    viz = Visualizer(output_dir)
+    viz = Visualizer(output_dir, group_order=group_order, palette=palette)
     results = {}
+
+    def _safe(name, fn):
+        """Run one plot builder; on any failure log + skip so the other figures still render."""
+        try:
+            path = fn()
+        except Exception as e:
+            warnings.warn(f"visualization '{name}' skipped: {type(e).__name__}: {e}")
+            return
+        if path:
+            results[name] = path
 
     # Artifact-exclusive deposit count (Normal+ROD) in memory so the standalone plots agree with
     # the report/stats (which use n_deposits). Never written to disk.
@@ -1354,20 +1433,12 @@ def generate_all_visualizations(
     _count_metric = 'n_deposits' if 'n_deposits' in film_summary.columns else 'n_total'
 
     # Dashboard
-    path = viz.summary_dashboard(film_summary, group_by, control_group)
-    if path:
-        results['dashboard'] = path
-    
+    _safe('dashboard', lambda: viz.summary_dashboard(film_summary, group_by, control_group))
     # PCA
-    path = viz.pca_plot(film_summary, color_by=group_by, control_group=control_group)
-    if path:
-        results['pca'] = path
-    
+    _safe('pca', lambda: viz.pca_plot(film_summary, color_by=group_by, control_group=control_group))
     # Heatmap
-    path = viz.heatmap(film_summary)
-    if path:
-        results['heatmap'] = path
-    
+    _safe('heatmap', lambda: viz.heatmap(film_summary))
+
     # Violin plots for key metrics
     # Primary metrics (always generated); deposit count is artifact-exclusive (Normal+ROD).
     primary_metrics = ['rod_fraction', 'total_iod', _count_metric]
@@ -1377,30 +1448,26 @@ def generate_all_visualizations(
         'normal_mean_hue', 'rod_mean_hue',        # pH proxy (Bromophenol Blue)
         'normal_mean_lightness', 'rod_mean_lightness',  # Pigment density
     ]
-    
+
     for metric in primary_metrics + secondary_metrics:
         if metric in film_summary.columns and group_by:
-            path = viz.violin_comparison(
-                film_summary, metric, group_by,
+            _safe(f'violin_{metric}', lambda m=metric: viz.violin_comparison(
+                film_summary, m, group_by,
                 control_group=control_group,
                 show_significance=show_significance,
                 significance_mode=significance_mode,
                 show_ns=show_ns
-            )
-            if path:
-                results[f'violin_{metric}'] = path
+            ))
 
     # Condition-matrix bar charts (open/closed circles) for factorial designs, when the caller
     # supplies the design table. One per primary metric.
     if condition_matrix and group_by:
         for metric in primary_metrics:
             if metric in film_summary.columns:
-                path = viz.condition_comparison(
-                    film_summary, metric, group_by, condition_matrix,
+                _safe(f'condition_{metric}', lambda m=metric: viz.condition_comparison(
+                    film_summary, m, group_by, condition_matrix,
                     control_group=control_group, show_significance=show_significance,
-                    significance_mode=significance_mode, show_ns=show_ns)
-                if path:
-                    results[f'condition_{metric}'] = path
+                    significance_mode=significance_mode, show_ns=show_ns))
 
     # Mean + CI plots for publication-standard visualization
     # Include area and hue for biological significance
@@ -1411,23 +1478,17 @@ def generate_all_visualizations(
     ]
     for metric in mean_ci_metrics:
         if metric in film_summary.columns and group_by:
-            path = viz.mean_ci_plot(
-                film_summary, metric, group_by,
+            _safe(f'mean_ci_{metric}', lambda m=metric: viz.mean_ci_plot(
+                film_summary, m, group_by,
                 control_group=control_group
-            )
-            if path:
-                results[f'mean_ci_{metric}'] = path
-    
+            ))
+
     # Scatter matrix
-    path = viz.scatter_matrix(film_summary, color_by=group_by, control_group=control_group)
-    if path:
-        results['scatter_matrix'] = path
-    
+    _safe('scatter_matrix', lambda: viz.scatter_matrix(film_summary, color_by=group_by, control_group=control_group))
+
     # Area vs IOD scatter
     if deposits_df is not None and len(deposits_df) > 0:
-        path = viz.area_iod_scatter(deposits_df)
-        if path:
-            results['area_iod'] = path
+        _safe('area_iod', lambda: viz.area_iod_scatter(deposits_df))
 
     return results
 

@@ -114,7 +114,7 @@ def _abspath(p) -> str:
 def write_run_manifest(output_dir, *, path=None, image_paths, model_type=None, model_path=None,
                        circularity=None, groups=None, group_column=None, detection=None,
                        warnings=None, primary_metric=None, normalization=None,
-                       confidence_threshold=None) -> dict:
+                       confidence_threshold=None, palette=None) -> dict:
     """Write <output_dir>/run_manifest.json describing this analysis run. Best-effort (OSError
     is swallowed) and additive — a new sidecar file that never touches the CSV outputs."""
     def _thr(v):
@@ -141,6 +141,8 @@ def write_run_manifest(output_dir, *, path=None, image_paths, model_type=None, m
             "normalization": (normalization if normalization in _metrics.NORMALIZATIONS
                               else _metrics.DEFAULT_NORMALIZATION),
             "confidence_threshold": _thr(confidence_threshold),
+            # caller color override, only when supplied (keeps the block clean for default runs)
+            **({"palette": palette} if palette else {}),
         },
         "warnings": list(warnings) if warnings else [],
     }

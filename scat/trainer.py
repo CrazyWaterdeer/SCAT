@@ -4,6 +4,7 @@ Supports Random Forest and CNN (transfer learning) models.
 """
 
 import json
+import ntpath
 import pickle
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional
@@ -83,9 +84,14 @@ class DataLoader:
             with open(label_file) as f:
                 data = json.load(f)
             
-            # Find corresponding image (support both 'image_file' and 'filename' keys)
+            # Find corresponding image (support both 'image_file' and 'filename' keys).
+            # Labels written on Windows store a Windows-absolute image_file (e.g.
+            # ``C:\Users\Jin\imgs\x.tif``); ``Path(ref).name`` on POSIX keeps the whole
+            # backslash string, so every image would be "not found". ntpath.basename
+            # treats both ``\`` and ``/`` as separators, so it extracts the basename
+            # regardless of which OS wrote the label. See scat/pathutils.py.
             image_ref = data.get('image_file', data.get('filename', ''))
-            image_name = Path(image_ref).name
+            image_name = ntpath.basename(str(image_ref))
             image_path = self.image_dir / image_name
             
             # Try common extensions if not found

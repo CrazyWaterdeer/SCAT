@@ -26,7 +26,7 @@ except ImportError:
 
 # Import color constants from visualization for consistency
 from .visualization import (
-    DEFAULT_GRAY, PASTEL_PALETTE,
+    DEFAULT_GRAY, PASTEL_PALETTE, get_palette,
     apply_publication_style, hue_to_rgb, order_groups, set_group_xticklabels
 )
 from . import __version__
@@ -476,9 +476,18 @@ class ReportGenerator:
         # Fallback: convert snake_case to Title Case
         return metric_name.replace('_', ' ').title()
     
-    def __init__(self, output_dir: Union[str, Path]):
+    def __init__(self, output_dir: Union[str, Path], group_order=None, control_group=None, palette=None):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        # Optional explicit group display order for the comparison boxplots (overrides the
+        # logical control-first / low<mid<high auto-order); None keeps the automatic order.
+        self.group_order = list(group_order) if group_order else None
+        # Optional reference group pinned first in the boxplot order (matches the standalone
+        # visualizations, which already honor control_group).
+        self.control_group = control_group
+        # Optional caller color override (dict {group->color} or list in group order); None keeps
+        # the default Imajin categorical palette. pH/hue boxplots keep their Bromophenol-Blue color.
+        self.palette = palette
 
     @staticmethod
     def _effective_groups(film, group_by):
@@ -821,7 +830,8 @@ class ReportGenerator:
         # Logical group order (control first, then low<mid<high or numeric dose), not alphabetical;
         # exclude the 'ungrouped' sentinel so it is never drawn as an extra comparison box.
         groups = order_groups([g for g in film_summary[group_by].dropna().unique()
-                               if str(g).strip() != "ungrouped"])
+                               if str(g).strip() != "ungrouped"],
+                              control_group=self.control_group, explicit_order=self.group_order)
         if not groups:
             plt.close(fig)
             return ""
@@ -859,9 +869,12 @@ class ReportGenerator:
                 median.set_color(edge)
                 median.set_linewidth(1.6)
         else:
-            # Standard categorical palette per group
-            for i, patch in enumerate(bp['boxes']):
-                patch.set_facecolor(PASTEL_PALETTE[i % len(PASTEL_PALETTE)])
+            # Standard categorical palette per group — control-aware + caller-override aware
+            # (matches the standalone visualizations), keyed BY GROUP so a color follows its group
+            # regardless of box position.
+            colors = get_palette(list(groups), control_group=self.control_group, override=self.palette)
+            for patch, group in zip(bp['boxes'], groups):
+                patch.set_facecolor(colors.get(group, PASTEL_PALETTE[0]))
                 patch.set_edgecolor('#333333')
                 patch.set_alpha(0.85)
         
@@ -1671,20 +1684,27 @@ def generate_report(
     statistical_results: Dict = None,
     group_by: str = None,
     format: str = 'html',
-    analysis: dict = None
+    analysis: dict = None,
+    group_order=None,
+    control_group=None,
+    palette=None
 ) -> str:
     """
     Convenience function to generate report.
-    
+
     Args:
         film_summary: Film-level summary DataFrame
         output_dir: Output directory
         format: 'html' or 'pdf'
-        
+        group_order: Optional explicit group display order for the comparison boxplots
+        control_group: Optional reference group pinned first in the boxplot order
+        palette: Optional caller color override (dict {group->color} or list in group order)
+
     Returns:
         Path to generated report
     """
-    generator = ReportGenerator(output_dir)
+    generator = ReportGenerator(output_dir, group_order=group_order, control_group=control_group,
+                                palette=palette)
     
     if format == 'pdf':
         return generator.generate_pdf_report(

@@ -3,16 +3,17 @@ from pathlib import Path
 from typing import Optional
 from dataclasses import asdict
 from scat.agent.registry import tool
-from scat.pipeline import analyze_folder_service, run_statistics_service, generate_report_service
+from scat.pipeline import (analyze_folder_service, run_statistics_service, generate_report_service,
+                           rerender_results_service, train_model_service)
 
 
-@tool(description="Detect + classify deposits across a folder and write CSVs/JSON/annotations to a timestamped results dir. Pass groups={filename: group_label} — the mapping YOU inferred from the filenames — to enable group comparison. Errors on duplicate basenames (unsafe to group). Pass image_paths=[...] to analyze ONLY those images (e.g. the pending ones from scan_folder's already_analyzed) instead of the whole folder. Set visualize=True to also render comparison plots; significance_mode chooses which significance brackets to draw ('auto'|'vs_control'|'adjacent'|'pairwise'|'none') — YOU decide it from the design. For a FACTORIAL design (2+ crossed factors, e.g. Drug × Light), pass condition_matrix={factor_name: {group: true/false}} to also render bar charts with an open/closed-circle condition table beneath (● = factor present, ○ = absent). Pass primary_metric (total_deposits [DEFAULT], rod_fraction, mean_area, mean_hue, total_iod, mean_circularity) — the predeclared endpoint this experiment measures; CONFIRM it with the user before running, never silently guess.")
+@tool(description="Detect + classify deposits across a folder and write CSVs/JSON/annotations to a timestamped results dir. Pass groups={filename: group_label} — the mapping YOU inferred from the filenames — to enable group comparison. Errors on duplicate basenames (unsafe to group). Pass image_paths=[...] to analyze ONLY those images (e.g. the pending ones from scan_folder's already_analyzed) instead of the whole folder. Set visualize=True to also render comparison plots; significance_mode chooses which significance brackets to draw ('auto'|'vs_control'|'adjacent'|'pairwise'|'none') — YOU decide it from the design. For a FACTORIAL design (2+ crossed factors, e.g. Drug × Light), pass condition_matrix={factor_name: {group: true/false}} to also render bar charts with an open/closed-circle condition table beneath (● = factor present, ○ = absent). Pass primary_metric (total_deposits [DEFAULT], rod_fraction, mean_area, mean_hue, total_iod, mean_circularity) — the predeclared endpoint this experiment measures; CONFIRM it with the user before running, never silently guess. Pass palette={group_label: color} (hex like '#4C72B0' or CSS name like 'tomato') to set plot COLORS per group; unlisted groups keep the default palette and pH/hue plots keep their Bromophenol-Blue coloring. To CHANGE colors/metric/order on an ALREADY-analyzed folder, use rerender_report instead (no re-detection).")
 def analyze_folder(path: str, groups: Optional[dict] = None, model_type: Optional[str] = None,
                    min_area: int = 20, max_area: int = 10000, circularity: float = 0.6,
                    annotate: bool = True, image_paths: Optional[list[str]] = None,
                    visualize: bool = False, significance_mode: str = "auto",
                    show_ns: bool = False, condition_matrix: Optional[dict] = None,
-                   primary_metric: Optional[str] = None) -> dict:
+                   primary_metric: Optional[str] = None, palette: Optional[dict] = None) -> dict:
     """Run detection + classification over a folder; returns counts + output dir."""
     return asdict(analyze_folder_service(path, groups=groups, model_type=model_type,
                                          min_area=min_area, max_area=max_area,
@@ -20,7 +21,7 @@ def analyze_folder(path: str, groups: Optional[dict] = None, model_type: Optiona
                                          image_paths=image_paths, visualize=visualize,
                                          significance_mode=significance_mode, show_ns=show_ns,
                                          condition_matrix=condition_matrix,
-                                         primary_metric=primary_metric,
+                                         primary_metric=primary_metric, palette=palette,
                                          ambient_progress=True))  # stream progress + honor Stop
 
 
@@ -35,6 +36,31 @@ def generate_report(results_dir: str, statistical_results: Optional[dict] = None
                     group_by: Optional[str] = None) -> dict:
     """Build the self-contained HTML report; returns its path."""
     return {"report_path": generate_report_service(results_dir, statistical_results, group_by)}
+
+
+@tool(description="Re-render statistics + comparison graphs + the HTML report from an EXISTING results dir WITHOUT re-detecting. Use this to (a) produce the outputs AFTER the user has manually reviewed/relabeled the detections (it rebuilds everything from the on-disk CSVs, so their label edits are preserved and the statistics are recomputed to match), and (b) re-graph the SAME detections differently. It NEVER runs detection — the reviewed detections are untouched. Optional overrides: primary_metric (change the headline endpoint the report/graph is keyed to — one of total_deposits|rod_fraction|mean_area|mean_hue|total_iod|mean_circularity); group_order (a list giving the explicit left-to-right order of groups on the x-axis); control_group (pin the reference group, drawn first and in gray); palette (change the COLORS — a dict {group_label: color} where color is a hex like '#4C72B0' or a CSS name like 'tomato'; unlisted groups keep the default palette; pH/hue plots keep their Bromophenol-Blue coloring); significance_mode ('auto'|'vs_control'|'adjacent'|'pairwise'|'none') and show_ns for the bracket style; condition_matrix for a factorial design table. Overrides are saved into run_manifest.json so later reports stay consistent. Prefer this over generate_report whenever the user wants edits reflected or a different metric/order/colors/brackets on already-detected results.")
+def rerender_report(results_dir: str, primary_metric: Optional[str] = None,
+                    group_order: Optional[list] = None, control_group: Optional[str] = None,
+                    group_by: Optional[str] = None, significance_mode: str = "auto",
+                    show_ns: bool = False, condition_matrix: Optional[dict] = None,
+                    palette: Optional[dict] = None,
+                    regenerate_visualizations: bool = True) -> dict:
+    """Rebuild stats + plots + report from an existing results dir (no re-detection)."""
+    return asdict(rerender_results_service(
+        results_dir, primary_metric=primary_metric, group_order=group_order,
+        control_group=control_group, group_by=group_by, significance_mode=significance_mode,
+        show_ns=show_ns, condition_matrix=condition_matrix, palette=palette,
+        regenerate_visualizations=regenerate_visualizations))
+
+
+@tool(description="Train (or retrain) the deposit classifier (Random Forest, or CNN) from LABELED results — the way to UPDATE the active model or make a NEW one. Labels come from a MANUAL review: after the user reviews/relabels a results dir, its deposits/*.labels.json hold the corrected labels, so pass results_dirs=[that dir]. There is NO warm-start/incremental learning — training fits a FRESH model each time, so 'update the existing model' means retrain on the UNION of the old labels + the new ones: pass ALL the relevant results_dirs (and/or an explicit image_dir+label_dir for a curated ground-truth set) together. output=path to write the model; OMIT it to write a timestamped file under models/ (safe — never overwrites the bundled models/model_rf.pkl); to make the trained model the ACTIVE one, set output to '<repo>/models/model_rf.pkl' after confirming with the user. model_type 'rf' (default) or 'cnn'. Returns sample/class counts, accuracy, cross-val, top features, and the model path. IMPORTANT: only train on REVIEWED labels — training on raw un-reviewed detections just re-learns the current model. This tool does NOT detect or label; do that first (analyze_folder, then the user reviews).")
+def train_model(results_dirs: Optional[list] = None, image_dir: Optional[str] = None,
+                label_dir: Optional[str] = None, output: Optional[str] = None,
+                model_type: str = "rf", n_estimators: int = 100) -> dict:
+    """Train an RF/CNN classifier from labeled results dirs and/or an explicit image_dir+label_dir."""
+    return asdict(train_model_service(results_dirs=results_dirs, image_dir=image_dir,
+                                      label_dir=label_dir, output=output, model_type=model_type,
+                                      n_estimators=n_estimators))
 
 
 def _search_roots(folder: Optional[str] = None) -> list[str]:
