@@ -18,7 +18,13 @@ def duplicate_basenames(paths) -> list[str]:
     return sorted({Path(p).name.lower() for p in paths if lc[Path(p).name.lower()] > 1})
 
 
-def build_group_metadata(mapping: dict) -> tuple[pd.DataFrame, list[str]]:
-    """{basename: group|None} -> (DataFrame[filename, group], ['group']). None/'' -> 'ungrouped'."""
+def build_group_metadata(mapping: dict, n_flies: dict | None = None) -> tuple[pd.DataFrame, list[str]]:
+    """{basename: group|None} -> (DataFrame[filename, group(, n_flies)], ['group']). None/'' -> 'ungrouped'.
+
+    n_flies (optional) is a {basename: count} map; its column rides into image_summary.csv via the
+    metadata merge (generate_film_summary), enabling per-fly normalization downstream."""
     rows = [{"filename": f, "group": (g if g else "ungrouped")} for f, g in mapping.items()]
-    return pd.DataFrame(rows), ["group"]
+    df = pd.DataFrame(rows)
+    if n_flies:
+        df["n_flies"] = df["filename"].map(lambda f: n_flies.get(f))
+    return df, ["group"]

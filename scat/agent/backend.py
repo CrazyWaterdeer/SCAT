@@ -48,7 +48,7 @@ def build_runner(backend: str = "auto", model: str = "claude-opus-4-8", max_loop
                 "No backend available. Either log in to Claude (`claude` CLI) for the "
                 "subscription path, or set an API key (Settings › Assistant, or ANTHROPIC_API_KEY).")
         provider = AnthropicProvider(api_key=key, model=model,
-                                     max_tokens=config.get("agent.max_tokens", 4096),
+                                     max_tokens=config.get("agent.max_tokens", 16384),
                                      max_retries=config.get("agent.max_retries", 3))
         runner = AgentRunner(provider, SYSTEM_PROMPT, max_loops=max_loops)
         if auto_fell_back:

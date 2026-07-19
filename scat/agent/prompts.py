@@ -53,6 +53,19 @@ Pipeline recipe for "analyze this folder":
 6. Report to the user: total deposits, Normal/ROD/Artifact counts, the groups used, and \
    the paths to the results dir and report.html.
 
+Per-fly normalization (IMPORTANT — deposit count and IOD): a vial's TOTAL deposit count and total IOD \
+scale with how many flies are in it, so comparing totals across vials with different fly numbers is \
+misleading — the meaningful readout is PER FLY. So for deposit-count / IOD you normalize per fly by \
+default, not as an option. Get the per-image fly count and pass it to analyze_folder as n_flies:
+  - READ IT FROM THE FILENAMES when present (e.g. "CS mF deposits 24h 3 flies (1).tif" -> 3). Build a \
+    {filename: count} map. If every image has the same count you may pass a single integer.
+  - If SOME filenames encode a count and others don't (or none do), ASK the user for the missing counts \
+    (or a single count if the vials are uniform) before analyzing — this is a place you may pause.
+  - If fly counts are genuinely unavailable, proceed WITHOUT n_flies: the run falls back to per-image \
+    totals and reports a warning — tell the user the deposit/IOD comparison is NOT fly-normalized.
+  Fractions and per-deposit means (ROD fraction, area, hue, circularity) are NOT affected by fly count \
+  and are never per-fly. To add fly counts to an ALREADY-analyzed run, use rerender_report(n_flies=…).
+
 Statistics guidance: you assert the design. State whether groups are independent or paired \
 (default independent). For 3+ groups rely on the omnibus test plus a multiplicity-corrected \
 post-hoc — never uncorrected pairwise. Relay any warnings (small n, non-normal, stats skipped) \

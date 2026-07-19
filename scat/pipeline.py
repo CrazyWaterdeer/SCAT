@@ -58,6 +58,28 @@ class AnalyzeResult:
     warnings: list[str] = field(default_factory=list)
 
 
+def _resolve_n_flies(n_flies, images) -> Optional[dict]:
+    """Normalize the n_flies argument to a {basename: positive-int} map (or None). An int/float applies
+    to EVERY image; a dict is keyed by basename (a bare name or a full path both work). Non-positive /
+    unparseable counts are dropped."""
+    if n_flies is None:
+        return None
+    if isinstance(n_flies, (int, float)):
+        v = int(n_flies)
+        return {p.name: v for p in images} if v > 0 else None
+    if isinstance(n_flies, dict):
+        norm: dict = {}
+        for k, val in n_flies.items():
+            try:
+                iv = int(val)
+            except (TypeError, ValueError):
+                continue
+            if iv > 0:
+                norm[Path(str(k)).name] = iv
+        return norm or None
+    return None
+
+
 _SCAN_NAME_CAP = 500
 
 
@@ -97,7 +119,7 @@ def analyze_folder_service(path: str, groups: Optional[dict] = None, model_type:
                            primary_metric: Optional[str] = None,
                            normalization: Optional[str] = None,
                            confidence_threshold: Optional[float] = None,
-                           palette=None) -> AnalyzeResult:
+                           palette=None, n_flies=None) -> AnalyzeResult:
     """Canonical folder analysis. Superset of every caller (CLI + GUI); every param
     beyond the original signature defaults to the value that reproduces the pre-slimdown
     CLI/parity behaviour, so tests/test_pipeline_parity.py (default kwargs) stays byte-identical.
@@ -145,11 +167,26 @@ def analyze_folder_service(path: str, groups: Optional[dict] = None, model_type:
     group_by = None
     group_names: list[str] = []
     warnings: list[str] = []
+    # Resolve per-image fly counts: an int applies to every image; a {basename: count} map is keyed by
+    # basename (matching how metadata joins). Rides into image_summary.csv so deposits/IOD normalize
+    # per fly (fly_normalize) — the meaningful readout when vials hold different numbers of flies.
+    n_flies_map = _resolve_n_flies(n_flies, images)
+    # A per-fly run needs a count for EVERY image; a partial map (some images uncovered) silently falls
+    # back to totals, so flag it. covered<total -> partial; empty map -> none.
+    _covered = sum(1 for p in images if n_flies_map and p.name in n_flies_map)
+    if n_flies_map and _covered < len(images):
+        warnings.append(f"partial n_flies ({_covered}/{len(images)} images) — deposit/IOD stay per-image "
+                        "totals, NOT fly-normalized; provide a count for every image to normalize per fly")
     if groups:
-        metadata, group_by = build_group_metadata(groups)
+        metadata, group_by = build_group_metadata(groups, n_flies=n_flies_map)
         group_names = sorted(set(metadata["group"]) - {"ungrouped"})
         if len(group_names) < 2:
             warnings.append(f"stats skipped: {len(group_names)} group(s) — need >=2 to compare")
+        elif not n_flies_map:
+            warnings.append("no n_flies provided — deposit/IOD comparisons are per-image totals, NOT "
+                            "fly-normalized (misleading if vials hold different numbers of flies)")
+    elif n_flies_map:
+        metadata = pd.DataFrame([{"filename": p.name, "n_flies": n_flies_map.get(p.name)} for p in images])
 
     # Compose the per-image callback. It always drives the caller's explicit callback (the GUI
     # Run button's Qt bar). It ALSO drives the process-global progress/cancel channel ONLY when
@@ -379,7 +416,7 @@ def rerender_results_service(results_dir: str,
                              significance_mode: str = "auto",
                              show_ns: bool = False,
                              condition_matrix: Optional[dict] = None,
-                             palette=None,
+                             palette=None, n_flies=None,
                              regenerate_visualizations: bool = True) -> RerenderResult:
     """Re-render statistics + comparison plots + the HTML report from an EXISTING results dir
     WITHOUT re-detecting. Reads the on-disk image_summary.csv / all_deposits.csv (which may have been
@@ -409,6 +446,22 @@ def rerender_results_service(results_dir: str,
     if not film_path.exists():
         raise FileNotFoundError(f"{IMAGE_SUMMARY} not found in {rd} — not a SCAT results dir")
     film = pd.read_csv(film_path)
+
+    # Add/replace per-image fly counts on an existing run, then normalize per fly. This augments the
+    # vial metadata (an n_flies column) — it does NOT change any detection — and is persisted so the
+    # recomputed stats + rebuilt report read it. Enables "I already analyzed; now normalize per fly".
+    if n_flies is not None and "filename" in film.columns:
+        nmap = _resolve_n_flies(n_flies, [Path(str(f)) for f in film["filename"]])
+        if nmap:
+            film = film.copy()
+            film["n_flies"] = film["filename"].map(lambda f: nmap.get(Path(str(f)).name))
+            film.to_csv(film_path, index=False)
+            changed.append("n_flies")
+            missing = int(film["n_flies"].isna().sum())
+            if missing:
+                warnings.append(f"partial n_flies ({len(film) - missing}/{len(film)} images) — "
+                                "deposit/IOD stay per-image totals until every image has a count")
+
     deposits = pd.read_csv(rd / ALL_DEPOSITS) if (rd / ALL_DEPOSITS).exists() else None
 
     mpath = rd / "run_manifest.json"

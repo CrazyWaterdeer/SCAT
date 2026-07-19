@@ -75,7 +75,8 @@ DEFAULT_CONFIG = {
         "api_key": "",       # Anthropic API key for the billed API backend (blank = use the Claude
                              # subscription). The ANTHROPIC_API_KEY env var, if set, overrides this.
         "max_loops": 40,
-        "max_tokens": 4096,   # API backend: max output tokens per request
+        "max_tokens": 16384,  # API backend: max output tokens per request (raised from 4096 so long
+                              #   replies aren't cut off mid-sentence; it's a cap, only billed if used)
         "max_retries": 3,     # API backend: SDK retry count for 408/409/429/5xx (SDK does the backoff)
         # Extra dirs to scan for prior results (T3.1 resume). Empty = just the analyzed
         # folder's parent (where results dirs are written as siblings).
@@ -175,6 +176,15 @@ class Config:
                     base[key] = value
         
         deep_update(result, loaded)
+
+        # One-time migration: the legacy API output cap (4096) truncated long assistant replies
+        # mid-sentence. Bump anyone still on that exact legacy value to the current default — 4096 was
+        # only ever the old default, never a value a user would deliberately choose. A user who set
+        # anything else (e.g. 8192) is left untouched.
+        agent = result.get("agent")
+        if isinstance(agent, dict) and agent.get("max_tokens") == 4096:
+            agent["max_tokens"] = DEFAULT_CONFIG["agent"]["max_tokens"]
+
         return result
     
     def save(self):

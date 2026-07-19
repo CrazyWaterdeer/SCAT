@@ -47,25 +47,47 @@ def test_normalizations_and_default():
 
 def test_per_image_divisor_is_image_count_not_non_nan_count():
     # total_iod present on both images; deposits rate over 2 images = (12+20)/2 = 16.0
-    assert metrics.format_headline(_film(), "total_deposits", "per_image", meta={}) == "16.0 deposits / image"
+    assert metrics.format_headline(_film(), "total_deposits", per_fly=False) == "16.0 deposits / image"
 
 
 def test_fraction_headline_is_mean_percent():
-    assert metrics.format_headline(_film(), "rod_fraction", "per_image", meta={}).startswith("8.3%")
+    assert metrics.format_headline(_film(), "rod_fraction", per_fly=False).startswith("8.3%")
 
 
-def test_per_fly_without_metadata_degrades_and_is_flagged():
-    text, mode, note = metrics.effective_normalization("per_fly", meta={})
-    assert mode == "per_image" and note  # a non-empty degrade note
-    # and the headline reflects the effective (degraded) mode
-    assert "/ image" in metrics.format_headline(_film(), "total_deposits", "per_fly", meta={})
+def test_fly_normalize_no_counts_falls_back_to_totals():
+    f2, per_fly = metrics.fly_normalize(_film())
+    assert per_fly is False
+    # counts unchanged (still totals); headline stays per image
+    assert list(metrics.metric_values(f2, "total_deposits")) == [12, 20]
+    assert "/ image" in metrics.format_headline(f2, "total_deposits", per_fly=per_fly)
 
 
-def test_per_fly_with_metadata_normalizes():
-    text, mode, note = metrics.effective_normalization("per_fly", meta={"n_flies": 8})
-    assert mode == "per_fly" and note == ""
-    # (12+20)/8 = 4.0 deposits / fly
-    assert metrics.format_headline(_film(), "total_deposits", "per_fly", meta={"n_flies": 8}) == "4.0 deposits / fly"
+def test_fly_normalize_divides_count_and_sum_columns_per_fly():
+    film = _film().assign(n_flies=[3, 2],
+                          normal_total_iod=[900.0, 1800.0], rod_total_iod=[100.0, 200.0])
+    f2, per_fly = metrics.fly_normalize(film)
+    assert per_fly is True
+    # deposits per fly: image a 12/3=4, image b 20/2=10  -> headline mean = (4+10)/2 = 7.0
+    assert list(metrics.metric_values(f2, "total_deposits")) == [4.0, 10.0]
+    assert metrics.format_headline(f2, "total_deposits", per_fly=per_fly) == "7.0 deposits / fly"
+    # total_iod per fly: 1000/3, 2000/2 ; sum-columns divided, fractions/means untouched
+    assert f2["total_iod"].tolist() == [1000.0 / 3, 2000.0 / 2]
+    assert f2["rod_fraction"].tolist() == _film()["rod_fraction"].tolist()   # fraction NOT divided
+    assert f2["mean_area"].tolist() == [80.0, 90.0]                          # mean NOT divided
+
+
+def test_fly_normalize_partial_counts_falls_back():
+    film = _film().assign(n_flies=[3, 0])   # one image missing a valid count
+    f2, per_fly = metrics.fly_normalize(film)
+    assert per_fly is False                 # ALL images must have a count, else totals
+
+
+def test_fly_normalize_is_idempotent():
+    film = _film().assign(n_flies=[3, 2])
+    f2, per_fly = metrics.fly_normalize(film)
+    f3, per_fly2 = metrics.fly_normalize(f2)   # second pass must NOT divide again
+    assert per_fly2 is True
+    assert f3["total_iod"].tolist() == f2["total_iod"].tolist()
 
 
 import pandas as pd

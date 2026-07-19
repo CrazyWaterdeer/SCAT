@@ -268,6 +268,22 @@ def test_rerender_palette_unknown_group_key_warns(results_dir):
     assert any("no matching group" in w for w in res.warnings)
 
 
+def test_rerender_add_n_flies_normalizes_per_fly_without_redetection(results_dir):
+    """Adding per-image fly counts to an existing run makes deposit/IOD per-fly, recomputes stats, and
+    does NOT touch the detected raw counts (only augments an n_flies column)."""
+    from scat.pipeline import run_statistics_service
+    film0 = pd.read_csv(f"{results_dir}/image_summary.csv")
+    raw_counts = (film0["n_normal"] + film0["n_rod"]).tolist()
+    nmap = {f: (2 if "ctrl" in str(f) else 3) for f in film0["filename"]}
+    res = rerender_results_service(results_dir, n_flies=nmap)
+    assert "n_flies" in res.changed
+    film1 = pd.read_csv(f"{results_dir}/image_summary.csv")
+    assert "n_flies" in film1.columns and film1["n_flies"].notna().all()
+    assert (film1["n_normal"] + film1["n_rod"]).tolist() == raw_counts   # detections untouched
+    stats = run_statistics_service(results_dir)
+    assert stats["metadata"]["per_fly"] is True
+
+
 # --------------------------------------------------------------------- trainer WSL basename fix
 def test_dataloader_resolves_windows_image_path(tmp_path):
     """A label written on Windows stores a Windows-absolute image_file; DataLoader must still find

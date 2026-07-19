@@ -488,6 +488,10 @@ class ReportGenerator:
         # Optional caller color override (dict {group->color} or list in group order); None keeps
         # the default Imajin categorical palette. pH/hue boxplots keep their Bromophenol-Blue color.
         self.palette = palette
+        # Per-fly state (set by generate_html_report via fly_normalize): the flag + the per-fly frame
+        # used for the analytical parts (headline, boxplots). _film_pf is None until then.
+        self._per_fly = False
+        self._film_pf = None
 
     @staticmethod
     def _effective_groups(film, group_by):
@@ -537,7 +541,10 @@ class ReportGenerator:
                 fn(film.head(1)); cols.append((label, fn, fmt))
             except Exception:
                 pass
-        head = "".join(f"<th>{_h.escape(c[0])}</th>" for c in cols)
+        # Per-fly column labels for the count/IOD means when the run is fly-normalized (values already
+        # divided in the frame passed in); other columns keep their labels.
+        _pf = {"Deposits / img": "Deposits / fly", "Total IOD": "IOD / fly"} if self._per_fly else {}
+        head = "".join(f"<th>{_h.escape(_pf.get(c[0], c[0]))}</th>" for c in cols)
         rows = ""
         for g in groups:
             sub = film[film[group_by].astype(str).str.strip() == g]
@@ -568,24 +575,31 @@ class ReportGenerator:
         Returns:
             Path to generated HTML file
         """
-        # Calculate summary statistics
+        # DESCRIPTIVE parts (volume summary card, per-image ledger, dataset-scope cards, per-group
+        # table) show RAW detected counts. Only the ANALYTICAL comparison — the headline, the group
+        # comparison boxplots, the deposit-count histogram, and the statistics — is normalized PER FLY
+        # (when every image has a valid n_flies), so raw and per-fly are never mixed inside one card.
         summary = self._calculate_summary(film_summary)
-        
+
+        from scat.metrics import fly_normalize
+        film_pf, self._per_fly = fly_normalize(film_summary)   # per-fly frame for the analytical parts
+        self._film_pf = film_pf
+
         # Generate inline plots
         inline_plots = {}
         if HAS_MATPLOTLIB:
             # Summary distribution plots (order: Count, Area, IOD, pH, ROD, Circularity)
             # Count and ROD fraction: image-level, others: individual deposit-level
-            inline_plots['count_distribution'] = self._generate_count_distribution(film_summary)
+            inline_plots['count_distribution'] = self._generate_count_distribution(film_pf)  # per fly
             inline_plots['area_distribution'] = self._generate_area_distribution(deposit_data)
             inline_plots['iod_distribution'] = self._generate_iod_distribution(deposit_data)
             inline_plots['ph_distribution'] = self._generate_ph_distribution(deposit_data)
-            inline_plots['rod_distribution'] = self._generate_rod_histogram(film_summary)
+            inline_plots['rod_distribution'] = self._generate_rod_histogram(film_summary)  # fraction: raw ok
             inline_plots['circularity_distribution'] = self._generate_circularity_distribution(deposit_data)
 
             if group_by and group_by in film_summary.columns:
-                # Generate all group comparison boxplots
-                group_plots = self._generate_all_group_comparisons(film_summary, group_by)
+                # Group comparison boxplots — PER FLY (film_pf)
+                group_plots = self._generate_all_group_comparisons(film_pf, group_by)
                 inline_plots.update(group_plots)
                 # Section-presence gate only — the value is never rendered; the real
                 # per-metric boxplots are the group_* keys from group_plots above.
@@ -715,9 +729,9 @@ class ReportGenerator:
             counts = (film_summary['n_normal'] + film_summary['n_rod']) \
                 if {'n_normal', 'n_rod'} <= set(film_summary.columns) else film_summary['n_total']
             self._hist_with_mean(ax, counts, bins=15, mean=counts.mean(), mean_label='Mean')
-            ax.set_xlabel('Deposit Count per Image')
+            ax.set_xlabel('Deposits per Fly' if self._per_fly else 'Deposit Count per Image')
             ax.set_ylabel('Number of Images')
-            ax.set_title('Distribution of Deposit Counts')
+            ax.set_title('Distribution of Deposits per Fly' if self._per_fly else 'Distribution of Deposit Counts')
             ax.legend()
         return self._histogram_figure(draw)
 
@@ -903,11 +917,14 @@ class ReportGenerator:
             film_summary['n_deposits'] = film_summary['n_normal'] + film_summary['n_rod']
 
         # Metrics to compare in order matching Summary section:
-        # Count, Area, IOD, pH(Hue), ROD, Circularity
+        # Count, Area, IOD, pH(Hue), ROD, Circularity. The count/IOD labels switch to "per fly" when
+        # the run is fly-normalized (self._per_fly) so the axis matches the (divided) values.
+        deposit_label = 'Deposits / fly' if self._per_fly else 'Deposit Count'
+        iod_label = 'IOD / fly' if self._per_fly else 'Total IOD'
         comparison_metrics = [
-            ('n_deposits', 'Deposit Count', 1.0, False),
+            ('n_deposits', deposit_label, 1.0, False),
             ('mean_area', 'Mean Deposit Area (px²)', 1.0, False),
-            ('total_iod', 'Total IOD', 1.0, False),
+            ('total_iod', iod_label, 1.0, False),
             ('mean_hue', 'pH Indicator (Hue °)', 1.0, True),  # Use hue colors
             ('rod_fraction', 'ROD Fraction (%)', 100.0, False),
             ('mean_circularity', 'Mean Circularity', 1.0, False),
@@ -971,9 +988,10 @@ class ReportGenerator:
         from scat import metrics as _metrics, confidence as _confidence, findings as _findings
         analysis = analysis or {}
         pm = _metrics.resolve_metric(analysis.get("primary_metric"))
-        norm = analysis.get("normalization") or _metrics.DEFAULT_NORMALIZATION
         thr = float(analysis.get("confidence_threshold", _metrics.DEFAULT_THRESHOLD))
-        headline = _metrics.format_headline(film_summary, pm, norm, meta={})
+        # The headline uses the per-fly frame (count/IOD divided) when available; unit label from _per_fly.
+        headline_film = self._film_pf if self._film_pf is not None else film_summary
+        headline = _metrics.format_headline(headline_film, pm, per_fly=self._per_fly)
         n_images = len(film_summary)
         grouped = bool(group_by) and group_by in film_summary.columns
         n_groups = len(self._effective_groups(film_summary, group_by))
@@ -1096,7 +1114,10 @@ class ReportGenerator:
             return int(film_summary[col].sum()) if col in getattr(film_summary, "columns", []) else 0
 
         n_normal, n_rod, n_artifact = _count("n_normal"), _count("n_rod"), _count("n_artifact")
-        table = self._html_per_group_table(film_summary, group_by)
+        # Scope cards above are RAW pooled counts; the per-group MEANS table is the comparison, so it
+        # uses the per-fly frame (matching the boxplots + stats) when the run is fly-normalized.
+        table = self._html_per_group_table(
+            self._film_pf if self._film_pf is not None else film_summary, group_by)
         return f'''
     <!-- Population overview -->
     <div class="section">

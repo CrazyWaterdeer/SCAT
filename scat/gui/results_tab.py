@@ -289,14 +289,14 @@ class ResultsTab(QWidget):
         std_rod_frac = film_summary['rod_fraction'].std()
         n = len(film_summary)
 
-        # Hero: lead with the headline answer, driven by the predeclared primary metric.
+        # Hero: lead with the headline answer, driven by the predeclared primary metric. When the run
+        # carries per-image fly counts, the count/IOD metrics are shown per fly (fly_normalize).
         pm = _metrics.resolve_metric(results.get("primary_metric"))
-        norm = results.get("normalization", _metrics.DEFAULT_NORMALIZATION)
-        meta = results.get("run_meta", {})
+        film_pf, per_fly = _metrics.fly_normalize(film_summary)
         m = _metrics.METRICS[pm]
         self.hero_kicker.setText(m.label.upper())
-        self.hero_value.setText(_metrics.format_headline(film_summary, pm, norm, meta))
-        vals = _metrics.metric_values(film_summary, pm).dropna()
+        self.hero_value.setText(_metrics.format_headline(film_pf, pm, per_fly=per_fly))
+        vals = _metrics.metric_values(film_pf, pm).dropna()
         sd = vals.std() if len(vals) > 1 else 0.0
         self.hero_sub.setText(f"±{sd:.1f}{m.unit}   ·   across {n} image{'s' if n != 1 else ''}")
         # Grouped runs: the hero value is a grand mean across distinct conditions — flag it as pooled

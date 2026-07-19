@@ -9,7 +9,7 @@ class AnthropicProvider:
     name = "anthropic"
 
     def __init__(self, api_key: str | None = None, model: str = "claude-opus-4-8",
-                 max_tokens: int = 4096, max_retries: int = 3) -> None:
+                 max_tokens: int = 16384, max_retries: int = 3) -> None:
         from anthropic import Anthropic
         self.model = model
         self.max_tokens = max_tokens
