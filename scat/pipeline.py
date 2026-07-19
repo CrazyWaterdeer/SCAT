@@ -119,7 +119,7 @@ def analyze_folder_service(path: str, groups: Optional[dict] = None, model_type:
                            primary_metric: Optional[str] = None,
                            normalization: Optional[str] = None,
                            confidence_threshold: Optional[float] = None,
-                           palette=None, n_flies=None, bar_groups=None) -> AnalyzeResult:
+                           palette=None, n_flies=None, bar_groups=None, bar_colors=None) -> AnalyzeResult:
     """Canonical folder analysis. Superset of every caller (CLI + GUI); every param
     beyond the original signature defaults to the value that reproduces the pre-slimdown
     CLI/parity behaviour, so tests/test_pipeline_parity.py (default kwargs) stays byte-identical.
@@ -255,7 +255,8 @@ def analyze_folder_service(path: str, groups: Optional[dict] = None, model_type:
                                         group_by=group_by[0] if group_by else None,
                                         significance_mode=significance_mode, show_ns=show_ns,
                                         condition_matrix=condition_matrix,
-                                        palette=clean_palette, bar_groups=bar_groups)
+                                        palette=clean_palette, bar_groups=bar_groups,
+                                        bar_colors=bar_colors)
         except ImportError as e:
             warnings.append(f"visualizations skipped (missing deps): {e}")
         except Exception as e:  # never let a plotting error abort the analysis or the manifest write
@@ -416,7 +417,7 @@ def rerender_results_service(results_dir: str,
                              significance_mode: str = "auto",
                              show_ns: bool = False,
                              condition_matrix: Optional[dict] = None,
-                             palette=None, n_flies=None, bar_groups=None,
+                             palette=None, n_flies=None, bar_groups=None, bar_colors=None,
                              regenerate_visualizations: bool = True) -> RerenderResult:
     """Re-render statistics + comparison plots + the HTML report from an EXISTING results dir
     WITHOUT re-detecting. Reads the on-disk image_summary.csv / all_deposits.csv (which may have been
@@ -566,7 +567,7 @@ def rerender_results_service(results_dir: str,
                                                significance_mode=significance_mode, show_ns=show_ns,
                                                condition_matrix=condition_matrix,
                                                group_order=effective_order, palette=effective_palette,
-                                               bar_groups=bar_groups)
+                                               bar_groups=bar_groups, bar_colors=bar_colors)
             n_viz = len(res)
         except ImportError as e:
             warnings.append(f"visualizations skipped (missing deps): {e}")

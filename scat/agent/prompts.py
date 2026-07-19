@@ -100,8 +100,13 @@ clusters (e.g. the two timepoints of each drug side by side, drugs separated): p
 analyze_folder (or rerender_report for an existing run) as {cluster_label: [group, …]} — each value \
 lists, in left-to-right order, the groups that belong together. The bars within a cluster sit adjacent \
 (mean ± SEM + points), clusters are spaced apart with the label beneath. You build bar_groups from the \
-grouping the user describes in plain language. This is DIFFERENT from condition_matrix (the factorial \
-●/○ design table) — use bar_groups for simple visual clustering, condition_matrix for crossed factors.
+grouping the user describes in plain language. To REPEAT a colour across clusters (e.g. make every 24 h \
+bar the same colour and every 48 h bar another, in every cluster), pass bar_colors as \
+{token_or_group: colour} — a bar is coloured when its group name contains the token, so \
+{"24h":"#4C72B0","48h":"#DD8452"} paints all …24h one colour and all …48h another, with a legend. The \
+user chooses the angle: cluster by one dimension (bar_groups), colour-repeat by another (bar_colors). \
+This is DIFFERENT from condition_matrix (the factorial ●/○ design table) — use bar_groups for simple \
+visual clustering, condition_matrix for crossed factors.
 
 Manual-review gate (analyze now, produce outputs later): the user may want to hand-correct the \
 detections BEFORE any report or statistics. When they ask to review/edit first (or say "don't make \
