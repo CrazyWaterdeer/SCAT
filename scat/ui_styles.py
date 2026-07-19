@@ -408,16 +408,25 @@ def build_app_stylesheet(theme) -> str:
             /* Menu */
             QMenu {{
                 background-color: {theme.BG_DARK};
+                color: {theme.TEXT_PRIMARY};
                 border: 1px solid {theme.BORDER};
                 border-radius: {theme.RADIUS_CONTAINER}px;
                 padding: 6px;
             }}
             QMenu::item {{
+                color: {theme.TEXT_PRIMARY};
+                background-color: transparent;
                 padding: 8px 24px;
                 border-radius: {theme.RADIUS_CONTROL}px;
             }}
             QMenu::item:selected {{
                 background-color: {theme.SECONDARY};
+                color: {theme.TEXT_PRIMARY};
+            }}
+            QMenu::separator {{
+                height: 1px;
+                background-color: {theme.BORDER};
+                margin: 6px 8px;
             }}
             
             /* ToolTip */
@@ -426,6 +435,37 @@ def build_app_stylesheet(theme) -> str:
                 color: {theme.TEXT_PRIMARY};
                 border: 1px solid {theme.BORDER};
                 padding: 8px;
+                border-radius: {theme.RADIUS_CONTROL}px;
+            }}
+
+            /* Status bar — the outermost bottom strip (was default light chrome) */
+            QStatusBar {{
+                background-color: {theme.BG_BASE};
+                color: {theme.TEXT_MUTED};
+                border-top: 1px solid {theme.BORDER};
+            }}
+            QStatusBar::item {{
+                border: none;
+            }}
+
+            /* Assistant dock — theme its title bar/frame (was default light chrome) */
+            QDockWidget {{
+                color: {theme.TEXT_PRIMARY};
+            }}
+            QDockWidget::title {{
+                background-color: {theme.BG_BASE};
+                color: {theme.TEXT_PRIMARY};
+                text-align: left;
+                padding: 8px 12px;
+                border-bottom: 1px solid {theme.BORDER};
+            }}
+            QDockWidget::close-button, QDockWidget::float-button {{
+                background: transparent;
+                border: none;
+                padding: 2px;
+            }}
+            QDockWidget::close-button:hover, QDockWidget::float-button:hover {{
+                background-color: {theme.BG_HOVER};
                 border-radius: {theme.RADIUS_CONTROL}px;
             }}
         """
