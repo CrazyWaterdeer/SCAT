@@ -58,7 +58,8 @@ scale with how many flies are in it, so comparing totals across vials with diffe
 misleading — the meaningful readout is PER FLY. So for deposit-count / IOD you normalize per fly by \
 default, not as an option. Get the per-image fly count and pass it to analyze_folder as n_flies:
   - READ IT FROM THE FILENAMES when present (e.g. "CS mF deposits 24h 3 flies (1).tif" -> 3). Build a \
-    {filename: count} map. If every image has the same count you may pass a single integer.
+    {filename: count} object covering EVERY image (if every vial has the same count, still map each \
+    filename to that number). A partial map falls back to per-image totals with a warning.
   - If SOME filenames encode a count and others don't (or none do), ASK the user for the missing counts \
     (or a single count if the vials are uniform) before analyzing — this is a place you may pause.
   - If fly counts are genuinely unavailable, proceed WITHOUT n_flies: the run falls back to per-image \

@@ -21,6 +21,28 @@ def test_tool_specs_have_schemas():
     assert specs["analyze_folder"]["input_schema"]["properties"]["path"]["type"] == "string"
 
 
+def test_no_tool_param_is_typeless():
+    """Every LLM-visible tool param must carry a real JSON type (or anyOf/enum) — a param left without
+    a type annotation compiles to a typeless {} schema the model can't fill, so it silently drops the
+    value (this is exactly the bug that broke n_flies). Guards every registered tool at once."""
+    def _typed(schema: dict) -> bool:
+        return bool({"type", "anyOf", "allOf", "oneOf", "enum", "$ref"} & set(schema.keys()))
+    offenders = []
+    for spec in tools.tools_for_anthropic():
+        for pname, pschema in spec["input_schema"].get("properties", {}).items():
+            if not _typed(pschema):
+                offenders.append(f'{spec["name"]}.{pname}')
+    assert not offenders, f"typeless tool params (add a type annotation): {offenders}"
+
+
+def test_n_flies_param_is_object_of_integers():
+    specs = {s["name"]: s for s in tools.tools_for_anthropic()}
+    for tname in ("analyze_folder", "rerender_report"):
+        nf = specs[tname]["input_schema"]["properties"]["n_flies"]
+        obj = next(b for b in nf["anyOf"] if b.get("type") == "object")   # filename -> int map
+        assert obj["additionalProperties"]["type"] == "integer"
+
+
 def test_new_optional_params_are_nullable_not_required():
     specs = {s["name"]: s for s in tools.tools_for_anthropic()}
     af = specs["analyze_folder"]["input_schema"]
