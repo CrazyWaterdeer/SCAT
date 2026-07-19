@@ -1846,8 +1846,11 @@ class LabelingWindow(QMainWindow):
                 n_normal = labels.count('normal')
                 n_rod = labels.count('rod')
                 n_artifact = labels.count('artifact')
-                n_total = n_normal + n_rod
-                rod_fraction = n_rod / n_total if n_total > 0 else 0
+                # n_total = ALL detected objects (incl. artifacts), matching fresh analysis
+                # (AnalysisResult.n_total = len(deposits)); ROD fraction stays ROD/(Normal+ROD).
+                n_total = n_normal + n_rod + n_artifact
+                n_deposits = n_normal + n_rod
+                rod_fraction = n_rod / n_deposits if n_deposits > 0 else 0
                 
                 mask = summary_df['filename'] == filename
                 if mask.any():
