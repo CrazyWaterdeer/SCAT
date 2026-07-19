@@ -284,6 +284,20 @@ def _is_control(name) -> bool:
     return any(w == 'wt' or w.startswith('wt') for w in re.split(r'[^a-z0-9]+', str(name).lower()))
 
 
+def _control_role_rank(name) -> int:
+    """Order WITHIN the control block by genetic role when the label declares one: the DRIVER control
+    (Gal4/+) before the EFFECTOR control (UAS/+) — the standard Drosophila figure order (driver ctrl,
+    effector ctrl, then the experimental cross). Generic controls keep their appearance order in
+    between. These are universal Gal4/UAS binary-system roles, not experiment-specific genotypes;
+    override with group_order / control_group when a run wants a different order."""
+    n = str(name).lower()
+    if 'driver' in n:
+        return 0
+    if 'effector' in n:
+        return 2
+    return 1
+
+
 def _ordered_within(groups) -> List[str]:
     """Order same-kind groups by ordinal level word (low<mid<high) if they ALL carry one, else by an
     embedded number (dose/temperature/time) if they ALL carry one, else keep the order they were
@@ -331,7 +345,9 @@ def order_groups(values, control_group: str = None, explicit_order=None) -> List
         rest = [g for g in seen if g not in used]
         return lead_list + order_groups(rest, control_group)     # leftovers keep logical order
     lead = str(control_group) if control_group is not None and str(control_group) in seen else None
-    controls = [g for g in seen if g != lead and _is_control(g)]     # kept in defined order
+    # Controls first; within them, driver control before effector control (stable sort keeps generic
+    # controls in appearance order between them).
+    controls = sorted((g for g in seen if g != lead and _is_control(g)), key=_control_role_rank)
     rest = [g for g in seen if g != lead and g not in controls]
     return ([lead] if lead else []) + controls + _ordered_within(rest)
 

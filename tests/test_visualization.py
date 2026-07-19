@@ -74,13 +74,29 @@ def test_order_groups_logical_not_alphabetical():
 
 def test_order_groups_controls_before_treated():
     from scat.visualization import order_groups
-    # ALL controls lead, in the order they were DEFINED (not alphabetical, not a hard-coded genetics
-    # order), and the treated/experimental group is last (alphabetical would put 'treated' first here)
+    # ALL controls lead and the treated/experimental group is last. Within the control block the DRIVER
+    # control precedes the EFFECTOR control (Gal4/UAS convention); a generic control keeps appearance
+    # order between them.
     assert order_groups(["treated", "effector control", "driver control", "untreated"]) == \
-        ["effector control", "driver control", "untreated", "treated"]
+        ["driver control", "untreated", "effector control", "treated"]
     # several controls all lead; the treated group comes last
     r = order_groups(["treated", "untreated", "control"])
     assert r[-1] == "treated" and set(r[:2]) == {"untreated", "control"}
+
+
+def test_order_groups_driver_control_before_effector_control():
+    from scat.visualization import order_groups
+    # the user's Gal4/UAS case: driver control before effector control, then the experimental cross —
+    # regardless of the order they appear in the data
+    assert order_groups(["effector control", "driver control", "experimental"]) == \
+        ["driver control", "effector control", "experimental"]
+    # works when the role sits in a trailing note on a genotype label
+    assert order_groups(["UAS/+ (effector control)", "GAL4/+ (driver control)", "GAL4>UAS"]) == \
+        ["GAL4/+ (driver control)", "UAS/+ (effector control)", "GAL4>UAS"]
+    # explicit_order still fully overrides (a lab that wants effector first)
+    assert order_groups(["driver control", "effector control"],
+                        explicit_order=["effector control", "driver control"]) == \
+        ["effector control", "driver control"]
     # arbitrary categorical conditions (genotypes/drugs, no level word or number) keep DEFINED order
     assert order_groups(["mutantB", "control", "mutantA"]) == ["control", "mutantB", "mutantA"]
     # quantitative conditions (temperature, dose, time) still auto-sort by value

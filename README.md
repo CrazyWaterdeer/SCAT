@@ -1,6 +1,6 @@
 # SCAT — Spot Classification and Analysis Tool
 
-**Version 2.1.1**
+**Version 2.1.2**
 
 A machine-learning tool for *Drosophila* excreta analysis. SCAT detects deposits in scanned
 images, classifies each as **Normal**, **ROD** (Reproductive Oblong Deposit), or **Artifact**,
