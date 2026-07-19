@@ -1,6 +1,6 @@
 # SCAT — Spot Classification and Analysis Tool
 
-**Version 2.0.0**
+**Version 2.0.1**
 
 A machine-learning tool for *Drosophila* excreta analysis. SCAT detects deposits in scanned
 images, classifies each as **Normal**, **ROD** (Reproductive Oblong Deposit), or **Artifact**,
@@ -10,6 +10,12 @@ assistant.
 
 📖 **[Detailed Workflow Guide](WORKFLOW.md)**
 
+> **New in 2.0.1** — the assistant can now re-render an existing results folder a different way
+> **without re-detecting** (change the primary metric, group order, or plot colours, or produce the
+> report *after* you have manually reviewed the detections), and it can **train or update the
+> classifier** from your reviewed results. Plus fixes: a plotting error no longer aborts an analysis,
+> and `scat train` now reads labels written on Windows when run under WSL.
+>
 > **What's new in 2.0** — a codebase-wide hardening pass: sounder statistics (Welch's
 > *t*-test, a corrected Cohen's *d*, a consistent *n* ≥ 3 significance gate), a group-comparison
 > "Deposit Count" that now excludes artifacts everywhere (matching the rest of the report),
@@ -73,8 +79,9 @@ That's all you need to analyze images with the bundled model. Steps 4–5 are op
 
 **4 — (Optional) Connect the AI Assistant.** Choose one backend:
 
-- **Subscription — no API charges** (uses your Claude Pro/Max login). On **WSL2, install and log
-  in inside the WSL distro** — a native-Windows login is not visible to SCAT:
+- **Subscription — no API charges** (uses your Claude Pro/Max login). **If you run SCAT under WSL2,
+  install and log in to the `claude` CLI _inside_ the WSL distro** — a login done in native Windows is
+  not visible to SCAT running under WSL. (Native-Windows users: see [Native Windows](#native-windows-powershell--advanced).)
 
   ```bash
   curl -fsSL https://claude.ai/install.sh | bash   # installs the `claude` CLI to ~/.local/bin
@@ -92,14 +99,49 @@ That's all you need to analyze images with the bundled model. Steps 4–5 are op
 - **API — billed.** Skip the CLI; paste a key into **Settings › Assistant** in the GUI, or export
   `ANTHROPIC_API_KEY=sk-ant-…` before launching.
 
-**5 — (Optional) One-click desktop icon** (Windows 11 + WSL2/WSLg):
+**5 — (Optional) One-click desktop icon** (**WSL2 only** — Windows 11 + WSLg):
 
 ```bash
 bash scripts/install_desktop_shortcut.sh
 ```
 
 Puts an **SCAT** icon on your Windows desktop (launches `.venv/bin/python -m scat.cli gui`, no
-console window). Run it after step 2 — it needs the `.venv` and `powershell.exe` on PATH.
+console window). This script is a WSL→Windows bridge (it uses `wslpath`/`powershell.exe`) and
+**requires** WSL2 interop — it does not run on native Windows. Run it after step 2. On native
+Windows, just use `uv run scat gui` (or make a shortcut to `.venv\Scripts\pythonw.exe -m scat.cli gui`).
+
+### Native Windows (PowerShell) — advanced
+
+The steps above are written for **Linux or WSL2** (bash). **WSL2 is the recommended way to run SCAT
+on Windows** — the commands above work verbatim there, and PDF export, the ~9× parallel speed-up, and
+the subscription assistant all work out of the box. SCAT also runs on **native Windows** (the code is
+cross-platform), but a few setup commands differ. The core happy path
+(`git clone` → `uv sync --extra agent` → `uv run scat gui`) and every `uv run scat <cmd>` are
+**identical on both** — only these differ:
+
+| Step / task | Linux / WSL2 | Native Windows (PowerShell) |
+| ----------- | ------------ | --------------------------- |
+| Install uv | `curl -LsSf https://astral.sh/uv/install.sh \| sh` | `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 \| iex"` |
+| PATH after install | `source $HOME/.local/bin/env` | not needed — restart the shell (the installer updates PATH) |
+| Install `claude` CLI | `curl -fsSL https://claude.ai/install.sh \| bash` | `irm https://claude.ai/install.ps1 \| iex` (needs a Windows-capable Claude Code build — confirm with `claude --version`) |
+| API key (env var) | `export ANTHROPIC_API_KEY=sk-ant-…` | `$env:ANTHROPIC_API_KEY = "sk-ant-…"` (or paste it into Settings › Assistant) |
+| Activate the venv | `source .venv/bin/activate` | `.venv\Scripts\Activate.ps1` |
+| Run via the interpreter | `.venv/bin/python -m scat.cli <cmd>` | `.venv\Scripts\python.exe -m scat.cli <cmd>` |
+| Desktop icon (step 5) | `bash scripts/install_desktop_shortcut.sh` | not available — use `uv run scat gui` |
+| Path arguments | `/path/to/images` | `C:\path\to\images` |
+
+**Tip:** prefer `uv run scat <cmd>` — it is the same on every OS and sidesteps the venv-activation and
+interpreter-path differences entirely.
+
+Two native-Windows caveats (both are non-issues under WSL2/Linux):
+
+- **PDF export** (the `pdf` extra / WeasyPrint) installs fine but needs the **GTK3 runtime** installed
+  separately and on `PATH`, or it errors at render time (`cannot load library 'libgobject-2.0-0'`). If
+  you need PDF reports on Windows, run SCAT under WSL2. (The default `report.html` needs none of this.)
+- **Speed:** native Windows runs analysis single-process (GIL-bound) — the ~9× fork parallelism is
+  Linux/WSL2-only. Large batches are noticeably faster under WSL2.
+- **Python version:** on native Windows stay on **Python 3.10–3.13**; PySide6/torch wheels can lag a new
+  CPython (e.g. 3.14) for a while.
 
 ### Extras & ways to run
 
@@ -107,12 +149,13 @@ console window). Run it after step 2 — it needs the `.venv` and `powershell.ex
 | -------- | -------------------------------------- | ----------------------------------------- |
 | `agent`  | pydantic, anthropic, claude-agent-sdk  | the conversational Assistant (Claude)     |
 | `deep`   | torch, torchvision                     | U-Net segmentation and the CNN classifier |
-| `pdf`    | weasyprint                             | PDF export of the report                  |
+| `pdf`    | weasyprint                             | PDF export of the report (native Windows needs the GTK3 runtime — see above) |
 | `dev`    | pytest                                 | running the test suite                    |
 
-Compose extras (`uv sync --extra agent --extra deep`). Once installed, run `scat` via
-`uv run scat <cmd>`, an activated venv (`source .venv/bin/activate` then `scat <cmd>`), or
-`.venv/bin/python -m scat.cli <cmd>` — all equivalent.
+Compose extras (`uv sync --extra agent --extra deep`). Once installed, `uv run scat <cmd>` is the
+portable way to run (identical on every OS). You can also use an activated venv
+(`source .venv/bin/activate`, or `.venv\Scripts\Activate.ps1` on native Windows) then `scat <cmd>`, or
+call the interpreter directly (`.venv/bin/python` / `.venv\Scripts\python.exe` `-m scat.cli <cmd>`).
 
 ## Quick Start (GUI)
 
@@ -165,7 +208,10 @@ and `--threshold` sets the detector's **circularity** parameter, not a classifie
 With the `agent` extra, SCAT includes a Claude-powered agent that runs the pipeline from plain
 language ("analyze this folder and compare the groups"). It infers grouping from your
 filenames/subfolders, runs detection → classification → statistics → report, and streams
-per-image progress.
+per-image progress. It can also **re-graph or re-report an existing results folder without
+re-detecting** (change the primary metric, group order, or plot colours), **wait while you manually
+review the detections** and then produce the outputs, and **train or update the classifier** from
+your reviewed results.
 
 ```bash
 uv run scat chat        # in the terminal
@@ -230,9 +276,11 @@ image004.tif,Treatment
 
 ## Requirements
 
-- Python **3.10+** (developed and tested on the uv-managed **Python 3.14**).
+- Python **3.10+** (developed and tested on the uv-managed **Python 3.14**; on native Windows stay
+  on **3.10–3.13** for now — PySide6/torch wheels can lag a new CPython).
 - [uv](https://docs.astral.sh/uv/) for the install/run flow above.
-- Windows 11 + WSL2/WSLg for the one-click desktop icon (optional).
+- **Windows:** runs under **WSL2** (recommended — commands above are verbatim) or **native Windows**
+  (see [Native Windows](#native-windows-powershell--advanced)). The one-click desktop icon is WSL2-only.
 - The `deep` extra (torch) for U-Net/CNN; the `agent` extra + a Claude login or API key for the
   Assistant.
 - 8 GB RAM recommended.
