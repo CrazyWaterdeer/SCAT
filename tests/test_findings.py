@@ -6,9 +6,10 @@ def _stats(key, *, test, p, sig):
     return {key: {"overall_test": test, "overall_p_value": p, "overall_significant": sig}}
 
 
-def test_default_metric_maps_to_n_total_stats_key():
-    # primary_metric total_deposits must look up stats key n_total (NOT "total_deposits")
-    s = _stats("n_total", test="Kruskal-Wallis", p=0.008, sig=True)
+def test_default_metric_maps_to_n_deposits_stats_key():
+    # primary_metric total_deposits must look up stats key n_deposits (Normal+ROD,
+    # artifact-EXCLUSIVE) — matching the metric value and the rest of the report.
+    s = _stats("n_deposits", test="Kruskal-Wallis", p=0.008, sig=True)
     f = findings.compose_finding(stats=s, primary_metric="total_deposits", headline="40.8 deposits / image",
                                  n_images=30, n_groups=6, group_label="condition")
     assert "Total deposits showed a difference across condition groups" in f["sentence"]

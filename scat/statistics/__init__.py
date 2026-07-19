@@ -15,7 +15,7 @@ from .size import SizeDistributionAnalyzer, analyze_size_distribution
 from .density import DensityAnalyzer, analyze_density
 from .correlation import CorrelationAnalyzer, analyze_correlations
 from .morphology import MorphologyAnalyzer, analyze_morphology
-from .comprehensive import run_comprehensive_analysis, _generate_comprehensive_summary
+from .comprehensive import run_comprehensive_analysis
 
 __all__ = [
     'coefficient_of_variation', 'correct_pvalues', 'compare_group_values',

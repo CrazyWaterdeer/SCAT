@@ -57,11 +57,6 @@ DEPOSIT_COLORS = {
     'unknown': '#DDA43A'
 }
 
-# Bromophenol-Blue pH axis (acidic -> basic), voiced in the Imajin palette's hues
-PH_ACIDIC = '#DDA43A'    # gold  (low pH / yellow end)
-PH_MID = '#1F9E77'       # teal green (transition)
-PH_BASIC = '#2F6B9E'     # steel blue (high pH / blue end)
-
 _fonts_registered = False
 
 
@@ -90,6 +85,7 @@ def _register_fonts() -> None:
 FEATURE_LABELS = {
     # Counts
     'n_total': 'Total Deposit Count',
+    'n_deposits': 'Deposit Count',            # Normal + ROD (artifact-exclusive)
     'n_normal': 'Normal Deposit Count',
     'n_rod': 'ROD Deposit Count',
     'n_artifact': 'Artifact Count',
@@ -183,29 +179,29 @@ def get_palette(groups: List[str], control_group: str = None) -> Dict[str, str]:
         Dict mapping group names to colors
     """
     palette = {}
-    # When a control is flagged it takes the slate grey (= PASTEL_PALETTE[0]), so start the
-    # conditions at index 1 to avoid a second slate bar colliding with it.
-    color_idx = 1 if (control_group and control_group in groups) else 0
+    has_control = bool(control_group and control_group in groups)
+    # When a control takes the slate grey (PASTEL_PALETTE[0]), cycle the conditions over the REST
+    # of the palette so a large group set never wraps back onto the control's own colour.
+    pool = PASTEL_PALETTE[1:] if has_control else PASTEL_PALETTE
+    color_idx = 0
 
     for group in groups:
-        if control_group and group == control_group:
+        if has_control and group == control_group:
             palette[group] = CONTROL_COLOR
         else:
-            palette[group] = PASTEL_PALETTE[color_idx % len(PASTEL_PALETTE)]
+            palette[group] = pool[color_idx % len(pool)]
             color_idx += 1
 
     return palette
 
 
-_CONTROL_TOKENS = ('control', 'ctrl', 'untreated', 'vehicle', 'baseline', 'mock', 'wildtype', 'wt')
-
-
 def guess_control_group(groups: List[str]) -> Optional[str]:
     """Best-effort: identify a control/reference group by name (control, ctrl, vehicle, WT, ...).
-    Returns the matching group or None — the agent can always pass one explicitly instead."""
+    Delegates to _is_control so significance-bracket control detection and group ORDERING can
+    never disagree (previously two token sets had drifted — 'sham' matched one but not the other).
+    Returns the first matching group or None — pass one explicitly to override."""
     for g in groups:
-        gl = str(g).strip().lower()
-        if gl in _CONTROL_TOKENS or any(gl.startswith(t) for t in _CONTROL_TOKENS):
+        if _is_control(g):
             return g
     return None
 
@@ -232,8 +228,10 @@ def _ordinal_rank(name: str):
 
 
 def _numeric_key(name: str):
-    """First signed number embedded in `name` (e.g. '10uM'->10, '6h'->6, '0.5'->0.5), else None."""
-    m = re.search(r'-?\d+\.?\d*', str(name))
+    """First number embedded in `name` (e.g. '10uM'->10, '6h'->6, '0.5'->0.5), else None. A leading
+    '-' counts as a sign only when NOT preceded by an alnum, so a hyphen SEPARATOR ('Day-1','sample-10')
+    is not read as a minus (which had reversed hyphen-numbered group order)."""
+    m = re.search(r'(?:(?<![A-Za-z0-9])-)?\d+\.?\d*', str(name))
     return float(m.group()) if m else None
 
 
@@ -806,8 +804,8 @@ class Visualizer:
             
             data1 = data[data[group_by] == group1][metric].dropna()
             data2 = data[data[group_by] == group2][metric].dropna()
-            
-            if len(data1) < 2 or len(data2) < 2:
+
+            if len(data1) < 3 or len(data2) < 3:   # match the stats' n>=3 significance gate
                 continue
             
             # Mann-Whitney U test (non-parametric)
@@ -866,56 +864,6 @@ class Visualizer:
         if annotations:
             new_ylim = y_max + y_offset * (len(annotations) + 1)
             ax.set_ylim(top=new_ylim)
-    
-    def box_comparison(
-        self,
-        film_summary: pd.DataFrame,
-        metrics: List[str],
-        group_by: str,
-        title: str = "Metrics Comparison",
-        filename: str = "box_comparison.png"
-    ) -> Optional[str]:
-        """
-        Generate grouped box plots for multiple metrics.
-        """
-        if not HAS_MATPLOTLIB or not HAS_SEABORN:
-            return None
-        
-        metrics = [m for m in metrics if m in film_summary.columns]
-        if not metrics:
-            return None
-        
-        # Rename metrics for display
-        rename_map = {m: get_feature_label(m) for m in metrics}
-        plot_df = film_summary[[group_by] + metrics].copy()
-        plot_df = plot_df.rename(columns=rename_map)
-        
-        # Melt data for grouped plotting
-        df_melted = plot_df.melt(
-            id_vars=[group_by],
-            value_vars=[rename_map[m] for m in metrics],
-            var_name='Metric',
-            value_name='Value'
-        )
-        
-        fig, ax = _plt.subplots(figsize=(12, 6))
-        
-        _sns.boxplot(
-            data=df_melted, x='Metric', y='Value', hue=group_by,
-            ax=ax, palette='Set2'
-        )
-        
-        ax.set_title(title)
-        ax.set_ylabel('Value')
-        _plt.xticks(rotation=45, ha='right')
-        
-        _plt.tight_layout()
-        filepath = self.output_dir / filename
-        _plt.savefig(filepath)
-        _plt.close()
-        
-        return str(filepath)
-    
     def mean_ci_plot(
         self,
         film_summary: pd.DataFrame,
@@ -1010,10 +958,12 @@ class Visualizer:
                 markeredgecolor='black', markeredgewidth=1
             )
         
-        # Add individual data points (jittered)
+        # Add individual data points (jittered). Seed a LOCAL RNG so the saved mean_ci_* PNGs are
+        # reproducible run-to-run (mirrors condition_comparison) without perturbing global RNG state.
+        rng = np.random.RandomState(0)
         for i, group in enumerate(unique_groups):
             data = film_summary[film_summary[group_by] == group][metric].dropna()
-            jitter = np.random.uniform(-0.15, 0.15, len(data))
+            jitter = rng.uniform(-0.15, 0.15, len(data))
             ax.scatter(
                 i + jitter, data, 
                 c='#333333', alpha=0.5, s=45, zorder=1, edgecolors='white', linewidth=0.5
@@ -1246,7 +1196,14 @@ class Visualizer:
         """
         if not HAS_MATPLOTLIB or not HAS_SEABORN:
             return None
-        
+
+        # Deposit count = Normal + ROD (artifact-exclusive), matching the report/stats.
+        if ({'n_normal', 'n_rod'} <= set(film_summary.columns)
+                and 'n_deposits' not in film_summary.columns):
+            film_summary = film_summary.copy()
+            film_summary['n_deposits'] = film_summary['n_normal'] + film_summary['n_rod']
+        count_col = 'n_deposits' if 'n_deposits' in film_summary.columns else 'n_total'
+
         # Get unique groups and calculate optimal width
         if group_by and group_by in film_summary.columns:
             unique_groups = order_groups(film_summary[group_by].dropna().unique())
@@ -1289,14 +1246,14 @@ class Visualizer:
         ax = axes[0, 1]
         if group_by and group_by in film_summary.columns:
             _sns.barplot(
-                data=film_summary, x=group_by, y='n_total',
+                data=film_summary, x=group_by, y=count_col,
                 hue=group_by, order=unique_groups, hue_order=unique_groups,
-                ax=ax, palette=palette, 
+                ax=ax, palette=palette,
                 errorbar='sd', width=box_width, edgecolor='black', linewidth=0.5, legend=False
             )
         else:
-            _sns.histplot(film_summary['n_total'], ax=ax, kde=True, color=DEFAULT_GRAY)
-        ax.set_title('Total Deposits per Image', fontweight='bold')
+            _sns.histplot(film_summary[count_col], ax=ax, kde=True, color=DEFAULT_GRAY)
+        ax.set_title('Deposits per Image', fontweight='bold')
         ax.set_ylabel('Count')
         ax.set_xlabel('')
         apply_publication_style(ax)
@@ -1387,7 +1344,15 @@ def generate_all_visualizations(
     """
     viz = Visualizer(output_dir)
     results = {}
-    
+
+    # Artifact-exclusive deposit count (Normal+ROD) in memory so the standalone plots agree with
+    # the report/stats (which use n_deposits). Never written to disk.
+    if ({'n_normal', 'n_rod'} <= set(film_summary.columns)
+            and 'n_deposits' not in film_summary.columns):
+        film_summary = film_summary.copy()
+        film_summary['n_deposits'] = film_summary['n_normal'] + film_summary['n_rod']
+    _count_metric = 'n_deposits' if 'n_deposits' in film_summary.columns else 'n_total'
+
     # Dashboard
     path = viz.summary_dashboard(film_summary, group_by, control_group)
     if path:
@@ -1404,8 +1369,8 @@ def generate_all_visualizations(
         results['heatmap'] = path
     
     # Violin plots for key metrics
-    # Primary metrics (always generated)
-    primary_metrics = ['rod_fraction', 'total_iod', 'n_total']
+    # Primary metrics (always generated); deposit count is artifact-exclusive (Normal+ROD).
+    primary_metrics = ['rod_fraction', 'total_iod', _count_metric]
     # Secondary metrics (morphology, pH, pigment - important for biological interpretation)
     secondary_metrics = [
         'normal_mean_area', 'rod_mean_area',      # Size/morphology
@@ -1572,52 +1537,6 @@ class SpatialVisualizer:
         _plt.close()
         
         return str(filepath)
-    
-    def spatial_scatter(
-        self,
-        centroids: np.ndarray,
-        labels: List[str] = None,
-        image_shape: Tuple[int, int] = None,
-        title: str = "Deposit Spatial Distribution",
-        filename: str = "spatial_scatter.png"
-    ) -> Optional[str]:
-        """Generate scatter plot of deposit locations."""
-        if not HAS_MATPLOTLIB or len(centroids) == 0:
-            return None
-        
-        fig, ax = _plt.subplots(figsize=(10, 10))
-        
-        if labels is not None:
-            colors = {'normal': 'green', 'rod': 'red', 'artifact': 'gray', 'unknown': 'yellow'}
-            for label in set(labels):
-                mask = np.array(labels) == label
-                if mask.any():
-                    ax.scatter(
-                        centroids[mask, 0], centroids[mask, 1],
-                        c=colors.get(label, 'blue'),
-                        label=label.capitalize(),
-                        alpha=0.6, s=50
-                    )
-            ax.legend()
-        else:
-            ax.scatter(centroids[:, 0], centroids[:, 1], alpha=0.6, s=50)
-        
-        if image_shape:
-            ax.set_xlim(0, image_shape[1])
-            ax.set_ylim(image_shape[0], 0)  # Invert Y for image coordinates
-        
-        ax.set_xlabel('X (pixels)')
-        ax.set_ylabel('Y (pixels)')
-        ax.set_title(title)
-        ax.set_aspect('equal')
-        
-        _plt.tight_layout()
-        filepath = self.output_dir / filename
-        _plt.savefig(filepath)
-        _plt.close()
-        
-        return str(filepath)
-    
     def clark_evans_summary(
         self,
         r_values: List[float],

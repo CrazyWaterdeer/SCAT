@@ -10,6 +10,10 @@ from typing import Dict, Optional, Union
 import numpy as np
 import pandas as pd
 from io import BytesIO
+import html as _h          # HTML-escape user-controlled names/filenames (alias avoids the
+import logging             # local `html` string-accumulator variable used in some methods)
+
+logger = logging.getLogger(__name__)
 
 # Check for optional dependencies
 try:
@@ -516,7 +520,6 @@ class ReportGenerator:
     ]
 
     def _html_per_group_table(self, film, group_by):
-        import html as _h
         groups = self._effective_groups(film, group_by)
         # stable column set: keep a column only if its source columns exist in film
         cols = []
@@ -546,8 +549,6 @@ class ReportGenerator:
         deposit_data: pd.DataFrame = None,
         spatial_stats: Dict = None,
         statistical_results: Dict = None,
-        visualization_paths: Dict[str, str] = None,
-        metadata: pd.DataFrame = None,
         group_by: str = None,
         title: str = "SCAT Analysis Report",
         analysis: dict = None
@@ -589,7 +590,6 @@ class ReportGenerator:
             deposit_data=deposit_data,
             spatial_stats=spatial_stats,
             statistical_results=statistical_results,
-            visualization_paths=visualization_paths,
             inline_plots=inline_plots,
             group_by=group_by,
             analysis=analysis
@@ -702,8 +702,9 @@ class ReportGenerator:
     def _generate_count_distribution(self, film_summary: pd.DataFrame) -> str:
         """Generate deposit count distribution histogram."""
         def draw(ax):
-            counts = film_summary['n_total'] if 'n_total' in film_summary.columns else \
-                     film_summary['n_normal'] + film_summary['n_rod']
+            # Artifact-exclusive deposit count (Normal+ROD), consistent with the rest of the report.
+            counts = (film_summary['n_normal'] + film_summary['n_rod']) \
+                if {'n_normal', 'n_rod'} <= set(film_summary.columns) else film_summary['n_total']
             self._hist_with_mean(ax, counts, bins=15, mean=counts.mean(), mean_label='Mean')
             ax.set_xlabel('Deposit Count per Image')
             ax.set_ylabel('Number of Images')
@@ -880,11 +881,18 @@ class ReportGenerator:
     ) -> Dict[str, str]:
         """Generate boxplots for all comparison metrics."""
         plots = {}
-        
+
+        # Artifact-EXCLUSIVE deposit count (Normal+ROD), derived in memory for the Deposit Count
+        # boxplot so it matches the rest of the report + Methods (never written to CSV).
+        if ({'n_normal', 'n_rod'} <= set(film_summary.columns)
+                and 'n_deposits' not in film_summary.columns):
+            film_summary = film_summary.copy()
+            film_summary['n_deposits'] = film_summary['n_normal'] + film_summary['n_rod']
+
         # Metrics to compare in order matching Summary section:
         # Count, Area, IOD, pH(Hue), ROD, Circularity
         comparison_metrics = [
-            ('n_total', 'Deposit Count', 1.0, False),
+            ('n_deposits', 'Deposit Count', 1.0, False),
             ('mean_area', 'Mean Deposit Area (px²)', 1.0, False),
             ('total_iod', 'Total IOD', 1.0, False),
             ('mean_hue', 'pH Indicator (Hue °)', 1.0, True),  # Use hue colors
@@ -929,7 +937,6 @@ class ReportGenerator:
         deposit_data: pd.DataFrame,
         spatial_stats: Dict,
         statistical_results: Dict,
-        visualization_paths: Dict,
         inline_plots: Dict,
         group_by: str,
         analysis: dict = None
@@ -949,7 +956,6 @@ class ReportGenerator:
 
     def _html_finding_lede(self, film_summary, deposit_data, statistical_results, group_by, analysis):
         from scat import metrics as _metrics, confidence as _confidence, findings as _findings
-        import html as _h
         analysis = analysis or {}
         pm = _metrics.resolve_metric(analysis.get("primary_metric"))
         norm = analysis.get("normalization") or _metrics.DEFAULT_NORMALIZATION
@@ -1193,7 +1199,7 @@ class ReportGenerator:
             # Define metrics in order matching Summary section
             # Order: Count, Area, IOD, pH(Hue), ROD, Circularity
             group_metrics = [
-                ('group_n_total', 'n_total', 'Deposit Count', 'Number of deposits detected per image.'),
+                ('group_n_deposits', 'n_deposits', 'Deposit Count', 'Number of deposits (Normal + ROD) detected per image.'),
                 ('group_mean_area', 'mean_area', 'Deposit Size', 'Mean area of deposits in pixels².'),
                 ('group_total_iod', 'total_iod', 'Pigment Amount (IOD)', 'Total Integrated Optical Density per image.'),
                 ('group_mean_hue', 'mean_hue', 'pH Indicator (Hue)', 'pH indicator hue. Bar colors reflect actual pH-indicator colors.'),
@@ -1206,7 +1212,11 @@ class ReportGenerator:
             idx = 1
             for _, stat_key, _, _ in group_metrics:
                 rk = self._resolve_stat_key(stat_key, statistical_results)
-                if statistical_results and rk in statistical_results:
+                # Mirror the appendix renderer's guard EXACTLY (present + dict + no 'error') so
+                # the caption "→ Appendix N" refs stay in lockstep with the appendix <h3>N headers
+                # even when a metric's stat result is an error dict / non-dict.
+                result = statistical_results.get(rk) if isinstance(statistical_results, dict) else None
+                if isinstance(result, dict) and 'error' not in result:
                     appendix_index[stat_key] = idx
                     idx += 1
             
@@ -1324,7 +1334,7 @@ class ReportGenerator:
 '''
             # Define metrics in order matching Summary/Group Comparison sections
             ordered_metrics = [
-                ('n_total', 'Total Deposit Count'),
+                ('n_deposits', 'Total Deposit Count'),
                 ('mean_area', 'Mean Deposit Area'),
                 ('total_iod', 'Total IOD'),
                 ('mean_hue', 'pH Indicator (Hue)'),
@@ -1409,7 +1419,7 @@ class ReportGenerator:
                                 row_bg = 'var(--surface)'  # plain - not significant
                             
                             html += f'''                    <tr style="background:{row_bg};">
-                        <td>{g1} vs {g2}</td>
+                        <td>{_h.escape(str(g1))} vs {_h.escape(str(g2))}</td>
                         <td class="num">{test_name}</td>
                         <td class="num">{p_raw:.4f}</td>
                         <td class="num">{p_display}</td>
@@ -1472,7 +1482,7 @@ class ReportGenerator:
                             n_val = gstat.get('n', 0)
                             
                             html += f'''                    <tr>
-                        <td>{gname}</td>
+                        <td>{_h.escape(str(gname))}</td>
                         <td class="num">{n_val}</td>
                         <td class="num">{mean_val:.3f} ± {std_val:.3f}</td>
                         <td class="num">{median_val:.3f}</td>
@@ -1502,11 +1512,11 @@ class ReportGenerator:
             <p><strong>Two-Group Comparison:</strong> {result.get('test_name', 'N/A')}</p>
             <table class="data-table">
                 <tr>
-                    <td><strong>{g1_name}</strong></td>
+                    <td><strong>{_h.escape(str(g1_name))}</strong></td>
                     <td class="num">{g1_mean:.3f} ± {g1_std:.3f}</td>
                 </tr>
                 <tr>
-                    <td><strong>{g2_name}</strong></td>
+                    <td><strong>{_h.escape(str(g2_name))}</strong></td>
                     <td class="num">{g2_mean:.3f} ± {g2_std:.3f}</td>
                 </tr>
             </table>
@@ -1581,7 +1591,7 @@ class ReportGenerator:
             total_iod = row.get('total_iod', 0) if 'total_iod' in row.index else 0
             
             html += f'''                    <tr>
-                        <td>{row.get('filename', 'N/A')}</td>
+                        <td>{_h.escape(str(row.get('filename', 'N/A')))}</td>
                         <td>{n_normal}</td>
                         <td>{n_rod}</td>
                         <td>{rod_fraction*100:.1f}%</td>
@@ -1613,9 +1623,10 @@ class ReportGenerator:
       measure.</p>
       <p><b>Statistics.</b> Group comparisons test <b>image-level</b> aggregates (the experimental unit
       is the image, not the deposit — avoiding pseudoreplication). The omnibus test is chosen by
-      normality and group count (one-way ANOVA or Kruskal-Wallis for three or more groups; an
-      independent t-test or Mann-Whitney U for two), with Holm-corrected pairwise comparisons when
-      there are more than two groups; effect sizes are reported alongside.</p>
+      normality and group count (one-way ANOVA or Kruskal-Wallis for three or more groups;
+      Welch's t-test or Mann-Whitney U for two), with Holm-corrected pairwise comparisons when
+      there are more than two groups; groups need at least three images to enter a test.
+      Effect sizes (Cohen's <i>d</i>, pooled sample SD) are reported alongside.</p>
     </div>
 '''
 
@@ -1648,7 +1659,7 @@ class ReportGenerator:
         except ImportError:
             pass
         
-        print("PDF generation requires 'weasyprint' or 'pdfkit'. HTML report generated instead.")
+        logger.warning("PDF generation requires 'weasyprint' or 'pdfkit'; HTML report generated instead.")
         return html_path
 
 
@@ -1658,7 +1669,6 @@ def generate_report(
     deposit_data: pd.DataFrame = None,
     spatial_stats: Dict = None,
     statistical_results: Dict = None,
-    visualization_paths: Dict = None,
     group_by: str = None,
     format: str = 'html',
     analysis: dict = None
@@ -1682,7 +1692,6 @@ def generate_report(
             deposit_data=deposit_data,
             spatial_stats=spatial_stats,
             statistical_results=statistical_results,
-            visualization_paths=visualization_paths,
             group_by=group_by,
             analysis=analysis
         )
@@ -1692,7 +1701,6 @@ def generate_report(
             deposit_data=deposit_data,
             spatial_stats=spatial_stats,
             statistical_results=statistical_results,
-            visualization_paths=visualization_paths,
             group_by=group_by,
             analysis=analysis
         )

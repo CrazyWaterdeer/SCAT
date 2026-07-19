@@ -182,11 +182,14 @@ class pHAnalyzer:
                 'group_statistics': group_stats
             }
         
-        # Statistical comparison on pH values
-        group_ph_data = {
-            g: film_summary[film_summary[group_column] == g]['_estimated_ph'].dropna().values
-            for g in valid_groups
-        }
+        # Statistical comparison on pH values — significance uses only groups with n>=3
+        # (matches compare_two/multiple_groups); the descriptive group_statistics above
+        # still lists smaller groups.
+        group_ph_data = {}
+        for g in valid_groups:
+            v = film_summary[film_summary[group_column] == g]['_estimated_ph'].dropna().values
+            if len(v) >= 3:
+                group_ph_data[g] = v
         
         # Use StatisticalAnalyzer for comparison
         results = {

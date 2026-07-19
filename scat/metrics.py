@@ -60,8 +60,11 @@ DEFAULT_METRIC = "total_deposits"
 # report + findings (which import these). The stats module compares split-by-class metrics, so
 # area/hue/circularity have no COMBINED comparison key — fall back to the normal_* comparison
 # (matching the metric value column and the group-comparison boxplots).
+# total_deposits → n_deposits (Normal+ROD, artifact-exclusive), matching the metric VALUE
+# (_deposits = n_normal+n_rod) and the report's artifact-exclusive Deposit Count. The stats
+# module derives the in-memory n_deposits column (comprehensive.run_comprehensive_analysis).
 STATS_KEY = {
-    "total_deposits": "n_total", "rod_fraction": "rod_fraction", "mean_area": "mean_area",
+    "total_deposits": "n_deposits", "rod_fraction": "rod_fraction", "mean_area": "mean_area",
     "mean_hue": "mean_hue", "total_iod": "total_iod", "mean_circularity": "mean_circularity",
 }
 STATS_KEY_FALLBACK = {

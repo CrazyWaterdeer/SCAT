@@ -3,7 +3,6 @@ Common UI components shared between main_gui and labeling_gui.
 Consolidates Theme, custom widgets, and utility functions.
 """
 
-import sys
 from pathlib import Path
 
 from PySide6.QtWidgets import (
@@ -124,8 +123,10 @@ class Theme:
     def get_app_stylesheet(cls) -> str:
         """Return the complete application stylesheet for main_gui."""
         from . import ui_styles  # deferred: avoids a ui_common <-> ui_styles import cycle
-        # Always regenerate (kept from the original; caching effectively disabled for live edits).
-        cls._cached_app_stylesheet = ui_styles.build_app_stylesheet(cls)
+        # Memoize (Theme tokens are not mutated at runtime) — mirrors get_labeling_stylesheet;
+        # avoids rebuilding the ~430-line stylesheet on every call.
+        if cls._cached_app_stylesheet is None:
+            cls._cached_app_stylesheet = ui_styles.build_app_stylesheet(cls)
         return cls._cached_app_stylesheet
 
     @classmethod
@@ -135,6 +136,11 @@ class Theme:
         if cls._cached_labeling_stylesheet is None:
             cls._cached_labeling_stylesheet = ui_styles.build_labeling_stylesheet(cls)
         return cls._cached_labeling_stylesheet
+
+    @classmethod
+    def primary_button_style(cls) -> str:
+        """The app's canonical primary/CTA button skin (coral fill, white text)."""
+        return cls.button_style(cls.PRIMARY, "#FFFFFF", cls.PRIMARY_LIGHT, cls.PRIMARY_DARK)
 
 
 # =============================================================================
@@ -319,6 +325,7 @@ class CollapsibleSection(QWidget):
         super().__init__(parent)
         self._title = title
         self._expanded = expanded
+        self._anim = None   # running height animation, stopped on re-toggle
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -367,34 +374,34 @@ class CollapsibleSection(QWidget):
 
     def _toggle(self):
         from scat import ui_motion
+        # Stop any in-flight animation first: ui_motion.animate does NOT retarget a prior
+        # animation, so a fast collapse-then-expand could otherwise let the collapse's
+        # finished handler hide the body AFTER the expand ran (expanded-but-hidden).
+        if self._anim is not None:
+            try:
+                self._anim.stop()   # a manual stop does NOT emit finished, so no stale handler
+            except RuntimeError:
+                pass                # DeleteWhenStopped may have already freed the C++ object
+            self._anim = None
         self._expanded = self.header.isChecked()
         self._update_header()
         if self._expanded:
             self.body.setVisible(True)
             target = self.body.sizeHint().height()
-            anim = ui_motion.animate(self.body, b"maximumHeight", target,
-                                     ui_motion.DUR_TAB, ui_motion.CURVE_OUT, start=0)
+            self._anim = ui_motion.animate(self.body, b"maximumHeight", target,
+                                           ui_motion.DUR_TAB, ui_motion.CURVE_OUT, start=0)
             # After opening, lift the cap so the body can grow with its content.
-            anim.finished.connect(lambda: self.body.setMaximumHeight(self._MAX))
+            self._anim.finished.connect(lambda: self.body.setMaximumHeight(self._MAX))
         else:
             start = self.body.height()
-            anim = ui_motion.animate(self.body, b"maximumHeight", 0,
-                                     ui_motion.DUR_TAB, ui_motion.CURVE_OUT, start=start)
-            anim.finished.connect(lambda: self.body.setVisible(False))
+            self._anim = ui_motion.animate(self.body, b"maximumHeight", 0,
+                                           ui_motion.DUR_TAB, ui_motion.CURVE_OUT, start=start)
+            self._anim.finished.connect(lambda: self.body.setVisible(False))
 
 
 # =============================================================================
 # Utility Functions
 # =============================================================================
-def get_resource_path(relative_path: str) -> Path:
-    """Get absolute path to a bundled resource under scat/resources/.
-
-    Args:
-        relative_path: Path relative to scat/resources/ (e.g., 'fonts/NotoSans-Regular.ttf')
-    """
-    return Path(__file__).parent / 'resources' / relative_path
-
-
 _icon_cache = {}
 
 

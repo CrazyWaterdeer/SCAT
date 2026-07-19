@@ -169,7 +169,7 @@ def analyze_folder_service(path: str, groups: Optional[dict] = None, model_type:
     out = Path(output_dir) if output_dir else get_timestamped_output_dir(Path(path).parent, "results")
     reporter = ReportGenerator(out)
     reports = reporter.save_all(results, metadata, group_by, save_json=save_json)
-    n_failed = sum(1 for r in results if r.n_total == 0)
+    n_failed = sum(1 for r in results if getattr(r, "failed", False))
 
     if annotate:
         from PIL import Image
@@ -178,11 +178,18 @@ def analyze_folder_service(path: str, groups: Optional[dict] = None, model_type:
         ann_dir = out / "annotated"; ann_dir.mkdir(exist_ok=True)
 
         def _annotate_one(item):
+            # Best-effort per image: a single bad/locked file must not discard the whole
+            # completed run (annotate is default-ON in the GUI). Return an error string instead.
             img_path, res = item
-            arr = np.array(Image.open(img_path))
-            annotated = analyzer.generate_annotated_image(
-                arr, res.deposits, show_labels=True, skip_artifacts=True)
-            Image.fromarray(annotated).save(ann_dir / f"{img_path.stem}_annotated.png")
+            try:
+                from .analyzer import to_rgb
+                arr = np.array(to_rgb(Image.open(img_path)))   # composite alpha → visible annotations
+                annotated = analyzer.generate_annotated_image(
+                    arr, res.deposits, show_labels=True, skip_artifacts=True)
+                Image.fromarray(annotated).save(ann_dir / f"{img_path.stem}_annotated.png")
+                return None
+            except Exception as e:
+                return f"{img_path.name}: {e}"
 
         # Each image writes a distinct PNG, so order is irrelevant. Decode (PIL), draw
         # (cv2), and PNG encode all release the GIL, so a thread pool overlaps this
@@ -192,10 +199,11 @@ def analyze_folder_service(path: str, groups: Optional[dict] = None, model_type:
             from concurrent.futures import ThreadPoolExecutor
             workers = max(1, min(_parallel.usable_cores(), len(todo), 8))
             with ThreadPoolExecutor(max_workers=workers) as ex:
-                list(ex.map(_annotate_one, todo))
+                ann_errs = [e for e in ex.map(_annotate_one, todo) if e]
         else:
-            for item in todo:
-                _annotate_one(item)
+            ann_errs = [e for e in (_annotate_one(item) for item in todo) if e]
+        if ann_errs:
+            warnings.append(f"{len(ann_errs)} image(s) could not be annotated (e.g. {ann_errs[0]})")
 
     if visualize:
         try:

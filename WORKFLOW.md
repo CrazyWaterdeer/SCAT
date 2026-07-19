@@ -1,41 +1,50 @@
 # SCAT Workflow Guide
 
-**Version 1.0.0**
+**Version 2.0.0**
 
 ## Overview
 
-SCAT provides three main tabs for different workflows:
+SCAT runs in **one window**. It opens on the **Configure** screen; when a run finishes the
+same window switches in place to the **Results** surface. Labeling, Train model, and Settings
+live behind the top-bar **More** menu. The Assistant (optional Claude agent) opens as a side
+dock from the top bar.
 
-| Tab | Purpose |
-|-----|---------|
-| **Analysis** | Run deposit detection and classification on images |
-| **Results** | View, edit, and export analysis results |
-| **Setup** | Create training data (Labeling) and build custom models (Training) |
+| Screen | Purpose |
+|--------|---------|
+| **Configure** (start) | Pick images + options, then **Run Analysis** |
+| **Results** (after a run) | Review the answer, flag low-confidence deposits, edit, open the report |
+| **More → Labeling** | Manually annotate deposits to build training data |
+| **More → Train model** | Build a custom Random-Forest / CNN / U-Net model |
+| **More → Settings** | Shortcuts, parallel-processing, the Assistant API key |
 
 ### Typical Workflow
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  Most Users: Analysis → Results → (Edit if needed) → Export                 │
+│  Most users:   Configure → Run Analysis → Results → (edit if needed) → report │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│  Custom Model: Setup/Labeling → Setup/Training → Analysis → Results        │
+│  Custom model: More/Labeling → More/Train model → Configure → Run → Results   │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 1. Analysis Tab
+## 1. Configure & Run
 
-Run automated deposit detection and classification.
+The start screen. Everything needed for a headless-quality run in one place.
 
 ### Steps
 
-1. **Image Folder**: Select folder containing your images (.tif, .tiff, .png, .jpg)
-2. **Groups CSV** (Optional): Load a CSV file mapping filenames to experimental groups
-3. **Classifier**: Select the model file
-   - Use `Models/model_rf.pkl` (included) or your custom trained model
-4. **Detection Method**: Choose Rule-based (default) or U-Net (requires trained model)
-5. Click **Run Analysis**
+1. **Add images** — drag image files or a whole folder onto the drop zone (folders are searched
+   recursively), or use **Choose images… / Choose folder…**. Formats: `.tif`, `.tiff`, `.png`, `.jpg`.
+2. **Method** (optional) — the classification method: **Threshold** (simple circularity rule),
+   **Random Forest** (the shipped `models/model_rf.pkl`, default), or **CNN** (ResNet-18, needs
+   the `deep` extra). A blank **Classifier model** uses the bundled Random Forest.
+3. **Compare groups** (optional) — toggle it on, then either **Group by subfolder** or
+   **Load grouping CSV…** (see the format below).
+4. **Output toggles** — Annotated images · Visualizations · HTML report (all on by default in the GUI).
+5. Press the sticky **Run Analysis** button. Progress streams per image; the window then switches
+   to the Results surface (the report is generated automatically if *HTML report* is on).
 
 ### Groups CSV Format
 
@@ -47,59 +56,50 @@ CS_treated_01.tif,Treatment
 CS_treated_02.tif,Treatment
 ```
 
-### Output Options
-
-| Option | Description |
-|--------|-------------|
-| Generate Annotated Images | Save images with colored deposit outlines |
-| Generate Visualizations | Create statistical plots (violin, PCA, heatmap, etc.) |
-| Generate Report | Create HTML report with embedded statistics |
+(Or simply organise images into per-condition subfolders and use **Group by subfolder**.)
 
 ---
 
-## 2. Results Tab
+## 2. Results
 
-View and edit analysis results.
+The in-place results surface — answer first, then the worklist.
 
-### Features
+### What you see
 
-- **Image List**: Shows all analyzed images with deposit counts
-- **Preview**: Thumbnail of selected image with annotations
-- **Statistics**: Summary statistics for selected image or group
-- **Edit Mode**: Double-click an image to open the editing window
+- **Hero card** — the run's primary metric (deposits/image by default), image + deposit counts,
+  and a neutral trust line (how many deposits fall below the confidence threshold). Actions:
+  **Open report** · **Rebuild after edits** · **Open folder**.
+- **Per-image table** — every image with its counts and a **Review** column showing how many
+  low-confidence deposits to double-check.
+- **Visualizations & statistics** below, in reading order.
 
-### Editing Results
+### Editing results
 
-1. Double-click an image in the list
-2. Edit window opens with the same controls as Labeling
-3. Correct any misclassified deposits (1/2/3 keys)
-4. Click **Save Changes** or press Ctrl+S
-5. Click **Regenerate Report** in Results tab to update statistics
+1. **Double-click a row** to open the editor (same controls as Labeling, in *edit* mode).
+2. Correct any misclassified deposits (1 / 2 / 3 keys).
+3. **Save Changes** (or Ctrl+S) — rewrites that image's rows in the CSVs and refreshes the surface.
+4. Use **Rebuild after edits** on the hero card to regenerate the report/stats/visualizations.
 
-### Export Options
-
-- **Open Folder**: Open results directory in file explorer
-- **Open Report**: Open HTML report in browser
-- **Load Previous**: Load results from a previous analysis session
+Use **New analysis** / **Re-run** to start over, or **Load previous results** to reopen an older
+run's folder.
 
 ---
 
-## 3. Setup Tab
+## 3. Labeling & Training (More menu)
 
 ### 3.1 Labeling
 
-Create training data by manually annotating deposits in images.
+Create training data by manually annotating deposits. Open it from **More → Labeling**.
 
 #### Steps
 
-1. Click **Launch Labeling Window**
-2. Open an image (File → Open or toolbar)
-3. Deposits are auto-detected; adjust labels as needed
-4. Save labels (Ctrl+S) - creates `imagename.labels.json`
+1. Open an image (File → Open or the toolbar).
+2. Deposits are auto-detected; adjust labels as needed.
+3. Save labels (Ctrl+S) — creates `imagename.labels.json`.
 
 #### Labeling Controls
 
-> 💡 Shortcuts can be customized in Settings. Changes require restart.
+> 💡 Shortcuts can be customized in **More → Settings**. Changes require a restart.
 
 | Key | Action |
 |-----|--------|
@@ -133,18 +133,16 @@ Create training data by manually annotating deposits in images.
 
 ### 3.2 Training
 
-Build a custom classifier from labeled data.
+Build a custom classifier from labeled data. Open it from **More → Train model**.
 
 #### Steps
 
-1. Select **Image Folder** containing your labeled images
-2. Select **Label Folder** (or check "Same as image folder")
-3. Choose **Model Type**:
-   - Random Forest (recommended, fast)
-   - CNN (requires PyTorch)
-   - U-Net Segmentation (requires PyTorch)
-4. Set output path for the model file
-5. Click **Train Model**
+1. Select **Image Folder** containing your labeled images.
+2. Select **Label Folder** (or check "Same as image folder").
+3. Choose **Model Type**: Random Forest (recommended, fast), CNN (requires PyTorch), or
+   U-Net Segmentation (requires PyTorch).
+4. Set the output path for the model file.
+5. Click **Train Model**.
 
 #### Recommended Training Data
 
@@ -162,104 +160,98 @@ If the pre-trained model doesn't work well for your data:
 
 ### Option A: Refine from Analysis Results (Recommended)
 
-1. Run analysis with pre-trained model
-2. Go to Results tab, double-click images with errors
-3. Correct misclassified deposits
-4. Save changes
-5. Use corrected data to train a new model in Setup/Training
+1. Run analysis with the pre-trained model.
+2. On the Results surface, double-click images with errors and correct the misclassified deposits.
+3. Save changes.
+4. Use the corrected data to train a new model in **More → Train model**.
 
 ### Option B: Manual Labeling from Scratch
 
-1. Go to Setup/Labeling
-2. Open your images one by one
-3. Manually label all deposits
-4. Train model in Setup/Training
+1. Open **More → Labeling** and label your images one by one.
+2. Train a model in **More → Train model**.
 
 ---
 
 ## 5. Command Line Interface
 
-SCAT can also be run from the command line:
+Every step is scriptable. Run via `uv run scat <cmd>`, an activated venv (`scat <cmd>`), or
+`python -m scat.cli <cmd>`.
 
 ```bash
-# Launch GUI
-python -m scat.cli gui
-
-# Run analysis
-python -m scat.cli analyze ./images -o ./results --model-type rf --model-path model.pkl
-
-# Train model
-python -m scat.cli train --image-dir ./labeled --output model.pkl --model-type rf
-
-# Launch labeling GUI only
-python -m scat.cli label
+scat --version                 # print the SCAT version
+scat gui                       # launch the GUI
+scat analyze ./images -o ./results --model-type rf --stats --report
+scat train --image-dir ./labeled --output model.pkl --model-type rf
+scat label                     # launch the labeling GUI
+scat chat                      # conversational agent in the terminal
 ```
 
-### CLI Analysis Options
+### CLI `analyze` Options
 
 | Option | Description |
 |--------|-------------|
-| `--model-type` | threshold, rf, or cnn |
-| `--model-path` | Path to trained model file |
-| `--threshold` | Circularity threshold (default: 0.6) |
-| `--min-area` | Minimum deposit area in pixels (default: 20) |
-| `--max-area` | Maximum deposit area in pixels (default: 10000) |
-| `--group-by` | Column name for grouping |
-| `--annotate` | Generate annotated images |
-| `--visualize` | Generate visualization plots |
-| `--stats` | Perform statistical analysis |
+| `--model-type` | `threshold`, `rf`, or `cnn` |
+| `--model-path` | Path to a trained model file (blank = bundled Random Forest) |
+| `--threshold` | Detector **circularity** parameter (default: 0.6) — not a classifier probability |
+| `--min-area` / `--max-area` | Deposit area bounds in pixels (defaults: 20 / 10000) |
+| `-m/--metadata` + `--group-by` | Grouping CSV + the column to group by |
+| `--annotate` | Save annotated images (**off** by default on the CLI) |
+| `--visualize` | Save visualization plots (**off** by default on the CLI) |
+| `--spatial` | Compute spatial dispersion metrics (writes `spatial_stats.json`) |
+| `--stats` | Run group statistics |
+| `--report` / `--no-report` | Force / skip the HTML report (default: on) |
+
+> Note: unlike the GUI (which defaults Annotate/Visualize **on**), the CLI leaves them **off**
+> so scripted runs stay fast; add the flags when you want those outputs.
 
 ---
 
 ## 6. Output Files Reference
 
-### image_summary.csv
+A run writes a timestamped `results_YYYYMMDD_HHMMSS/` folder next to the analyzed images
+(override with `-o/--output`).
 
-Per-image statistics with columns:
-- `filename`: Image filename
-- `n_total`: Total deposits (Normal + ROD)
-- `n_normal`, `n_rod`, `n_artifact`: Counts by classification
-- `rod_fraction`: ROD / (Normal + ROD)
-- `normal_mean_area`, `rod_mean_area`: Mean deposit sizes
-- `normal_mean_hue`, `rod_mean_hue`: Mean color (pH indicator)
-- `total_iod`: Total Integrated Optical Density
-- `group`: Experimental group (if provided)
+### image_summary.csv (always)
 
-### all_deposits.csv
+Per-image statistics:
+- `filename` — image filename
+- `n_total` — **all** detected objects (Normal + ROD + Artifact)
+- `n_normal`, `n_rod`, `n_artifact` — counts by classification
+- `rod_fraction` — ROD / (Normal + ROD)
+- `normal_mean_area`, `rod_mean_area` — mean deposit sizes
+- `normal_mean_hue`, `rod_mean_hue` — mean color (pH indicator)
+- `total_iod` — Total Integrated Optical Density
+- `group` — experimental group (if provided)
 
-Individual deposit measurements with columns:
-- `id`: Unique deposit ID
-- `filename`: Source image
-- `label`: Classification (normal/rod/artifact)
-- `area_px`: Area in pixels
-- `circularity`: Shape circularity (0-1)
-- `mean_hue`, `mean_saturation`, `mean_lightness`: Color features
-- `iod`: Integrated Optical Density
-- `x`, `y`, `width`, `height`: Bounding box
+> The report's **Deposit Count** and the "Total Deposits" figures use Normal + ROD only —
+> artifacts are the reject class, excluded from deposit counts and metrics.
 
-### deposits/*.labels.json
+### all_deposits.csv (always)
 
-Per-image deposit data with full contour coordinates. Used for re-editing results.
+Individual deposit measurements: `id`, `filename`, `label` (normal/rod/artifact), `area_px`,
+`circularity`, `mean_hue`/`mean_saturation`/`mean_lightness`, `iod`, and the bounding box
+`x`, `y`, `width`, `height`.
 
-### visualizations/
+### Other outputs
 
-Statistical plots generated during analysis:
-- `dashboard.png`: Summary dashboard with multiple plots
-- `pca_plot.png`: PCA analysis of image features
-- `heatmap.png`: Feature correlation heatmap
-- `scatter_matrix.png`: Pairwise feature scatter plots
-- `violin_*.png`: Violin plots for each metric by group
-- `mean_ci_*.png`: Mean ± 95% CI plots for each metric
+| File / folder | When | Contents |
+|---------------|------|----------|
+| `run_manifest.json` | always | Reproducibility sidecar: SCAT version, git commit, dataset fingerprint, model + hash, detection settings, grouping |
+| `deposits/*.labels.json` | always | Per-image deposit data with full contour coordinates (used for re-editing) |
+| `report.html` | report on | Self-contained HTML report, charts embedded inline |
+| `condition_summary.csv` | grouped runs | Group-level statistics |
+| `groups/<group>_deposits.csv` | grouped runs | Per-group deposit tables |
+| `annotated/*_annotated.png` | annotate on | Images with colored deposit outlines |
+| `visualizations/*.png` | visualize on | `dashboard`, `pca_plot`, `heatmap`, `scatter_matrix`, `violin_*`, `mean_ci_*` |
+| `spatial_stats.json` | spatial on | Spatial dispersion statistics |
 
 ---
 
 ## 7. Keyboard Shortcuts
 
-Shortcuts can be customized in **Settings** (⚙ button in the top-right corner). Changes take effect after restarting SCAT.
+Shortcuts can be customized in **More → Settings**. Changes take effect after restarting SCAT.
 
-### Default Shortcuts
-
-#### Global
+### Global
 
 | Key | Action |
 |-----|--------|
@@ -268,7 +260,7 @@ Shortcuts can be customized in **Settings** (⚙ button in the top-right corner)
 | Ctrl+Z | Undo |
 | Ctrl+R | Run analysis |
 
-#### Labeling / Edit Mode
+### Labeling / Edit Mode
 
 | Key | Action |
 |-----|--------|
@@ -290,23 +282,23 @@ Shortcuts can be customized in **Settings** (⚙ button in the top-right corner)
 
 ### Too many false positives (non-deposits detected)
 
-- Increase **Min Area** in Settings
-- Train a custom model with your data
+- Increase **Min Area** (the analysis option / `--min-area`).
+- Train a custom model with your data.
 
 ### Missing deposits (not detected)
 
-- Decrease **Min Area** in Settings
-- Check image quality and contrast
-- Train U-Net segmentation model for difficult images
+- Decrease **Min Area** (`--min-area`).
+- Check image quality and contrast.
+- Train a U-Net segmentation model for difficult images.
 
 ### Low classification accuracy
 
-- Add more labeled training data
-- Ensure balanced classes (similar numbers of Normal and ROD)
-- Check that your labeling is consistent
+- Add more labeled training data.
+- Ensure balanced classes (similar numbers of Normal and ROD).
+- Keep your labeling consistent.
 
 ### Slow performance
 
-- Enable parallel processing in Settings
-- Reduce image resolution if very large
-- Use SSD storage for faster I/O
+- Enable parallel processing in **More → Settings**.
+- Reduce image resolution if very large.
+- Use SSD storage for faster I/O.

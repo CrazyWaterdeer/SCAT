@@ -103,7 +103,8 @@ class SizeDistributionAnalyzer:
         n_small = size_classes.count('small')
         n_medium = size_classes.count('medium')
         n_large = size_classes.count('large')
-        
+
+        bc = self._bimodality_coefficient(areas)   # compute once (was called twice)
         result = {
             'n_deposits': n_total,
             # Basic statistics
@@ -123,8 +124,8 @@ class SizeDistributionAnalyzer:
             'fraction_large': n_large / n_total,
             # Heterogeneity metrics
             'gini_coefficient': self._gini_coefficient(areas),
-            'bimodality_coefficient': self._bimodality_coefficient(areas),
-            'is_bimodal': self._bimodality_coefficient(areas) > 0.555 if len(areas) >= 4 else False,
+            'bimodality_coefficient': bc,
+            'is_bimodal': (len(areas) >= 4 and bc > 0.555),
             # Distribution shape
             'skewness': float(self.stats.skew(areas)),
             'kurtosis': float(self.stats.kurtosis(areas)),

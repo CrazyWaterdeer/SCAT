@@ -436,8 +436,13 @@ class CNNTrainer:
         )
         self.model = self.model.to(self.device)
         
-        # Class weights
-        class_weights = _compute_class_weight('balanced', classes=np.unique(y_train), y=y_train)
+        # Class weights — build a full-length vector indexed by class id so it always matches
+        # the 3-logit head even when a class is absent from the train split (absent classes get
+        # a harmless weight of 1.0 they never use, and each weight lands at its correct index).
+        present = np.unique(y_train)
+        _cw = _compute_class_weight('balanced', classes=present, y=y_train)
+        class_weights = np.ones(len(self.class_names), dtype=np.float32)
+        class_weights[present] = _cw
         criterion = nn.CrossEntropyLoss(weight=torch.tensor(class_weights, dtype=torch.float32).to(self.device))
         optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
         

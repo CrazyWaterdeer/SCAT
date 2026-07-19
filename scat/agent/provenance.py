@@ -84,11 +84,6 @@ def set_driver(driver: str) -> None:
     global _CURRENT_DRIVER
     _CURRENT_DRIVER = driver
 
-
-def current_session_id() -> str | None:
-    return _CURRENT_SESSION_ID
-
-
 def _summarize(value: Any) -> Any:
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value

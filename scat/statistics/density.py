@@ -118,13 +118,15 @@ class DensityAnalyzer:
             'deposits_cv': coefficient_of_variation(n_total)
         }
         
-        # Per-fly normalization
+        # Per-fly normalization. Mask the FULL n_total column jointly with n_flies (the earlier
+        # dropna() shortened n_total, so a full-length mask misaligned / raised IndexError).
         if n_flies_column and n_flies_column in film_summary.columns:
+            n_total_full = film_summary['n_total'].values
             n_flies = film_summary[n_flies_column].values
-            valid_mask = n_flies > 0
-            
+            valid_mask = (n_flies > 0) & pd.notna(n_total_full)
+
             if np.any(valid_mask):
-                deposits_per_fly = n_total[valid_mask] / n_flies[valid_mask]
+                deposits_per_fly = n_total_full[valid_mask] / n_flies[valid_mask]
                 result['mean_deposits_per_fly'] = float(np.mean(deposits_per_fly))
                 result['std_deposits_per_fly'] = float(np.std(deposits_per_fly))
                 result['deposits_per_fly_cv'] = coefficient_of_variation(deposits_per_fly)

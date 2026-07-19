@@ -97,8 +97,10 @@ class SpatialAnalyzer:
         # Nearest Neighbor Distance
         nnd_result = self._calculate_nnd(centroids)
         
-        # Clark-Evans clustering index
-        ce_result = self._clark_evans_index(centroids, width, height)
+        # Clark-Evans clustering index (reuse the NND mean already computed above — the O(n^2)
+        # distance matrix would otherwise be built a second time per image).
+        ce_result = self._clark_evans_index(centroids, width, height,
+                                            observed_mean=nnd_result['mean'])
         
         # Quadrant analysis
         quad_result = self._quadrant_analysis(centroids, width, height)
@@ -152,14 +154,15 @@ class SpatialAnalyzer:
         }
     
     def _clark_evans_index(
-        self, 
-        centroids: np.ndarray, 
-        width: int, 
-        height: int
+        self,
+        centroids: np.ndarray,
+        width: int,
+        height: int,
+        observed_mean: float = None
     ) -> Dict:
         """
         Calculate Clark-Evans R index for clustering.
-        
+
         R < 1: Clustered
         R = 1: Random (Poisson)
         R > 1: Dispersed (regular)
@@ -167,12 +170,13 @@ class SpatialAnalyzer:
         n = len(centroids)
         if n < 2:
             return {'r': 1.0, 'interpretation': 'insufficient_data'}
-        
+
         area = width * height
-        
-        # Observed mean NND
-        nnd = self._calculate_nnd(centroids)
-        observed_mean = nnd['mean']
+
+        # Observed mean NND — reuse a precomputed value when the caller has one (analyze()),
+        # else compute it here so the method stays independently correct.
+        if observed_mean is None:
+            observed_mean = self._calculate_nnd(centroids)['mean']
         
         # Expected mean NND for random distribution
         density = n / area
@@ -316,29 +320,6 @@ class SpatialAnalyzer:
             density_map=np.zeros((50, 50)),
             image_width=width, image_height=height
         )
-    
-    def get_summary_dict(self, result: SpatialResult) -> Dict:
-        """Convert SpatialResult to dictionary for reporting."""
-        return {
-            'nnd_mean': result.nnd_mean,
-            'nnd_std': result.nnd_std,
-            'nnd_min': result.nnd_min,
-            'nnd_max': result.nnd_max,
-            'clark_evans_r': result.clark_evans_r,
-            'clustering': result.clustering_interpretation,
-            'quadrant_Q1': result.quadrant_counts['Q1'],
-            'quadrant_Q2': result.quadrant_counts['Q2'],
-            'quadrant_Q3': result.quadrant_counts['Q3'],
-            'quadrant_Q4': result.quadrant_counts['Q4'],
-            'quadrant_chi2': result.quadrant_chi2,
-            'quadrant_p_value': result.quadrant_p_value,
-            'quadrant_uniform': result.quadrant_uniform,
-            'edge_count': result.edge_count,
-            'center_count': result.center_count,
-            'edge_fraction': result.edge_fraction
-        }
-
-
 def aggregate_spatial_stats(spatial_results: List[SpatialResult]) -> Dict:
     """
     Aggregate spatial statistics across multiple images.

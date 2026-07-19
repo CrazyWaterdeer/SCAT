@@ -64,3 +64,20 @@ def test_no_command_prints_help_and_exits(monkeypatch):
     with pytest.raises(SystemExit) as exc:
         cli.main()
     assert exc.value.code == 1
+
+
+def test_version_flag(monkeypatch, capsys):
+    """[51] `scat --version` prints the SCAT version and exits 0."""
+    from scat import __version__
+    monkeypatch.setattr(sys, "argv", ["scat", "--version"])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 0
+    assert __version__ in capsys.readouterr().out
+
+
+def test_analyze_spatial_writes_sidecar(synth_dir, tmp_path, monkeypatch):
+    """[50] `scat analyze --spatial` reaches the spatial path (writes spatial_stats.json)."""
+    out = tmp_path / "sp"
+    _run(monkeypatch, ["analyze", str(synth_dir), "-o", str(out), "--spatial"])
+    assert (out / "spatial_stats.json").exists()

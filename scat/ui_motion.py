@@ -78,10 +78,6 @@ def motion_reduced() -> bool:
     return _os_prefers_reduced()
 
 
-# Convenience snapshot for call sites that only need the value once at build time.
-REDUCED = motion_reduced()
-
-
 # ------------------------------------------------------------------------- curves
 def _bezier(x1: float, y1: float, x2: float, y2: float) -> QEasingCurve:
     """A CSS-style ``cubic-bezier(x1,y1,x2,y2)`` from (0,0) to (1,1)."""
@@ -297,17 +293,11 @@ def attach_button_motion(btn, *, primary: bool = False):
     return _ButtonMotion(btn, rest=rest, hover=hover, press=press, color=color)
 
 
-def apply_ui_polish(root, *, cursors: bool = True, elevate: bool = False):
+def apply_ui_polish(root, *, cursors: bool = True):
     """Post-build polish that QSS can't express: a pointing-hand cursor on interactive widgets
-    (QSS has no ``cursor`` property). Call once after a window's UI is constructed.
-
-    ``elevate`` (drop-shadow on top-level cards) defaults OFF: on SCAT's near-black theme a
-    black drop shadow is invisible against a near-black background (and costs a blurred pixmap
-    per card). Card depth instead comes from the surface-tier lift (``BG_SURFACE`` above
-    ``BG_BASE``) plus a lit top-edge border in the stylesheet. Elevation is only applied to
-    group boxes NOT nested inside another group box, for the rare lighter-surface context."""
+    (QSS has no ``cursor`` property). Call once after a window's UI is constructed."""
     from PySide6.QtWidgets import (QPushButton, QComboBox, QCheckBox, QRadioButton,
-                                   QToolButton, QGroupBox, QTabBar)
+                                   QToolButton, QTabBar)
     from PySide6.QtCore import Qt
     if cursors:
         for cls_ in (QPushButton, QComboBox, QCheckBox, QRadioButton, QToolButton):
@@ -315,26 +305,4 @@ def apply_ui_polish(root, *, cursors: bool = True, elevate: bool = False):
                 w.setCursor(Qt.PointingHandCursor)
         for tb in root.findChildren(QTabBar):
             tb.setCursor(Qt.PointingHandCursor)
-    if elevate:
-        for gb in root.findChildren(QGroupBox):
-            p = gb.parentWidget()
-            while p is not None and not isinstance(p, QGroupBox):
-                p = p.parentWidget()
-            if p is None:              # not nested in a group box → a top-level card
-                attach_elevation(gb)
 
-
-def attach_elevation(widget, *, blur: int = 18, y: int = 3, alpha: int = 120):
-    """Attach a static soft drop shadow so a container (e.g. a QGroupBox) reads as a raised
-    surface — QSS cannot do ``box-shadow``. No animation; pure depth. Skipped if the widget
-    already has a graphics effect (one-effect-per-widget). The caller must leave layout margin
-    around the widget (>= the blur radius/2) so the shadow is not clipped by the parent."""
-    if widget.graphicsEffect() is not None:
-        return None
-    eff = QGraphicsDropShadowEffect(widget)
-    eff.setColor(QColor(0, 0, 0, alpha))
-    eff.setBlurRadius(blur)
-    eff.setXOffset(0)
-    eff.setYOffset(y)
-    widget.setGraphicsEffect(eff)
-    return eff

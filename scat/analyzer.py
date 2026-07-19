@@ -18,6 +18,19 @@ from .features import FeatureExtractor
 from .classifier import get_classifier, ClassifierConfig
 
 
+def to_rgb(img: Image.Image) -> Image.Image:
+    """A PIL image as 3-channel RGB, compositing any alpha over WHITE first. Excreta scans are
+    light paper, so transparent padding must become white — a plain ``convert('RGB')`` would drop
+    alpha and expose the hidden (usually black) RGB, which adaptive thresholding then reads as dark
+    foreground (false deposits) and which leaves OpenCV-drawn annotations invisible. A no-op
+    (identical pixels) for opaque 8-bit RGB, so pipeline CSV parity is preserved."""
+    if img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info):
+        img = img.convert('RGBA')
+        bg = Image.new('RGBA', img.size, (255, 255, 255, 255))
+        img = Image.alpha_composite(bg, img)
+    return img.convert('RGB')
+
+
 class AnalysisResult:
     """Container for analysis results of a single image."""
     
@@ -26,6 +39,9 @@ class AnalysisResult:
         self.deposits = deposits
         self.dpi = dpi
         self.timestamp = datetime.now().isoformat()
+        # True only for a placeholder produced by a real analysis failure (unreadable
+        # image / worker give-up), NOT for a legitimately clean 0-deposit image.
+        self.failed = False
     
     @property
     def n_total(self) -> int:
@@ -147,9 +163,10 @@ class Analyzer:
     def analyze_image(self, image_path: Union[str, Path]) -> AnalysisResult:
         image_path = Path(image_path)
         img = Image.open(image_path)
-        image = np.array(img)
-        
         dpi = img.info.get('dpi', (self.dpi, self.dpi))[0]
+        # Normalize to 3-channel RGB (compositing alpha over white) so grayscale/palette/RGBA/CMYK
+        # inputs don't crash detection/feature extraction or misread transparency as deposits.
+        image = np.array(to_rgb(img))
         # Use a local extractor (not self.extractor): analyze_batch runs this
         # method concurrently in a thread pool, so a shared instance attribute
         # would let one image's DPI clobber another's mid-extraction.
@@ -440,7 +457,8 @@ class ReportGenerator:
             if group_col in deposit_data.columns:
                 groups_dir = self.output_dir / 'groups'
                 groups_dir.mkdir(exist_ok=True)
-                
+
+                seen_stems = {}   # disambiguate distinct group names that sanitize alike
                 for group_name in deposit_data[group_col].dropna().unique():
                     group_df = deposit_data[deposit_data[group_col] == group_name].copy()
                     # Re-assign IDs within group
@@ -457,6 +475,14 @@ class ReportGenerator:
                     for char in [':', '*', '?', '"']:
                         safe_name = safe_name.replace(char, '_')
                     safe_name = safe_name.replace(' ', '_')
+                    # Two distinct group names can sanitize to the same stem (e.g. 'A/B' and
+                    # 'A|B' → 'A-B'); disambiguate so the second no longer overwrites the first.
+                    if safe_name in seen_stems:
+                        stem = safe_name
+                        while safe_name in seen_stems:
+                            seen_stems[stem] += 1
+                            safe_name = f'{stem}_{seen_stems[stem]}'
+                    seen_stems[safe_name] = seen_stems.get(safe_name, 0)
                     group_df.to_csv(groups_dir / f'{safe_name}_deposits.csv', index=False)
         
         return {

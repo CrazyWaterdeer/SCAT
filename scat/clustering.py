@@ -51,7 +51,7 @@ def unusual_flag(df: pd.DataFrame) -> pd.Series:
     return ((_num(df, "circularity") < 0.5) | (elong > 2.5)) & ~line_flag(df)
 
 
-def cluster_kind(circularity, aspect_ratio, solidity=None, pct_line=0.0, pct_unusual=0.0) -> str:
+def cluster_kind(circularity, aspect_ratio, pct_line=0.0, pct_unusual=0.0) -> str:
     """A short label to guide labeling. Prefers per-cluster FRACTIONS (a median alone marks a mixed
     or giant-noise cluster 'common' while its tail holds exactly the interesting deposits); falls
     back to the scalar medians for single-deposit callers."""
@@ -212,7 +212,7 @@ def cluster_profile(df: pd.DataFrame, labels: np.ndarray) -> pd.DataFrame:
         pct_unusual=("_unusual", "mean"),
         **{c: (c, "median") for c in cols}).reset_index()
     agg["kind"] = agg.apply(
-        lambda r: cluster_kind(r.get("circularity"), r.get("aspect_ratio"), r.get("solidity"),
+        lambda r: cluster_kind(r.get("circularity"), r.get("aspect_ratio"),
                                pct_line=r["pct_line"], pct_unusual=r["pct_unusual"]), axis=1)
     return agg.sort_values("cluster_id").reset_index(drop=True)
 

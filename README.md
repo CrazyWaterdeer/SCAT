@@ -1,6 +1,6 @@
 # SCAT — Spot Classification and Analysis Tool
 
-**Version 1.0.0**
+**Version 2.0.0**
 
 A machine-learning tool for *Drosophila* excreta analysis. SCAT detects deposits in scanned
 images, classifies each as **Normal**, **ROD** (Reproductive Oblong Deposit), or **Artifact**,
@@ -9,6 +9,12 @@ HTML report — from the GUI, the command line, or a plain-language chat with a 
 assistant.
 
 📖 **[Detailed Workflow Guide](WORKFLOW.md)**
+
+> **What's new in 2.0** — a codebase-wide hardening pass: sounder statistics (Welch's
+> *t*-test, a corrected Cohen's *d*, a consistent *n* ≥ 3 significance gate), a group-comparison
+> "Deposit Count" that now excludes artifacts everywhere (matching the rest of the report),
+> grayscale/RGBA images no longer crash detection, HTML-escaped filenames/group names in the
+> report, and CLI `--version` / `--spatial` flags. Plus many smaller bug fixes and cleanups.
 
 ## Features
 
