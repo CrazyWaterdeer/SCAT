@@ -176,3 +176,18 @@ def test_condition_comparison_renders(tmp_path):
     out = Visualizer(tmp_path).condition_comparison(df, "n_total", "group", matrix,
                                                     control_group="Vehicle", filename="c.png")
     assert out and (tmp_path / "c.png").exists()
+
+
+@pytest.mark.skipif(not _HAS_VIZ, reason="viz libs missing")
+def test_grouped_bar_clusters_render_and_skip_missing(tmp_path):
+    import pandas as pd
+    from scat.visualization import Visualizer
+    df = pd.DataFrame([{"group": g, "n_total": base}
+                       for g, base in [("mF 24h", 60), ("mF 48h", 44), ("saline 24h", 22), ("saline 48h", 52)]
+                       for _ in range(5)])
+    # dict form: related timepoints clustered per drug; a listed group not in the data is skipped
+    bg = {"mF": ["mF 24h", "mF 48h"], "Saline": ["saline 24h", "saline 48h", "saline 72h"]}
+    out = Visualizer(tmp_path).grouped_bar(df, "n_total", "group", bg, filename="g.png")
+    assert out and (tmp_path / "g.png").exists()
+    # empty / no-match clusters -> None, never raises
+    assert Visualizer(tmp_path).grouped_bar(df, "n_total", "group", {"x": ["nope"]}) is None
