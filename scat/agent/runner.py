@@ -220,6 +220,11 @@ class AgentRunner:
                 if assistant_blocks:
                     self.messages.append({"role": "assistant", "content": assistant_blocks})
                 if stop_reason != "tool_use":
+                    if stop_reason == "max_tokens":
+                        # The reply hit the per-request output cap and was cut off mid-text. Surface it
+                        # so it is never a silent truncation; raising agent.max_tokens allows longer replies.
+                        yield TextDelta("\n\n_[Reply cut off at the output-token limit — raise "
+                                        "`agent.max_tokens` in ~/.scat/config.json for longer replies.]_\n")
                     yield TurnDone(stop_reason, total_usage); return
                 tool_result_blocks: list[dict[str, Any]] = []
                 for block in assistant_blocks:

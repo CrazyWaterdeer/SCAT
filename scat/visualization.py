@@ -1259,12 +1259,13 @@ class Visualizer:
         if not HAS_MATPLOTLIB or not HAS_SEABORN:
             return None
 
-        # Deposit count = Normal + ROD (artifact-exclusive), matching the report/stats.
-        if ({'n_normal', 'n_rod'} <= set(film_summary.columns)
-                and 'n_deposits' not in film_summary.columns):
-            film_summary = film_summary.copy()
-            film_summary['n_deposits'] = film_summary['n_normal'] + film_summary['n_rod']
+        # Deposit count = Normal + ROD (artifact-exclusive), matching the report/stats — and per fly
+        # when every image has a valid n_flies (fly_normalize divides the count/sum columns).
+        from scat.metrics import fly_normalize
+        film_summary, _dash_per_fly = fly_normalize(film_summary)
         count_col = 'n_deposits' if 'n_deposits' in film_summary.columns else 'n_total'
+        _cnt_word = 'per fly' if _dash_per_fly else 'per Image'
+        _iod_word = 'IOD / fly' if _dash_per_fly else 'Total IOD'
 
         # Get unique groups and calculate optimal width
         if group_by and group_by in film_summary.columns:
@@ -1315,8 +1316,8 @@ class Visualizer:
             )
         else:
             _sns.histplot(film_summary[count_col], ax=ax, kde=True, color=DEFAULT_GRAY)
-        ax.set_title('Deposits per Image', fontweight='bold')
-        ax.set_ylabel('Count')
+        ax.set_title(f'Deposits {_cnt_word}', fontweight='bold')
+        ax.set_ylabel('Deposits / fly' if _dash_per_fly else 'Count')
         ax.set_xlabel('')
         apply_publication_style(ax)
         
@@ -1363,8 +1364,8 @@ class Visualizer:
                 )
             else:
                 _sns.histplot(film_summary['total_iod'], ax=ax, kde=True, color=DEFAULT_GRAY)
-        ax.set_title('Total IOD Distribution', fontweight='bold')
-        ax.set_ylabel('Total IOD')
+        ax.set_title(f'{_iod_word} Distribution', fontweight='bold')
+        ax.set_ylabel(_iod_word)
         ax.set_xlabel('')
         apply_publication_style(ax)
         
@@ -1424,13 +1425,16 @@ def generate_all_visualizations(
         if path:
             results[name] = path
 
-    # Artifact-exclusive deposit count (Normal+ROD) in memory so the standalone plots agree with
-    # the report/stats (which use n_deposits). Never written to disk.
-    if ({'n_normal', 'n_rod'} <= set(film_summary.columns)
-            and 'n_deposits' not in film_summary.columns):
-        film_summary = film_summary.copy()
-        film_summary['n_deposits'] = film_summary['n_normal'] + film_summary['n_rod']
+    # Derive the artifact-exclusive deposit count (Normal+ROD) and, when every image has a valid
+    # n_flies, divide the count/sum columns PER FLY — so the standalone plots agree with the
+    # report/stats. Never written to disk. per_fly drives the count/IOD axis labels below.
+    from scat.metrics import fly_normalize
+    film_summary, per_fly = fly_normalize(film_summary)
     _count_metric = 'n_deposits' if 'n_deposits' in film_summary.columns else 'n_total'
+    # Per-fly axis labels for the count/sum metrics (values are already divided); others unchanged.
+    _pf_label = {_count_metric: 'Deposits / fly', 'total_iod': 'IOD / fly'} if per_fly else {}
+    def _ylabel(metric):
+        return _pf_label.get(metric)   # None -> the plotter's default get_feature_label
 
     # Dashboard
     _safe('dashboard', lambda: viz.summary_dashboard(film_summary, group_by, control_group))
@@ -1456,7 +1460,7 @@ def generate_all_visualizations(
                 control_group=control_group,
                 show_significance=show_significance,
                 significance_mode=significance_mode,
-                show_ns=show_ns
+                show_ns=show_ns, ylabel=_ylabel(m)
             ))
 
     # Condition-matrix bar charts (open/closed circles) for factorial designs, when the caller
@@ -1467,7 +1471,7 @@ def generate_all_visualizations(
                 _safe(f'condition_{metric}', lambda m=metric: viz.condition_comparison(
                     film_summary, m, group_by, condition_matrix,
                     control_group=control_group, show_significance=show_significance,
-                    significance_mode=significance_mode, show_ns=show_ns))
+                    significance_mode=significance_mode, show_ns=show_ns, ylabel=_ylabel(m)))
 
     # Mean + CI plots for publication-standard visualization
     # Include area and hue for biological significance
@@ -1480,7 +1484,7 @@ def generate_all_visualizations(
         if metric in film_summary.columns and group_by:
             _safe(f'mean_ci_{metric}', lambda m=metric: viz.mean_ci_plot(
                 film_summary, m, group_by,
-                control_group=control_group
+                control_group=control_group, ylabel=_ylabel(m)
             ))
 
     # Scatter matrix

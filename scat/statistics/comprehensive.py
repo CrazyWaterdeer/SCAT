@@ -41,19 +41,19 @@ def run_comprehensive_analysis(
         include_analyses = ['basic', 'ph', 'pigmentation', 'size', 'density',
                            'correlation', 'morphology']
 
-    # Derive an artifact-EXCLUSIVE per-image deposit count (Normal+ROD) IN MEMORY so the
-    # "Deposit Count" group comparison matches the rest of the report (Summary card, per-group
-    # table, Methods all exclude artifacts). Never written to CSV → pipeline parity untouched.
-    if ('n_normal' in film_summary.columns and 'n_rod' in film_summary.columns
-            and 'n_deposits' not in film_summary.columns):
-        film_summary = film_summary.copy()
-        film_summary['n_deposits'] = film_summary['n_normal'] + film_summary['n_rod']
+    # Derive the artifact-EXCLUSIVE per-image deposit count (Normal+ROD) IN MEMORY and, when every
+    # image carries a valid n_flies, divide the count/sum columns PER FLY — so the whole comparison
+    # (deposit count, IOD) is per fly, matching the report/plots/headline. Never written to CSV →
+    # pipeline parity untouched. per_fly=False (no/partial counts) falls back to totals.
+    from scat import metrics as _metrics
+    film_summary, per_fly = _metrics.fly_normalize(film_summary)
 
     results = {
         'metadata': {
             'n_films': len(film_summary),
             'n_deposits': len(deposits_df) if deposits_df is not None else 0,
             'group_column': group_column,
+            'per_fly': per_fly,
             'analyses_included': include_analyses
         }
     }
@@ -87,7 +87,7 @@ def run_comprehensive_analysis(
                 deposits_df=deposits_df,
                 film_summary=film_summary,
                 group_column=group_column,
-                n_flies_column=n_flies_column
+                n_flies_column=None   # film_summary is already per-fly (fly_normalize) — don't re-divide
             )
         except Exception as e:
             results['pigmentation'] = {'error': str(e)}
@@ -110,7 +110,7 @@ def run_comprehensive_analysis(
                 deposits_df=deposits_df,
                 film_summary=film_summary,
                 group_column=group_column,
-                n_flies_column=n_flies_column
+                n_flies_column=None   # film_summary is already per-fly (fly_normalize) — don't re-divide
             )
         except Exception as e:
             results['density'] = {'error': str(e)}

@@ -84,36 +84,68 @@ def metric_values(film: pd.DataFrame, key: str) -> pd.Series:
 NORMALIZATIONS = ("per_image", "per_fly", "per_area", "per_time")
 DEFAULT_NORMALIZATION = "per_image"
 
-# Each non-default mode needs run metadata (captured in a LATER task — see Plan 1 scope note); until
-# then it degrades to per_image with a note. Keys are the run_meta names the pipeline will provide.
-_NORM_META_KEY = {"per_fly": "n_flies", "per_area": "roi_area", "per_time": "duration"}
-_NORM_UNIT = {"per_image": "image", "per_fly": "fly", "per_area": "mm²", "per_time": "h"}
+# The count/abundance columns that scale with the number of flies in a vial, so a raw total is
+# meaningless to compare across vials with different fly counts — these are divided by n_flies for
+# per-fly normalization. Fractions (rod_fraction) and per-deposit means (area/hue/circularity/
+# mean_iod) are intensive quantities and are NEVER divided. n_deposits is the derived Normal+ROD
+# count. (This is the same set run_all_tests compares; keeping them consistent keeps the whole report
+# per-fly or all-total, never mixed.)
+COUNT_SUM_COLUMNS = ("n_deposits", "n_total", "n_normal", "n_rod",
+                     "total_iod", "normal_total_iod", "rod_total_iod")
+
+_PREPARED_ATTR = "scat_per_fly"   # DataFrame.attrs marker so fly_normalize() is idempotent
 
 
-def effective_normalization(mode: str, meta: dict) -> tuple[str, str, str]:
-    """Resolve a requested normalization against available run metadata.
-    Returns (unit_label, effective_mode, degrade_note). degrade_note is "" when not degraded."""
-    mode = mode if mode in NORMALIZATIONS else DEFAULT_NORMALIZATION
-    if mode == "per_image":
-        return (_NORM_UNIT["per_image"], "per_image", "")
-    if meta.get(_NORM_META_KEY[mode]):
-        return (_NORM_UNIT[mode], mode, "")
-    return (_NORM_UNIT["per_image"], "per_image",
-            f"no {_NORM_META_KEY[mode]} metadata — showing per image")
+def has_fly_counts(film: pd.DataFrame) -> bool:
+    """True only when EVERY image has a valid (>0) n_flies — a partial column can't silently mix
+    per-fly and total values in one comparison, so partial coverage falls back to totals."""
+    if "n_flies" not in getattr(film, "columns", []) or len(film) == 0:
+        return False
+    import numpy as np
+    nf = pd.to_numeric(film["n_flies"], errors="coerce")
+    return bool((np.isfinite(nf) & (nf > 0)).all())   # every image needs a finite, positive count
 
 
-def format_headline(film: pd.DataFrame, key: str, normalization: str, meta: dict) -> str:
-    """Primary-metric headline. Rate metrics show a rate (divisor = image count for per_image, or the
-    metadata value), never a pooled total (spec §2.1). Fraction/mean metrics show a per-image mean."""
+def fly_normalize(film: pd.DataFrame) -> tuple[pd.DataFrame, bool]:
+    """Return (film2, per_fly). Derives the shared artifact-exclusive n_deposits (Normal+ROD), and —
+    when every image carries a valid n_flies — divides the count/sum columns (COUNT_SUM_COLUMNS) by
+    n_flies so all downstream stats/plots/headline are PER FLY. Otherwise returns totals (per_fly=
+    False, the fallback). Idempotent: a film already normalized here is returned unchanged.
+
+    The on-disk image_summary.csv keeps RAW totals + an n_flies column; per-fly is computed in memory
+    here at every entry point, so re-report/re-render read raw and re-derive consistently."""
+    if getattr(film, "attrs", {}).get(_PREPARED_ATTR) is not None:
+        return film, film.attrs[_PREPARED_ATTR]
+    f = film
+    if {"n_normal", "n_rod"} <= set(f.columns) and "n_deposits" not in f.columns:
+        f = f.copy()
+        f["n_deposits"] = f["n_normal"].astype(float) + f["n_rod"].astype(float)
+    per_fly = has_fly_counts(f)
+    if per_fly:
+        if f is film:
+            f = f.copy()
+        nf = pd.to_numeric(f["n_flies"], errors="coerce")
+        for col in COUNT_SUM_COLUMNS:
+            if col in f.columns:
+                f[col] = f[col].astype(float) / nf
+    if f is film:            # nothing was copied (no derivation, no per-fly) — copy so attrs is ours
+        f = f.copy()
+    f.attrs[_PREPARED_ATTR] = per_fly
+    return f, per_fly
+
+
+def format_headline(film: pd.DataFrame, key: str, per_fly: bool = False) -> str:
+    """Primary-metric headline. Rate/count metrics show a per-unit rate (per fly when per_fly else per
+    image), never a pooled total (spec §2.1). Fraction/mean metrics show a per-image mean. Pass a film
+    already run through fly_normalize() so count columns are in the right (per-fly or total) units."""
     m = METRICS[resolve_metric(key)]
     vals = m.values(film).dropna()
     if len(vals) == 0:
         return "—"
     if m.is_rate:
-        unit, eff, _note = effective_normalization(normalization, meta)
-        divisor = {"per_image": len(film), "per_fly": meta.get("n_flies"),
-                   "per_area": meta.get("roi_area"), "per_time": meta.get("duration")}[eff] or len(film)
-        rate = float(vals.sum()) / float(divisor)
+        n = len(film)
+        rate = float(vals.sum()) / n if n else 0.0
+        unit = "fly" if per_fly else "image"
         noun = m.label.lower().replace("total ", "")  # "Total deposits" -> "deposits"
         return f"{m.fmt.format(rate)} {noun} / {unit}"
     return f"{m.fmt.format(float(vals.mean()))}{m.unit}"

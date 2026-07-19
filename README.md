@@ -1,6 +1,6 @@
 # SCAT — Spot Classification and Analysis Tool
 
-**Version 2.0.1**
+**Version 2.1.0**
 
 A machine-learning tool for *Drosophila* excreta analysis. SCAT detects deposits in scanned
 images, classifies each as **Normal**, **ROD** (Reproductive Oblong Deposit), or **Artifact**,
@@ -10,6 +10,13 @@ assistant.
 
 📖 **[Detailed Workflow Guide](WORKFLOW.md)**
 
+> **New in 2.1.0** — **per-fly normalization**: because a vial's total deposit count and total IOD
+> scale with how many flies are in it, SCAT now reports and compares deposit count and IOD **per fly**
+> whenever a per-image fly count is available (read from the filenames, e.g. "… 3 flies …", or supplied
+> as `n_flies`); fractions and per-deposit means are unaffected, and runs without fly counts fall back
+> to per-image totals with a warning. Also: the assistant's replies are no longer cut off at a low
+> output-token limit (raised + auto-migrated).
+>
 > **New in 2.0.1** — the assistant can now re-render an existing results folder a different way
 > **without re-detecting** (change the primary metric, group order, or plot colours, or produce the
 > report *after* you have manually reviewed the detections), and it can **train or update the
