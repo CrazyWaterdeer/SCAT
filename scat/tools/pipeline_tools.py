@@ -34,10 +34,10 @@ def run_statistics(results_dir: str, group_col: str = "group") -> dict:
     return run_statistics_service(results_dir, group_col=group_col)
 
 
-@tool(description="Generate the HTML report for a results dir. Pass the statistics dict if available.")
+@tool(description="Generate the HTML report for a results dir. It COMPUTES AND EMBEDS the group statistics itself (from the CSVs) and auto-groups by the run's grouping column — you do NOT need to run run_statistics first or pass any statistics in; the report always reflects the actual data. (run_statistics is only for reading the numbers to relay in chat.) statistical_results is an optional fallback; group_by overrides the grouping column.")
 def generate_report(results_dir: str, statistical_results: Optional[dict] = None,
                     group_by: Optional[str] = None) -> dict:
-    """Build the self-contained HTML report; returns its path."""
+    """Build the self-contained HTML report (stats computed internally); returns its path."""
     return {"report_path": generate_report_service(results_dir, statistical_results, group_by)}
 
 
