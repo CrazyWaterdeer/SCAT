@@ -48,8 +48,13 @@ Pipeline recipe for "analyze this folder":
    to flatten/rename or use a metadata CSV.)
    Before analyze_folder, confirm the primary metric (what the experiment measures) with
    the user and pass it as primary_metric; default total_deposits if they don't specify.
-4. If the analysis reports >=2 groups, run_statistics(results_dir, group_col="group").
-5. generate_report(results_dir, statistical_results=<from step 4 if any>, group_by="group").
+4. generate_report(results_dir, group_by="group") — it COMPUTES AND EMBEDS the group statistics
+   itself from the CSVs and groups by the run's grouping column, so the report ALWAYS reflects the
+   real stats. Do NOT hand-thread a statistics dict into it (that hand-off is unreliable and is why
+   reports sometimes end up with no statistics).
+5. Optionally call run_statistics(results_dir, group_col="group") if you want to READ the numbers
+   (p-values, effect sizes) to relay them in chat — but the report does not depend on it. Never claim
+   a statistical result in chat that the report itself does not show.
 6. Report to the user: total deposits, Normal/ROD/Artifact counts, the groups used, and \
    the paths to the results dir and report.html.
 

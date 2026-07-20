@@ -329,18 +329,32 @@ def generate_report_service(results_dir: str, statistical_results: Optional[dict
     # run's own choices rather than global config. Best-effort — a missing/bad manifest degrades
     # to an empty dict, never raises into the report path.
     import json
-    analysis = {}
+    analysis, grouping = {}, {}
     mpath = rd / "run_manifest.json"
     if mpath.exists():
         try:
-            analysis = (json.loads(mpath.read_text()).get("analysis") or {})
+            _man = json.loads(mpath.read_text())
+            analysis = _man.get("analysis") or {}
+            grouping = _man.get("grouping") or {}
         except Exception:
-            analysis = {}
+            analysis, grouping = {}, {}
     film = pd.read_csv(rd / IMAGE_SUMMARY)
     deposits = pd.read_csv(rd / ALL_DEPOSITS) if (rd / ALL_DEPOSITS).exists() else None
-    # report expects the FLAT metrics mapping, not the whole run_comprehensive_analysis dict.
+
+    # Resolve the grouping column (arg > manifest > a 'group' column if present) and group the report by
+    # it, so even a bare generate_report(results_dir) produces a grouped, stats-bearing report.
+    group_by = group_by or grouping.get("column") or ("group" if "group" in film.columns else None)
+
+    # ALWAYS compute the group statistics HERE from the CSVs. The report's stats must never depend on
+    # the caller threading a (large, easily-truncated) stats dict back in — that hand-off is the #1
+    # reason a report ends up with no statistics even though the agent "ran the stats". A caller-passed
+    # statistical_results is used only as a fallback. report wants the FLAT metrics mapping.
     metrics = None
-    if statistical_results and not statistical_results.get("skipped"):
+    if group_by and group_by in film.columns:
+        stats = run_statistics_service(str(rd), group_col=group_by)
+        if not stats.get("skipped"):
+            metrics = stats.get("basic", {}).get("metrics") or stats
+    if metrics is None and statistical_results and not statistical_results.get("skipped"):
         metrics = statistical_results.get("basic", {}).get("metrics") or statistical_results
     # The report renders a Spatial Analysis section from spatial_stats; pick up the sidecar
     # analyze_folder_service(spatial=True) writes so the HTML matches the Results tab.
