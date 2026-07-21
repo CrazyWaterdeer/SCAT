@@ -106,16 +106,24 @@ That's all you need to analyze images with the bundled model. Steps 4–5 are op
 - **API — billed.** Skip the CLI; paste a key into **Settings › Assistant** in the GUI, or export
   `ANTHROPIC_API_KEY=sk-ant-…` before launching.
 
-**5 — (Optional) One-click desktop icon** (**WSL2 only** — Windows 11 + WSLg):
+**5 — (Optional) One-click desktop icon.** Puts an **SCAT** icon on your desktop that launches the
+GUI with no console window. Run it after step 2 (it needs the `.venv`).
 
-```bash
-bash scripts/install_desktop_shortcut.sh
-```
+- **WSL2** (Windows 11 + WSLg):
 
-Puts an **SCAT** icon on your Windows desktop (launches `.venv/bin/python -m scat.cli gui`, no
-console window). This script is a WSL→Windows bridge (it uses `wslpath`/`powershell.exe`) and
-**requires** WSL2 interop — it does not run on native Windows. Run it after step 2. On native
-Windows, just use `uv run scat gui` (or make a shortcut to `.venv\Scripts\pythonw.exe -m scat.cli gui`).
+  ```bash
+  bash scripts/install_desktop_shortcut.sh
+  ```
+
+  A WSL→Windows bridge (uses `wslpath`/`powershell.exe`); it launches `.venv/bin/python -m scat.cli gui`.
+
+- **Native Windows** (PowerShell):
+
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File scripts\install_desktop_shortcut.ps1
+  ```
+
+  Launches `.venv\Scripts\pythonw.exe -m scat.cli gui` with the SCAT icon.
 
 ### Native Windows (PowerShell) — advanced
 
@@ -134,7 +142,7 @@ cross-platform), but a few setup commands differ. The core happy path
 | API key (env var) | `export ANTHROPIC_API_KEY=sk-ant-…` | `$env:ANTHROPIC_API_KEY = "sk-ant-…"` (or paste it into Settings › Assistant) |
 | Activate the venv | `source .venv/bin/activate` | `.venv\Scripts\Activate.ps1` |
 | Run via the interpreter | `.venv/bin/python -m scat.cli <cmd>` | `.venv\Scripts\python.exe -m scat.cli <cmd>` |
-| Desktop icon (step 5) | `bash scripts/install_desktop_shortcut.sh` | not available — use `uv run scat gui` |
+| Desktop icon (step 5) | `bash scripts/install_desktop_shortcut.sh` | `powershell -ExecutionPolicy ByPass -File scripts\install_desktop_shortcut.ps1` |
 | Path arguments | `/path/to/images` | `C:\path\to\images` |
 
 **Tip:** prefer `uv run scat <cmd>` — it is the same on every OS and sidesteps the venv-activation and
@@ -287,7 +295,8 @@ image004.tif,Treatment
   on **3.10–3.13** for now — PySide6/torch wheels can lag a new CPython).
 - [uv](https://docs.astral.sh/uv/) for the install/run flow above.
 - **Windows:** runs under **WSL2** (recommended — commands above are verbatim) or **native Windows**
-  (see [Native Windows](#native-windows-powershell--advanced)). The one-click desktop icon is WSL2-only.
+  (see [Native Windows](#native-windows-powershell--advanced)). The one-click desktop icon has both a
+  WSL2 (`.sh`) and a native-Windows (`.ps1`) installer.
 - The `deep` extra (torch) for U-Net/CNN; the `agent` extra + a Claude login or API key for the
   Assistant.
 - 8 GB RAM recommended.
