@@ -110,12 +110,13 @@ def test_shutdown_is_safe_without_runner(app):
 
 def test_model_and_provider_pickers(app):
     from scat.agent.chat_widget import ChatDockWidget, _PROVIDERS
-    from scat.agent.backend import LATEST_MODELS
+    from scat.agent.model_catalog import AUTO, available_models
     from scat.config import config
     w = ChatDockWidget()
-    # Model picker lists the single-source latest models and selects the configured one
-    assert [w.model_combo.itemData(i) for i in range(w.model_combo.count())] == [m for _, m in LATEST_MODELS]
-    assert w.model_combo.currentData() == config.get("agent.model", "claude-opus-4-8")
+    # Model picker lists the catalog (auto-latest first) and selects the configured model
+    assert [w.model_combo.itemData(i) for i in range(w.model_combo.count())] == [m for _, m in available_models()]
+    assert w.model_combo.itemData(0) == AUTO
+    assert w.model_combo.currentData() == config.get("agent.model", AUTO)
     assert [w.provider_combo.itemData(i) for i in range(w.provider_combo.count())] == [v for _, v in _PROVIDERS]
     assert w.provider_combo.currentData() == config.get("agent.backend", "auto")
 
@@ -242,3 +243,15 @@ def test_stop_requests_cancel(app, monkeypatch):
     w._set_runner_for_test(_runner())
     w._stop()
     assert called, "_stop must request cancellation of the in-progress batch"
+
+
+def test_model_picker_keeps_a_pinned_model_not_in_the_catalog(app, monkeypatch):
+    """A model the catalog no longer lists (an old pin, a model retired upstream) must still show
+    as the current selection — silently switching the user to another model would be worse."""
+    from scat.config import config
+    monkeypatch.setattr(config, "get",
+                        lambda k, d=None: "claude-opus-4-6" if k == "agent.model" else d)
+    from scat.agent.chat_widget import ChatDockWidget
+    w = ChatDockWidget()
+    assert w.model_combo.currentData() == "claude-opus-4-6"
+    assert w.model_combo.currentText() == "Opus 4.6"
