@@ -27,7 +27,15 @@ def get_config_path() -> Path:
     return get_config_dir() / "config.json"
 
 
+# Bumped whenever a one-time migration is added below; a saved config carries the version it
+# was last migrated to, so each migration runs exactly once and never re-overrides a choice the
+# user has since made deliberately.
+SCHEMA_VERSION = 1
+
+
 DEFAULT_CONFIG = {
+    "schema_version": SCHEMA_VERSION,
+
     # Paths
     "last_input_dir": "",
     "last_output_dir": "",
@@ -71,7 +79,7 @@ DEFAULT_CONFIG = {
     # AI agent (non-secret selection only; ANTHROPIC_API_KEY comes from the env)
     "agent": {
         "backend": "auto",   # auto | subscription | api
-        "model": "claude-opus-4-8",
+        "model": "latest",  # model_catalog.AUTO — always the newest Claude (pin an id to opt out)
         "api_key": "",       # Anthropic API key for the billed API backend (blank = use the Claude
                              # subscription). The ANTHROPIC_API_KEY env var, if set, overrides this.
         "max_loops": 40,
@@ -149,9 +157,14 @@ class Config:
         self._config_path = get_config_path()
         self._data = self._load()
         self._initialized = True
+        if self._migrated:
+            # Persist the migration now, so it is genuinely one-time: a user who re-pins the
+            # model a migration moved them off must not be moved again on the next launch.
+            self.save()
     
     def _load(self) -> Dict:
         """Load configuration from file."""
+        self._migrated = False
         if self._config_path.exists():
             try:
                 with open(self._config_path, 'r', encoding='utf-8') as f:
@@ -184,6 +197,20 @@ class Config:
         agent = result.get("agent")
         if isinstance(agent, dict) and agent.get("max_tokens") == 4096:
             agent["max_tokens"] = DEFAULT_CONFIG["agent"]["max_tokens"]
+
+        # Versioned one-time migrations. v1: "claude-opus-4-8" was the old hardcoded default, so
+        # a config carrying it was almost certainly never a deliberate pin — move it to the
+        # auto-latest sentinel so the assistant stops lagging behind Anthropic's releases. Running
+        # it once (and only once) is what lets a user pin Opus 4.8 afterwards and keep it.
+        try:
+            version = int(loaded.get("schema_version", 0))
+        except (TypeError, ValueError):
+            version = 0          # hand-edited/garbage value: treat as pre-versioning, never crash
+        if version < 1 and isinstance(agent, dict) and agent.get("model") == "claude-opus-4-8":
+            agent["model"] = DEFAULT_CONFIG["agent"]["model"]
+        if version != SCHEMA_VERSION:
+            result["schema_version"] = SCHEMA_VERSION
+            self._migrated = True
 
         return result
     

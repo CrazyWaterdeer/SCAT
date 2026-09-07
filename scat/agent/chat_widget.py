@@ -7,7 +7,7 @@ explicit light colour, so nothing ever renders black-on-black.
 
 Design constraints (see docs/superpowers/plans/2026-07-14-scat-gui-chat-dock.md):
 - Top level imports **nothing that requires the ``[agent]`` extra** — only PySide6, the core
-  ``Theme``, the plain ``LATEST_MODELS`` list, and ``config`` (none pull pydantic/anthropic).
+  ``Theme``, the plain model catalog, and ``config`` (none pull pydantic/anthropic).
   The agent runner (``build_runner``) is imported **lazily on first send**, so the dock
   constructs fine without the extra — chatting is what needs it, and its absence is surfaced as
   a friendly message rather than an import crash. Events are rendered by class NAME + duck-typed
@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
 
 from scat.ui_common import Theme, icon           # core GUI theme + bundled Material Symbol loader
 from scat.config import config                   # core config (no agent deps)
-from scat.agent.backend import LATEST_MODELS     # plain model list (backend top-level = os + prompts)
+from scat.agent.model_catalog import AUTO, available_models, prefetch   # plain lists/strings; no anthropic import
 
 _PROVIDERS = [("Auto", "auto"), ("Subscription", "subscription"), ("API", "api")]
 _SUBSCRIPTION_IDX = next(i for i, (_n, v) in enumerate(_PROVIDERS) if v == "subscription")
@@ -750,12 +750,19 @@ class ChatDockWidget(QWidget):
 
         self.model_combo = QComboBox()
         self.model_combo.setObjectName("ghostPicker")   # Claude-style: text until hover
-        for _name, _mid in LATEST_MODELS:
+        # Offline by design: the picker reads the cached catalog (refreshed on the API path) so
+        # opening the dock never waits on the network. "Latest (auto)" is first and is the default.
+        _models = available_models()
+        _cur_model = config.get("agent.model", AUTO)
+        if _cur_model not in [m for _n, m in _models]:
+            from scat.agent.model_catalog import display_name
+            _models.append((display_name(_cur_model), _cur_model))   # keep a pinned choice visible
+        for _name, _mid in _models:
             self.model_combo.addItem(_name, _mid)
-        _cur_model = config.get("agent.model", "claude-opus-4-8")
         self.model_combo.setCurrentIndex(
-            next((i for i, (_n, m) in enumerate(LATEST_MODELS) if m == _cur_model), 0))
-        self.model_combo.setToolTip("Model — always the latest Claude versions")
+            next((i for i, (_n, m) in enumerate(_models) if m == _cur_model), 0))
+        self.model_combo.setToolTip(
+            "Model — “Latest (auto)” follows Anthropic's newest release; pick an id to pin one")
         self.model_combo.currentIndexChanged.connect(self._on_model_changed)  # after setCurrentIndex
         picker_row.addWidget(self.model_combo)
 
@@ -774,6 +781,11 @@ class ChatDockWidget(QWidget):
 
         picker_row.addStretch(1)
         layout.addLayout(picker_row)
+
+        # Warm the model catalog off the GUI thread (no-op without an API key): the first send
+        # resolves "Latest (auto)" to a concrete id on the GUI thread, and a warm cache keeps
+        # that from ever waiting on the network.
+        prefetch()
 
     def _use_example(self, text: str):
         """Clicking a welcome example prompt drops it into the composer, ready to send/edit."""
@@ -829,7 +841,7 @@ class ChatDockWidget(QWidget):
             set_driver("gui-chat")
             self.runner, self.desc = build_runner(
                 backend=config.get("agent.backend", "auto"),
-                model=config.get("agent.model", "claude-opus-4-8"),
+                model=config.get("agent.model", AUTO),
                 max_loops=config.get("agent.max_loops", 40),
             )
             self.status.setText(self.desc)

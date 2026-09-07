@@ -88,13 +88,18 @@ High-leverage: makes the just-merged agent + chat dock reach users reliably.
   already does exp backoff (+jitter) on 408/409/429/≥500 at request establishment, so no hand-rolled
   loop — just exposed `agent.max_retries` (3) + `agent.max_tokens` (4096) via config.
 - [ ] **T3.4 — Effort/thinking selector in the chat dock** · S · medium (API provider hardcodes `max_tokens=4096`, passes no thinking/effort; add a combo).
-- [ ] **T3.5 — Live model catalog** (`client.models.list()`) vs hardcoded `LATEST_MODELS` · S · medium.
+- [x] **T3.5 — Live model catalog** (`client.models.list()`) vs hardcoded `LATEST_MODELS` · S · medium — DONE
+  (feat/live-model-catalog): `scat/agent/model_catalog.py` — a `latest` sentinel (default) that resolves to
+  the `claude` CLI's `opus` alias on the subscription path and to the newest catalog id on the API path,
+  plus a live `client.models.list()` catalog cached in `~/.scat/model_catalog.json` for a day (static
+  `FALLBACK_MODELS` when there's no key/network). Config gains `schema_version` + a one-time migration
+  off the old pinned `claude-opus-4-8` default.
 - [ ] **T3.6 — Ollama / OpenAI-compatible backends** behind `build_runner` · L · low (Provider Protocol is the clean seam).
 - [x] **T3.7 — GUI "Load grouping CSV…" override** · S · low — DONE (feat/tier3-cleanup): AnalysisTab
   gains a "Load grouping CSV…" button + `_grouping_from_csv` (matches images by filename, prefers a
   `group` column, ignores unselected/blank rows) mirroring the CLI `--metadata` option.
 - [ ] **T3.4 — Effort/thinking selector in the chat dock** · S · medium — deferred (Jin deselected).
-- [ ] **T3.5 — Live model catalog** vs hardcoded `LATEST_MODELS` · S · medium — deferred (Jin deselected).
+- [x] **T3.5 — Live model catalog** — DONE (was deferred; Jin asked for it 2026-09-07).
 - [ ] **T3.6 — Ollama / OpenAI-compatible backends** · L · low — deferred (Jin deselected).
 
 ### Small cleanups (each S)

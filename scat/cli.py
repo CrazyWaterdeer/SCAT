@@ -155,7 +155,8 @@ def main():
     # chat (conversational agent)
     cp = subparsers.add_parser('chat', help='Conversational agent (analyze a folder by asking)')
     cp.add_argument('--backend', default='auto', choices=['auto', 'subscription', 'api'])
-    cp.add_argument('--model', default='claude-opus-4-8')
+    cp.add_argument('--model', default='latest',
+                    help="Model id, or 'latest' (default) to always use the newest Claude")
     cp.set_defaults(func=chat_command)
 
     # analyze
